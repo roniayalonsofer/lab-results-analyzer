@@ -1,0 +1,468 @@
+"""
+core/excel_output.py
+---------------------
+Builds a multi-sheet, multi-threshold Hebrew RTL Excel report.
+
+One sheet is created per analysis type found in the records.
+Each sheet pivots records into a wide table:
+  compound | CAS | sample-1 | sample-2 | ... | threshold-col-1 | ...
+
+Colour coding:
+  Yellow  — measured value exceeds threshold
+  Gray    — below detection limit, but LOD > threshold (uncertain)
+
+Orientation (per sheet):
+  Portrait  (compounds as rows)  — when n_compounds >= n_samples
+  Landscape (samples as rows)    — when n_samples > n_compounds
+
+Sheet config:
+  SOIL_GAS_VOC → "גז קרקע VOC"   µg/m³
+  SOIL_VOC     → "קרקע VOC/BTEX" mg/kg
+  SOIL_TPH     → "קרקע TPH"      mg/kg
+  SOIL_METALS  → "קרקע מתכות"    mg/kg DW
+  SOIL_PFAS    → "קרקע PFAS"     ng/kg
+  GW_VOC       → "מי תהום BTEX"  mg/L
+  GW_PFAS      → "מי תהום PFAS"  ng/L
+  LOWFLOW      → "LOWFLOW"        — field parameters, no thresholds
+"""
+
+from __future__ import annotations
+
+import os
+from collections import defaultdict
+from datetime import date
+
+import pandas as pd
+import openpyxl
+from openpyxl.styles import Font, Border, Side, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
+
+from core.threshold_manager import ThresholdManager, ANALYSIS_THRESHOLDS, THRESHOLD_LABELS
+
+
+# ── Style constants ───────────────────────────────────────────────────
+YELLOW  = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+GRAY    = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
+ORANGE  = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
+BLUE_H  = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
+DARK_H  = PatternFill(start_color="2F4F4F", end_color="2F4F4F", fill_type="solid")
+THIN    = Border(
+    left=Side(style="thin"), right=Side(style="thin"),
+    top=Side(style="thin"),  bottom=Side(style="thin"),
+)
+WRAP_C  = Alignment(horizontal="center", vertical="center", wrap_text=True)
+WRAP_L  = Alignment(horizontal="right",  vertical="center", wrap_text=True)
+CENTER  = Alignment(horizontal="center", vertical="center")
+
+FHE = {"name": "David",           "size": 9}
+FEN = {"name": "Times New Roman", "size": 8}
+
+
+def _font(val, bold=False) -> Font:
+    s = str(val) if val is not None else ""
+    is_en = any(c.isalpha() and c.isascii() for c in s)
+    base = FEN if is_en else FHE
+    return Font(**base, bold=bold)
+
+
+# ── Sheet configuration ───────────────────────────────────────────────
+SHEET_CONFIG: dict[str, dict] = {
+    # force_landscape=True → samples as rows regardless of compound/sample count
+    "SOIL_GAS_VOC": {"name": "גז קרקע VOC",    "unit": "µg/m³",   "force_landscape": True},
+    "SOIL_VOC":     {"name": "קרקע VOC BTEX",   "unit": "mg/kg"},
+    "SOIL_TPH":     {"name": "קרקע TPH",         "unit": "mg/kg"},
+    "SOIL_METALS":  {"name": "קרקע מתכות",       "unit": "mg/kg DW"},
+    "SOIL_PFAS":    {"name": "קרקע PFAS",         "unit": "ng/kg"},
+    "GW_VOC":       {"name": "מי תהום BTEX",     "unit": "mg/L"},
+    "GW_PFAS":      {"name": "מי תהום PFAS",      "unit": "ng/L"},
+    "LOWFLOW":      {"name": "LOWFLOW",            "unit": "שונות"},
+}
+
+
+def _ordered_unique(seq) -> list:
+    seen = set()
+    out = []
+    for x in seq:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
+
+
+class LabReportExcel:
+    """
+    Build a multi-sheet Hebrew RTL Excel lab report.
+
+    Parameters
+    ----------
+    records : list[dict]
+        Flat list of measurement records, each with keys:
+        compound, cas, sample_id, value, flag, unit, lod, analysis_type
+    threshold_manager : ThresholdManager
+    output_path : str
+    project_name : str
+    client : str
+    report_date : str   (DD.MM.YYYY)
+    selected_thresholds : list[str] | None
+        Override which threshold keys to show.  None = use defaults per analysis.
+    """
+
+    def __init__(
+        self,
+        records: list[dict],
+        threshold_manager: ThresholdManager,
+        output_path: str = "lab_report.xlsx",
+        project_name: str = "",
+        client: str = "",
+        report_date: str = "",
+        selected_thresholds: list[str] | None = None,
+    ):
+        self.records    = records
+        self.tm         = threshold_manager
+        self.out_path   = output_path
+        self.project    = project_name
+        self.client     = client
+        self.rep_date   = report_date or date.today().strftime("%d.%m.%Y")
+        self.sel_thresh = selected_thresholds  # None → auto per analysis_type
+
+    # ------------------------------------------------------------------
+    def build(self) -> str:
+        # Group records by analysis_type
+        groups: dict[str, list[dict]] = defaultdict(list)
+        for r in self.records:
+            groups[r.get("analysis_type", "UNKNOWN")].append(r)
+
+        wb = openpyxl.Workbook()
+        wb.remove(wb.active)   # remove default sheet
+
+        for atype, recs in groups.items():
+            cfg   = SHEET_CONFIG.get(atype, {"name": atype, "unit": ""})
+            sheet = wb.create_sheet(title=cfg["name"][:31])
+            sheet.sheet_view.rightToLeft = True
+
+            thresh_keys = self._thresh_keys(atype)
+
+            if atype == "LOWFLOW":
+                self._write_lowflow_sheet(sheet, recs, cfg)
+            else:
+                self._write_data_sheet(sheet, recs, cfg, thresh_keys)
+
+        os.makedirs(os.path.dirname(self.out_path) or ".", exist_ok=True)
+        wb.save(self.out_path)
+        return self.out_path
+
+    # ------------------------------------------------------------------
+    # Sheet writers
+    # ------------------------------------------------------------------
+    def _write_data_sheet(self, ws, records, cfg, thresh_keys):
+        samples   = _ordered_unique(r["sample_id"] for r in records)
+        compounds = _ordered_unique(r["compound"]  for r in records)
+
+        # Pivot: compound → sample_id → (value, flag, lod)
+        pivot: dict[str, dict] = {}
+        cas_map: dict[str, str] = {}
+        lod_map: dict[str, float | None] = {}
+        for r in records:
+            cmp = r["compound"]
+            sid = r["sample_id"]
+            if cmp not in pivot:
+                pivot[cmp]   = {}
+                cas_map[cmp] = r.get("cas", "")
+                lod_map[cmp] = r.get("lod")
+            pivot[cmp][sid] = (r.get("value"), r.get("flag", ""), r.get("lod"))
+
+        # Decide orientation
+        portrait = len(compounds) >= len(samples)
+
+        # Get thresholds per compound
+        thresh_vals: dict[str, dict[str, float | None]] = {}
+        for cmp, cas in cas_map.items():
+            thresh_vals[cmp] = {k: self.tm.get_threshold(cas, k) for k in thresh_keys}
+
+        header_info = {
+            "project": self.project,
+            "date":    self.rep_date,
+            "client":  self.client,
+            "unit":    cfg["unit"],
+        }
+
+        if portrait:
+            self._write_portrait(ws, compounds, samples, pivot, cas_map, lod_map,
+                                 thresh_keys, thresh_vals, header_info)
+        else:
+            self._write_landscape(ws, compounds, samples, pivot, cas_map, lod_map,
+                                  thresh_keys, thresh_vals, header_info)
+
+    def _write_lowflow_sheet(self, ws, records, cfg):
+        """LOWFLOW: field parameters as rows, samples as columns, no thresholds."""
+        samples = _ordered_unique(r["sample_id"] for r in records)
+        params  = _ordered_unique(r["compound"]  for r in records)
+
+        pivot: dict[str, dict] = {}
+        unit_map: dict[str, str] = {}
+        for r in records:
+            p = r["compound"]
+            s = r["sample_id"]
+            if p not in pivot:
+                pivot[p]    = {}
+                unit_map[p] = r.get("unit", "")
+            v = r.get("value")
+            pivot[p][s] = (round(v, 3) if isinstance(v, (int, float)) else v,
+                           r.get("flag", ""), None)
+
+        # Header row 1
+        self._write_header_row(ws, 1, len(samples) + 3)
+        row_num = 2
+
+        # Column header row
+        headers = ["פרמטר", "יחידות"] + samples
+        for ci, h in enumerate(headers, 1):
+            c = ws.cell(row=row_num, column=ci, value=h)
+            c.font = Font(**FHE, bold=True)
+            c.alignment = WRAP_C
+            c.border = THIN
+            c.fill = BLUE_H
+        row_num += 1
+
+        # Data rows
+        for param in params:
+            row_data = [param, unit_map.get(param, "")]
+            for sid in samples:
+                v, flag, _ = pivot.get(param, {}).get(sid, (None, "ND", None))
+                row_data.append(v if v is not None else "N.D.")
+            for ci, val in enumerate(row_data, 1):
+                c = ws.cell(row=row_num, column=ci, value=val)
+                c.font = _font(val)
+                c.alignment = CENTER
+                c.border = THIN
+            row_num += 1
+
+        # Note
+        note = ws.cell(row=row_num + 1, column=1,
+                       value="* LOWFLOW — ממצאי שדה בלבד, ללא השוואה לערכי סף")
+        note.font = Font(**FHE, italic=True, color="808080")
+
+        self._auto_width(ws, 2 + len(samples))
+
+    # ------------------------------------------------------------------
+    # Portrait layout: compounds as rows
+    # ------------------------------------------------------------------
+    def _write_portrait(self, ws, compounds, samples, pivot, cas_map, lod_map,
+                         thresh_keys, thresh_vals, hinfo):
+        N_FIXED = 2   # compound + CAS
+        total_cols = N_FIXED + len(samples) + len(thresh_keys)
+
+        # Row 1: merged project info header
+        self._write_header_row(ws, 1, total_cols, hinfo)
+
+        # Row 2: column headers
+        headers = ["תרכובת", "CAS"] + samples + \
+                  [THRESHOLD_LABELS.get(k, k) for k in thresh_keys]
+        for ci, h in enumerate(headers, 1):
+            c = ws.cell(row=2, column=ci, value=h)
+            c.font = Font(**FHE, bold=True)
+            c.alignment = WRAP_C
+            c.border = THIN
+            c.fill = BLUE_H if ci <= N_FIXED + len(samples) else ORANGE
+
+        # Row 2 units sub-header
+        unit_row = ["", f"({hinfo['unit']})"] + [""] * len(samples) + [""] * len(thresh_keys)
+        for ci, v in enumerate(unit_row, 1):
+            if v:
+                c = ws.cell(row=3, column=ci, value=v)
+                c.font = Font(name=FEN["name"], size=7, italic=True)
+                c.alignment = CENTER
+                c.border = THIN
+
+        data_row = 4
+
+        for cmp in compounds:
+            cas = cas_map.get(cmp, "")
+            t_vals = thresh_vals.get(cmp, {})
+
+            row_data = [cmp, cas]
+
+            # Sample values
+            sample_vals: list = []
+            for sid in samples:
+                v, flag, lod = pivot.get(cmp, {}).get(sid, (None, "ND", None))
+                if flag == "ND" or v is None:
+                    display = f"<{round(lod, 3)}" if lod is not None else "N.D."
+                elif flag == "<":
+                    display = f"<{round(v, 3)}"
+                else:
+                    display = round(v, 3) if isinstance(v, float) else v
+                sample_vals.append((display, v, flag, lod))
+                row_data.append(display)
+
+            # Threshold values
+            thresh_row = [t_vals.get(k) for k in thresh_keys]
+            row_data += thresh_row
+
+            for ci, val in enumerate(row_data, 1):
+                c = ws.cell(row=data_row, column=ci, value=val)
+                c.font = _font(val)
+                c.alignment = WRAP_C if ci <= N_FIXED else CENTER
+                c.border = THIN
+
+                # Colour coding for sample columns
+                if N_FIXED < ci <= N_FIXED + len(samples):
+                    si = ci - N_FIXED - 1
+                    display, num_v, flag, lod = sample_vals[si]
+                    # Find the strictest applicable threshold
+                    thresh_limit = self._strictest(t_vals)
+                    if thresh_limit is not None:
+                        if isinstance(num_v, (int, float)) and num_v > thresh_limit:
+                            c.fill = YELLOW
+                            c.font = Font(**FEN, bold=True)
+                        elif str(display).startswith("<") and flag in ("ND", "<"):
+                            lod_num = lod or (num_v * 2 if isinstance(num_v, float) else None)
+                            if lod_num is not None and lod_num > thresh_limit:
+                                c.fill = GRAY
+
+                # Shade threshold columns
+                elif ci > N_FIXED + len(samples):
+                    c.fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC",
+                                         fill_type="solid")
+                    c.font = Font(**FEN, bold=True)
+
+            data_row += 1
+
+        # Legend
+        self._write_legend(ws, data_row + 1)
+        self._auto_width(ws, N_FIXED + len(samples) + len(thresh_keys))
+
+    # ------------------------------------------------------------------
+    # Landscape layout: samples as rows (when many samples, few compounds)
+    # ------------------------------------------------------------------
+    def _write_landscape(self, ws, compounds, samples, pivot, cas_map, lod_map,
+                          thresh_keys, thresh_vals, hinfo):
+        N_FIXED_ROWS = 3  # compound name, CAS, unit
+        total_cols = 1 + len(compounds)   # row label + one col per compound
+
+        # Header row
+        self._write_header_row(ws, 1, total_cols, hinfo)
+
+        row2_data = ["תרכובת"] + compounds
+        row3_data = ["CAS"]    + [cas_map.get(c, "") for c in compounds]
+        row4_data = [f"({hinfo['unit']})"] + [""] * len(compounds)
+
+        for ri, row_vals in enumerate([row2_data, row3_data, row4_data], 2):
+            for ci, v in enumerate(row_vals, 1):
+                c = ws.cell(row=ri, column=ci, value=v)
+                c.font = Font(**FHE, bold=True)
+                c.alignment = WRAP_C
+                c.border = THIN
+                c.fill = BLUE_H
+
+        data_row = 5
+        for sid in samples:
+            row_data = [sid]
+            for cmp in compounds:
+                v, flag, lod = pivot.get(cmp, {}).get(sid, (None, "ND", None))
+                if flag == "ND" or v is None:
+                    display = f"<{round(lod, 3)}" if lod is not None else "N.D."
+                elif flag == "<":
+                    display = f"<{round(v, 3)}"
+                else:
+                    display = round(v, 3) if isinstance(v, float) else v
+                row_data.append(display)
+
+            for ci, val in enumerate(row_data, 1):
+                c = ws.cell(row=data_row, column=ci, value=val)
+                c.font = _font(val)
+                c.alignment = CENTER
+                c.border = THIN
+
+                if ci > 1:
+                    cmp = compounds[ci - 2]
+                    t_vals = thresh_vals.get(cmp, {})
+                    thresh_limit = self._strictest(t_vals)
+                    num_v = v if isinstance(v, (int, float)) else None
+                    if thresh_limit is not None and num_v is not None and num_v > thresh_limit:
+                        c.fill = YELLOW
+                        c.font = Font(**FEN, bold=True)
+            data_row += 1
+
+        # Threshold rows
+        for tk in thresh_keys:
+            label = THRESHOLD_LABELS.get(tk, tk)
+            ws.cell(row=data_row, column=1, value=label).font = Font(**FHE, bold=True)
+            for ci, cmp in enumerate(compounds, 2):
+                cas = cas_map.get(cmp, "")
+                tval = self.tm.get_threshold(cas, tk)
+                c = ws.cell(row=data_row, column=ci, value=tval)
+                c.fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC",
+                                     fill_type="solid")
+                c.font = Font(**FEN, bold=True)
+                c.border = THIN
+            data_row += 1
+
+        self._write_legend(ws, data_row + 1)
+        self._auto_width(ws, 1 + len(compounds))
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    def _thresh_keys(self, atype: str) -> list[str]:
+        if self.sel_thresh is not None:
+            return self.sel_thresh
+        return ANALYSIS_THRESHOLDS.get(atype, [])
+
+    @staticmethod
+    def _strictest(t_vals: dict) -> float | None:
+        vals = [v for v in t_vals.values() if v is not None]
+        return min(vals) if vals else None
+
+    def _write_header_row(self, ws, row_num: int, total_cols: int, hinfo: dict | None = None):
+        if hinfo:
+            parts = [
+                ("שם פרויקט:", hinfo.get("project", "")),
+                ("תאריך:",     hinfo.get("date", "")),
+                ("מזמין:",     hinfo.get("client", "")),
+            ]
+            span = max(1, total_cols // len(parts))
+            for i, (label, val) in enumerate(parts):
+                col_start = i * span + 1
+                col_end   = (i + 1) * span if i < len(parts) - 1 else total_cols
+                ws.merge_cells(start_row=row_num, start_column=col_start,
+                               end_row=row_num, end_column=col_end)
+                c = ws.cell(row=row_num, column=col_start,
+                            value=f"{label}  {val}")
+                c.font = Font(**FHE, bold=True, color="FFFFFF")
+                c.alignment = WRAP_C
+                c.fill = PatternFill(start_color="1F4E79", end_color="1F4E79",
+                                     fill_type="solid")
+                c.border = THIN
+        else:
+            ws.merge_cells(start_row=row_num, start_column=1,
+                           end_row=row_num, end_column=total_cols)
+            c = ws.cell(row=row_num, column=1,
+                        value=f"{self.project}  |  {self.rep_date}  |  {self.client}")
+            c.font = Font(**FHE, bold=True, color="FFFFFF")
+            c.fill = PatternFill(start_color="1F4E79", end_color="1F4E79",
+                                 fill_type="solid")
+            c.alignment = WRAP_C
+            c.border = THIN
+
+    @staticmethod
+    def _write_legend(ws, start_row: int):
+        items = [
+            ("חריגה מערך סף",              YELLOW),
+            ("מתחת לגבול גילוי — לא ודאי", GRAY),
+        ]
+        for i, (label, fill) in enumerate(items):
+            c = ws.cell(row=start_row + i, column=1, value=label)
+            c.font   = Font(name="David", size=8, bold=True)
+            c.fill   = fill
+            c.border = THIN
+            c.alignment = Alignment(horizontal="right", vertical="center")
+
+    @staticmethod
+    def _auto_width(ws, n_cols: int):
+        ws.column_dimensions["A"].width = 30
+        ws.column_dimensions["B"].width = 13
+        for ci in range(3, n_cols + 1):
+            ws.column_dimensions[get_column_letter(ci)].width = 13
+        ws.row_dimensions[1].height = 20
+        ws.row_dimensions[2].height = 28

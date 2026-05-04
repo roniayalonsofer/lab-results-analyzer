@@ -1,0 +1,388 @@
+"""
+core/threshold_manager.py
+--------------------------
+Loads environmental threshold values from Excel files and provides
+CAS-based lookup across multiple threshold types.
+
+Supported threshold keys
+------------------------
+From soil_vsl_tier1_v7_2024.xlsx  (sheet "VSL Tier1 2024"):
+  VSL_SOIL          ← "Soil Direct Contact"   (mg/kg)
+  TIER1_INDOOR_RES  ← "Indoor Residential"    (µg/m³)
+  TIER1_OUTDOOR_RES ← "Outdoor Residential"   (µg/m³)
+  TIER1_INDOOR_IND  ← "Indoor Industrial"     (µg/m³)
+  TIER1_OUTDOOR_IND ← "Outdoor Industrial"    (µg/m³)
+  GW                ← "Groundwater"           (mg/L)
+
+From נספח לטבלת ערכי סף - PFAS.xlsx:
+  PFAS_VSL          ← sheet " Soil VSL",       col [mg/kg]
+  PFAS_TIER1_RES    ← sheet "Tier 1 Residential RBTL", first [mg/kg] col
+  PFAS_TIER1_IND    ← sheet "Tier 1 - Industrial RBTL", first [mg/kg] col
+
+From soil_vsl_v7_full.xlsx  (Tier 1 RBTL sheets) — soil vapor inhalation:
+  GAS_INDOOR_RES    ← "Tier 1 Residential RBTL", Indoor Vapor col  (µg/m³)
+  GAS_OUTDOOR_RES   ← "Tier 1 Residential RBTL", Outdoor Vapor col (µg/m³)
+  GAS_INDOOR_IND    ← "Tier 1 - Industrial RBTL", Indoor Vapor col (µg/m³)
+  GAS_OUTDOOR_IND   ← "Tier 1 - Industrial RBTL", Outdoor Vapor col(µg/m³)
+
+From soil_vsl_v7_full.xlsx  (Tier 1 RBTL sheets) — soil direct contact
+  with aquifer sensitivity & depth to groundwater (mg/kg):
+
+  Col D (0-based 3): Very High sensitivity, all depths
+  Col E (0-based 4): High/Medium sensitivity, 0-6 m depth
+  Col G (0-based 6): High/Medium sensitivity, >6 m depth
+  Col I (0-based 8): Low sensitivity
+
+  TIER1_RES_SOIL_VH      ← Residential, Very High sensitivity
+  TIER1_RES_SOIL_HM_0_6  ← Residential, High/Medium, 0-6 m
+  TIER1_RES_SOIL_HM_6    ← Residential, High/Medium, >6 m
+  TIER1_RES_SOIL_LOW     ← Residential, Low sensitivity
+  TIER1_IND_SOIL_VH      ← Industrial,  Very High sensitivity
+  TIER1_IND_SOIL_HM_0_6  ← Industrial,  High/Medium, 0-6 m
+  TIER1_IND_SOIL_HM_6    ← Industrial,  High/Medium, >6 m
+  TIER1_IND_SOIL_LOW     ← Industrial,  Low sensitivity
+"""
+
+from __future__ import annotations
+
+import re
+import pandas as pd
+
+
+# ── Main file column mapping ──────────────────────────────────────────
+_MAIN_COL_MAP: dict[str, str] = {
+    "VSL_SOIL":          "Soil Direct Contact",
+    "TIER1_INDOOR_RES":  "Indoor Residential",
+    "TIER1_OUTDOOR_RES": "Outdoor Residential",
+    "TIER1_INDOOR_IND":  "Indoor Industrial",
+    "TIER1_OUTDOOR_IND": "Outdoor Industrial",
+    "GW":                "Groundwater",
+}
+
+# Display labels for threshold keys (Hebrew)
+THRESHOLD_LABELS: dict[str, str] = {
+    "VSL_SOIL":          "VSL קרקע",
+    "TIER1_INDOOR_RES":  "TIER1 גז פנים-מגורים",
+    "TIER1_OUTDOOR_RES": "TIER1 גז חוץ-מגורים",
+    "TIER1_INDOOR_IND":  "TIER1 גז פנים-תעשייה",
+    "TIER1_OUTDOOR_IND": "TIER1 גז חוץ-תעשייה",
+    "GW":                'ערך סף מי"ת',
+    "PFAS_VSL":          "PFAS VSL",
+    "PFAS_TIER1_RES":    "PFAS TIER1 מגורים",
+    "PFAS_TIER1_IND":    "PFAS TIER1 תעשייה",
+    # Soil-vapor RBTL keys (full V7 Tier1 RBTL sheets)
+    "GAS_INDOOR_RES":  "סף חש גז פנים-מגורים",
+    "GAS_OUTDOOR_RES": "סף חש גז חוץ-מגורים",
+    "GAS_INDOOR_IND":  "סף חש גז פנים-תעשייה",
+    "GAS_OUTDOOR_IND": "סף חש גז חוץ-תעשייה",
+    # Soil direct-contact RBTL keys with aquifer sensitivity & depth
+    "TIER1_RES_SOIL_VH":     "TIER1 קרקע מגורים - רגיש מאוד",
+    "TIER1_RES_SOIL_HM_0_6": "TIER1 קרקע מגורים - רגיש/בינוני, 0-6מ'",
+    "TIER1_RES_SOIL_HM_6":   "TIER1 קרקע מגורים - רגיש/בינוני, >6מ'",
+    "TIER1_RES_SOIL_LOW":    "TIER1 קרקע מגורים - לא רגיש",
+    "TIER1_IND_SOIL_VH":     "TIER1 קרקע תעשייה - רגיש מאוד",
+    "TIER1_IND_SOIL_HM_0_6": "TIER1 קרקע תעשייה - רגיש/בינוני, 0-6מ'",
+    "TIER1_IND_SOIL_HM_6":   "TIER1 קרקע תעשייה - רגיש/בינוני, >6מ'",
+    "TIER1_IND_SOIL_LOW":    "TIER1 קרקע תעשייה - לא רגיש",
+}
+
+# Which threshold keys apply to which analysis type
+ANALYSIS_THRESHOLDS: dict[str, list[str]] = {
+    # Soil gas: use dedicated soil-vapor RBTL keys (not the compact TIER1 keys)
+    "SOIL_GAS_VOC": ["GAS_INDOOR_RES", "GAS_OUTDOOR_RES",
+                     "GAS_INDOOR_IND",  "GAS_OUTDOOR_IND"],
+    "SOIL_VOC":     ["VSL_SOIL"],
+    "SOIL_TPH":     ["VSL_SOIL"],
+    "SOIL_METALS":  ["VSL_SOIL"],
+    "SOIL_PFAS":    ["PFAS_VSL", "PFAS_TIER1_RES", "PFAS_TIER1_IND"],
+    "GW_VOC":       ["GW"],
+    "GW_PFAS":      [],
+    "LOWFLOW":      [],
+}
+
+
+class ThresholdManager:
+    """Manages environmental threshold values from one or more Excel files."""
+
+    def __init__(
+        self,
+        main_path: str,
+        pfas_path: str | None = None,
+        vsl_full_path: str | None = None,
+    ):
+        self._main: pd.DataFrame = self._load_main(main_path)
+        # Full V7 file: 800+ compounds including metals & TPH; used for VSL_SOIL
+        self._vsl_full: pd.DataFrame | None = None
+        # Soil-vapor RBTL thresholds (from Tier1 Residential/Industrial sheets in full V7 file)
+        self._rbtl: dict[str, pd.DataFrame] = {}
+        if vsl_full_path:
+            self._vsl_full = self._load_vsl_full(vsl_full_path)
+            self._rbtl    = self._load_tier1_rbtl(vsl_full_path)
+        self._pfas: dict[str, pd.DataFrame] = {}
+        if pfas_path:
+            self._pfas = self._load_pfas(pfas_path)
+
+    # ------------------------------------------------------------------
+    # Loaders
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _load_main(path: str) -> pd.DataFrame:
+        df = pd.read_excel(path, dtype=str).fillna("")
+        df.columns = [c.strip() for c in df.columns]
+        # Normalise CAS column name
+        for col in df.columns:
+            if "cas" in col.lower():
+                df = df.rename(columns={col: "CAS No."})
+                break
+        df["CAS No."] = df["CAS No."].str.strip()
+        return df
+
+    @staticmethod
+    def _load_vsl_full(path: str) -> pd.DataFrame | None:
+        """
+        Load the full V7 threshold file (ערכי סף מעודכנים - גרסה 7).
+
+        Sheet: " Soil VSL"  |  header row: 2  |  value column: "[mg/kg]"
+        Returns a DataFrame with columns normalised to match _MAIN_COL_MAP
+        ('Soil Direct Contact', 'CAS No.').
+        """
+        try:
+            df = pd.read_excel(
+                path, sheet_name=" Soil VSL", header=2, dtype=str
+            ).fillna("")
+            df.columns = [c.strip() for c in df.columns]
+            # Rename value column to match _MAIN_COL_MAP key
+            if "[mg/kg]" in df.columns:
+                df = df.rename(columns={"[mg/kg]": "Soil Direct Contact"})
+            # Normalise CAS column
+            for col in df.columns:
+                if col.lower().startswith("cas"):
+                    df = df.rename(columns={col: "CAS No."})
+                    break
+            df["CAS No."] = df["CAS No."].str.strip()
+            return df
+        except Exception:
+            return None
+
+    @staticmethod
+    def _load_tier1_rbtl(path: str) -> dict[str, pd.DataFrame]:
+        """
+        Load Soil Vapor RBTL thresholds from the full V7 file.
+
+        Reads:
+          'Tier 1 Residential RBTL' → keys 'res_indoor', 'res_outdoor'
+          'Tier 1 - Industrial RBTL' → keys 'ind_indoor', 'ind_outdoor'
+
+        Each DataFrame has columns: CAS No. | value
+        Column positions are found by scanning the header rows for
+        'Soil Vapor … Indoor' and 'Soil Vapor … Outdoor' text.
+        """
+        result: dict[str, pd.DataFrame] = {}
+        _CAS_RE = re.compile(r"^\d+-\d+-\d+$")
+
+        sheet_map = {
+            "Tier 1 Residential RBTL":   "res",
+            "Tier 1 - Industrial RBTL":  "ind",
+        }
+        try:
+            xl = pd.ExcelFile(path)
+        except Exception:
+            return result
+
+        for sheet_name, prefix in sheet_map.items():
+            if sheet_name not in xl.sheet_names:
+                continue
+            try:
+                raw = xl.parse(sheet_name, header=None, dtype=str).fillna("")
+
+                # Find soil-vapor column indices from the first 8 rows
+                sv_indoor_col:  int | None = None
+                sv_outdoor_col: int | None = None
+                for ri in range(min(8, len(raw))):
+                    row = raw.iloc[ri]
+                    for ci, v in enumerate(row.values):
+                        vs = str(v).lower()
+                        if "soil vapor" in vs and "indoor" in vs and sv_indoor_col is None:
+                            sv_indoor_col = ci
+                        elif "soil vapor" in vs and "outdoor" in vs and sv_outdoor_col is None:
+                            sv_outdoor_col = ci
+                    if sv_indoor_col is not None and sv_outdoor_col is not None:
+                        break
+
+                if sv_indoor_col is None:
+                    continue  # sheet doesn't have expected columns
+
+                # Find first data row (row where col 1 looks like a CAS number)
+                data_start: int | None = None
+                for ri in range(len(raw)):
+                    if _CAS_RE.match(str(raw.iloc[ri, 1]).strip()):
+                        data_start = ri
+                        break
+                if data_start is None:
+                    continue
+
+                data = raw.iloc[data_start:].reset_index(drop=True)
+
+                for col_idx, key_suffix in [
+                    (sv_indoor_col,  "indoor"),
+                    (sv_outdoor_col, "outdoor"),
+                ]:
+                    if col_idx is None:
+                        continue
+                    full_key = f"{prefix}_{key_suffix}"
+                    df = pd.DataFrame({
+                        "CAS No.": data.iloc[:, 1].str.strip(),
+                        "value":   data.iloc[:, col_idx],
+                    })
+                    # Keep only rows with valid CAS
+                    df = df[df["CAS No."].str.match(_CAS_RE, na=False)].copy()
+                    result[full_key] = df
+
+            except Exception:
+                continue
+
+        return result
+
+    @staticmethod
+    def _load_pfas(path: str) -> dict[str, pd.DataFrame]:
+        result: dict[str, pd.DataFrame] = {}
+        xl = pd.ExcelFile(path)
+
+        for sheet in xl.sheet_names:
+            key = sheet.strip().lower()
+
+            if "vsl" in key:
+                # Header on row 2 (0-indexed)
+                df = xl.parse(sheet, header=2, dtype=str).fillna("")
+                df.columns = [c.strip() for c in df.columns]
+                result["vsl"] = df
+            elif "residential" in key or "res" in key:
+                # Multi-row header — row 5 (0-indexed)
+                df = xl.parse(sheet, header=5, dtype=str).fillna("")
+                df.columns = [c.strip() for c in df.columns]
+                result["tier1_res"] = df
+            elif "industrial" in key or "ind" in key:
+                df = xl.parse(sheet, header=5, dtype=str).fillna("")
+                df.columns = [c.strip() for c in df.columns]
+                result["tier1_ind"] = df
+
+        return result
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+    def get_threshold(self, cas: str, threshold_key: str) -> float | None:
+        """
+        Return the threshold value for a CAS number and threshold key.
+
+        Parameters
+        ----------
+        cas : str
+            CAS number, e.g. '71-43-2'
+        threshold_key : str
+            One of the keys defined in _MAIN_COL_MAP or 'PFAS_*'
+
+        Returns
+        -------
+        float | None
+        """
+        cas = str(cas).strip()
+        if not cas:
+            return None
+
+        if threshold_key in _MAIN_COL_MAP:
+            return self._lookup_main(cas, _MAIN_COL_MAP[threshold_key])
+        if threshold_key == "PFAS_VSL":
+            return self._lookup_pfas("vsl", cas)
+        if threshold_key == "PFAS_TIER1_RES":
+            return self._lookup_pfas("tier1_res", cas)
+        if threshold_key == "PFAS_TIER1_IND":
+            return self._lookup_pfas("tier1_ind", cas)
+        # Soil-vapor RBTL keys (from full V7 Tier1 sheets)
+        _rbtl_map = {
+            "GAS_INDOOR_RES":  "res_indoor",
+            "GAS_OUTDOOR_RES": "res_outdoor",
+            "GAS_INDOOR_IND":  "ind_indoor",
+            "GAS_OUTDOOR_IND": "ind_outdoor",
+        }
+        if threshold_key in _rbtl_map:
+            return self._lookup_rbtl(_rbtl_map[threshold_key], cas)
+        return None
+
+    def get_thresholds_for_analysis(
+        self, cas: str, analysis_type: str
+    ) -> dict[str, float | None]:
+        """Return all applicable thresholds for a given analysis type."""
+        keys = ANALYSIS_THRESHOLDS.get(analysis_type, [])
+        return {k: self.get_threshold(cas, k) for k in keys}
+
+    def threshold_label(self, threshold_key: str) -> str:
+        """Return the Hebrew display label for a threshold key."""
+        return THRESHOLD_LABELS.get(threshold_key, threshold_key)
+
+    def available_keys(self) -> list[str]:
+        keys = list(_MAIN_COL_MAP.keys())
+        if self._pfas:
+            keys += ["PFAS_VSL", "PFAS_TIER1_RES", "PFAS_TIER1_IND"]
+        return keys
+
+    @property
+    def has_full_vsl(self) -> bool:
+        return self._vsl_full is not None
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+    def _lookup_rbtl(self, key: str, cas: str) -> float | None:
+        df = self._rbtl.get(key)
+        if df is None:
+            return None
+        row = df[df["CAS No."] == cas]
+        if row.empty:
+            return None
+        return self._to_float(row.iloc[0]["value"])
+
+    def _lookup_main(self, cas: str, col_name: str) -> float | None:
+        # For VSL_SOIL ("Soil Direct Contact"): try full V7 file first (has metals/TPH)
+        if col_name == "Soil Direct Contact" and self._vsl_full is not None:
+            val = self._lookup_df(self._vsl_full, cas, col_name)
+            if val is not None:
+                return val
+        # Fall back to compact main file (also has TIER1 gas and GW columns)
+        return self._lookup_df(self._main, cas, col_name)
+
+    @staticmethod
+    def _lookup_df(df: pd.DataFrame, cas: str, col_name: str) -> float | None:
+        if "CAS No." not in df.columns or col_name not in df.columns:
+            return None
+        row = df[df["CAS No."] == cas]
+        if row.empty:
+            return None
+        return ThresholdManager._to_float(row.iloc[0][col_name])
+
+    def _lookup_pfas(self, sheet_key: str, cas: str) -> float | None:
+        df = self._pfas.get(sheet_key)
+        if df is None:
+            return None
+        # Find CAS column
+        cas_col = next((c for c in df.columns if "cas" in c.lower()), None)
+        if cas_col is None:
+            return None
+        row = df[df[cas_col].str.strip() == cas]
+        if row.empty:
+            return None
+        # First numeric-looking column after CAS column
+        cas_idx = list(df.columns).index(cas_col)
+        for col in df.columns[cas_idx + 1:]:
+            val = self._to_float(row.iloc[0][col])
+            if val is not None:
+                return val
+        return None
+
+    @staticmethod
+    def _to_float(val) -> float | None:
+        try:
+            f = float(str(val).replace(",", "").strip())
+            return f if f == f else None   # NaN check
+        except (ValueError, TypeError):
+            return None
