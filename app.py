@@ -330,6 +330,7 @@ def load_threshold_manager(_mtime):
 
 try:
     from core.excel_output import LabReportExcel
+    from core.word_output  import LabReportWord
     from parsers import get_parser, auto_detect_category
     _tm_py    = os.path.join(TOOL_DIR, 'core', 'threshold_manager.py')
     _tm_mtime = os.path.getmtime(_tm_py)
@@ -720,6 +721,8 @@ _is_kte_gw = (
 
 excel_buf = io.BytesIO()
 excel_ok  = False
+word_buf  = io.BytesIO()
+word_ok   = False
 
 if _is_kte_gw:
     try:
@@ -747,6 +750,22 @@ else:
         builder.build()
         excel_buf.seek(0)
         excel_ok = True
+        try:
+            LabReportWord(
+                records             = records,
+                threshold_manager   = tm,
+                output_path         = word_buf,
+                project_name        = project_name,
+                client              = client_name,
+                report_date         = date.today().strftime('%d.%m.%Y'),
+                selected_thresholds = selected_thresholds if selected_thresholds else None,
+                combine_tph_voc     = combine_tph_voc,
+                combine_tph_mbtex   = combine_tph_mbtex,
+            ).build()
+            word_buf.seek(0)
+            word_ok = True
+        except Exception as e:
+            st.warning(f"⚠️ שגיאת בניית Word: {e}")
     except Exception as e:
         st.error(f"שגיאת בניית Excel: {e}")
         st.exception(e)
@@ -761,14 +780,22 @@ if excel_ok:
     out_filename = f"{'_'.join(_parts)}.xlsx"
     size_kb = len(excel_buf.getvalue()) / 1024
 
-    dl_col, info_col = st.columns([2, 1])
+    dl_col, wd_col, info_col = st.columns([2, 2, 1])
     with dl_col:
         st.download_button(
-            label     = f"⬇️ הורד דוח Excel",
+            label     = "⬇️ הורד דוח Excel",
             data      = excel_buf.getvalue(),
             file_name = out_filename,
             mime      = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+    with wd_col:
+        if word_ok:
+            st.download_button(
+                label     = "⬇️ הורד דוח Word",
+                data      = word_buf.getvalue(),
+                file_name = out_filename.replace(".xlsx", ".docx"),
+                mime      = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
     with info_col:
         st.markdown(f"""
         <div style="padding:0.5rem 0;font-size:0.82rem;color:#64748b;direction:rtl;">
