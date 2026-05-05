@@ -324,19 +324,21 @@ _THRESHOLD_SOURCES: dict[str, str] = {
 
 # ── Sheet configuration ───────────────────────────────────────────────
 SHEET_CONFIG: dict[str, dict] = {
-    # include_lod_loq  → add LOD + LOQ columns between CAS and threshold(s)
+    # include_lod_loq  → add LOD + LOQ columns between CAS and threshold(s) (gas sheet)
+    # lod_loq_mode     → "both" adds LOD+LOQ columns, "loq" adds only LOQ (soil sheets)
     # filter_nd_safe   → exclude compounds that are ND everywhere AND LOD ≤ threshold
     # units_in_header  → embed unit in column headers; no separate יחידות column
+    # include_lod_row  → add a LOD meta-row in the sample-column header band
     "SOIL_GAS_VOC": {
         "name": "גז קרקע VOC", "unit": "µg/m³",
         "include_lod_loq": True,
         "filter_nd_safe":  False,
         "units_in_header": True,
     },
-    "SOIL_VOC":       {"name": "קרקע VOC",  "unit": "mg/kg", "include_lod_row": True},
-    "SOIL_SVOC":      {"name": "קרקע SVOC", "unit": "mg/kg", "include_lod_row": True},
-    "SOIL_MBTEX":     {"name": "קרקע MBTEX",         "unit": "mg/kg"},
-    "SOIL_TPH":       {"name": "קרקע TPH",           "unit": "mg/kg"},
+    "SOIL_VOC":   {"name": "קרקע VOC",  "unit": "mg/kg", "include_lod_row": True, "lod_loq_mode": "both"},
+    "SOIL_SVOC":  {"name": "קרקע SVOC", "unit": "mg/kg", "include_lod_row": True, "lod_loq_mode": "both"},
+    "SOIL_MBTEX": {"name": "קרקע MBTEX",         "unit": "mg/kg"},
+    "SOIL_TPH":   {"name": "קרקע TPH",            "unit": "mg/kg", "lod_loq_mode": "loq"},
     "SOIL_TPH_VOC":   {"name": "קרקע TPH+BTEX",      "unit": "mg/kg"},
     "SOIL_TPH_MBTEX": {"name": "קרקע TPH+MBTEX",     "unit": "mg/kg"},
     "SOIL_METALS":    {"name": "קרקע מתכות",         "unit": "mg/kg DW"},
@@ -609,11 +611,17 @@ class LabReportExcel:
         cfg         = cfg or {}
         sample_meta = sample_meta or {}
         unit            = hinfo["unit"]
-        include_lod_loq = cfg.get("include_lod_loq", False)
+        include_lod_loq = cfg.get("include_lod_loq", False)   # gas sheet: full LOD+LOQ mode
+        lod_loq_mode    = cfg.get("lod_loq_mode", False)       # soil: "both" or "loq"
         units_in_header = cfg.get("units_in_header", False)
 
         N_COMPOUND = 2                         # A: compound, B: CAS Number
-        N_LOD_LOQ  = 2 if include_lod_loq else 0
+        if include_lod_loq or lod_loq_mode == "both":
+            N_LOD_LOQ = 2
+        elif lod_loq_mode == "loq":
+            N_LOD_LOQ = 1
+        else:
+            N_LOD_LOQ = 0
         N_THRESH   = len(thresh_keys)
         N_UNIT     = 0                             # unit shown in "Final conc." header
         N_FIXED    = N_COMPOUND + N_LOD_LOQ + N_THRESH + N_UNIT
@@ -714,7 +722,14 @@ class LabReportExcel:
                             cell.font = _font(v)
             # ── Column headers row (after all meta rows) ───────────────
             hdr_row = 2 + len(meta_rows)
+            if lod_loq_mode == "both":
+                lod_loq_hdrs = [f"LOD [{unit}]", f"LOQ [{unit}]"]
+            elif lod_loq_mode == "loq":
+                lod_loq_hdrs = [f"LOQ [{unit}]"]
+            else:
+                lod_loq_hdrs = []
             headers = (["תרכובת", "CAS Number"]
+                       + lod_loq_hdrs
                        + thresh_labels
                        + samples)
 
@@ -783,14 +798,13 @@ class LabReportExcel:
                     display = round(v, 2) if isinstance(v, float) else v
                 sample_vals.append((display, v, flag, lod))
 
-            if include_lod_loq:
-                row_data = ([cmp, cas, lod_disp, loq_disp]
-                            + thresh_row
-                            + [sv[0] for sv in sample_vals])
+            if include_lod_loq or lod_loq_mode == "both":
+                fixed_vals = [cmp, cas, lod_disp, loq_disp]
+            elif lod_loq_mode == "loq":
+                fixed_vals = [cmp, cas, loq_disp]
             else:
-                row_data = ([cmp, cas]
-                            + thresh_row
-                            + [sv[0] for sv in sample_vals])
+                fixed_vals = [cmp, cas]
+            row_data = fixed_vals + thresh_row + [sv[0] for sv in sample_vals]
 
             for ci, val in enumerate(row_data, 1):
                 c = ws.cell(row=data_row, column=ci, value=val)
@@ -799,7 +813,7 @@ class LabReportExcel:
                 c.border    = THIN
 
                 # ── LOD / LOQ columns ──────────────────────────────────
-                if include_lod_loq and N_COMPOUND < ci <= N_COMPOUND + N_LOD_LOQ:
+                if N_LOD_LOQ and N_COMPOUND < ci <= N_COMPOUND + N_LOD_LOQ:
                     pass   # no special fill, just left as-is
 
                 # ── Threshold columns: no fill ─────────────────────────
@@ -901,10 +915,30 @@ class LabReportExcel:
                 c.border    = THIN
                 # No fill on header rows 2-4 (rows 1-4 are fill-free)
 
-        # ── Rows 5+: threshold rows (BEFORE sample data) ────────────────
-        UNDEF_FONT  = Font(**FHE, color="808080", italic=True)
-
+        # ── Optional LOQ header row (per-compound, before thresholds) ──
+        lod_loq_mode = (cfg or {}).get("lod_loq_mode", False)
         data_row = 5
+        if lod_loq_mode:
+            unit     = hinfo["unit"]
+            loq_lbl  = f"LOQ [{unit}]"
+            lc = ws.cell(row=data_row, column=1, value=loq_lbl)
+            lc.font      = _font(loq_lbl, bold=True)
+            lc.alignment = WRAP_C
+            lc.border    = THIN
+            for fc in range(2, cmp_col_start):
+                ws.cell(row=data_row, column=fc).border = THIN
+            for ci, cmp in enumerate(compounds, cmp_col_start):
+                loq_val  = loq_map.get(cmp)
+                loq_disp = round(loq_val, 3) if isinstance(loq_val, float) else ""
+                c = ws.cell(row=data_row, column=ci)
+                c.value     = loq_disp
+                c.font      = _font(loq_disp)
+                c.alignment = CENTER
+                c.border    = THIN
+            data_row += 1
+
+        # ── Threshold rows (BEFORE sample data) ─────────────────────────
+        UNDEF_FONT  = Font(**FHE, color="808080", italic=True)
         for tk in thresh_keys:
             label    = THRESHOLD_LABELS.get(tk, tk)
             # Use plain string with readingOrder=2 so Excel treats the paragraph as RTL
