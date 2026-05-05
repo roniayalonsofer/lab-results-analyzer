@@ -105,7 +105,7 @@ class AlchemSoilParser(BaseParser):
         # Same layout as VOC; kept separate because Alchem reports both sheets.
         svoc_sheet = _find_sheet("svoc")
         if svoc_sheet and svoc_sheet != voc_sheet:
-            records.extend(self._parse_voc_sheet(xl, svoc_sheet))
+            records.extend(self._parse_voc_sheet(xl, svoc_sheet, "SOIL_SVOC"))
 
         # --- Parse TPH sheet ---
         tph_sheet = _find_sheet("tph")
@@ -125,7 +125,7 @@ class AlchemSoilParser(BaseParser):
         return records
 
     # ------------------------------------------------------------------
-    def _parse_voc_sheet(self, xl: pd.ExcelFile, sheet_name: str) -> list[dict]:
+    def _parse_voc_sheet(self, xl: pd.ExcelFile, sheet_name: str, analysis_type: str = "SOIL_VOC") -> list[dict]:
         raw = xl.parse(sheet_name, header=None, dtype=str).fillna("")
 
         # Find header row (contains "Compound" and "CAS")
@@ -208,7 +208,7 @@ class AlchemSoilParser(BaseParser):
                     "unit":      "mg/kg",
                     "lod":       lod,
                     "loq":       loq,
-                    "analysis_type": "SOIL_VOC",
+                    "analysis_type": analysis_type,
                 })
 
         return records

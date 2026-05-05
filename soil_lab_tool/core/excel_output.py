@@ -334,6 +334,7 @@ SHEET_CONFIG: dict[str, dict] = {
         "units_in_header": True,
     },
     "SOIL_VOC":       {"name": "קרקע VOCs",          "unit": "mg/kg"},
+    "SOIL_SVOC":      {"name": "קרקע SVOC",          "unit": "mg/kg"},
     "SOIL_MBTEX":     {"name": "קרקע MBTEX",         "unit": "mg/kg"},
     "SOIL_TPH":       {"name": "קרקע TPH",           "unit": "mg/kg"},
     "SOIL_TPH_VOC":   {"name": "קרקע TPH+BTEX",      "unit": "mg/kg"},
