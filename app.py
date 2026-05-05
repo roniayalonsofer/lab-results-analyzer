@@ -13,10 +13,11 @@ THRESH_DIR = os.path.join(TOOL_DIR, 'thresholds')
 
 # ── company logo (base64 embed) ────────────────────────────────────
 def _logo_b64() -> str:
-    logo_path = os.path.join(ROOT, 'logo.png')
-    if os.path.exists(logo_path):
-        with open(logo_path, 'rb') as f:
-            return base64.b64encode(f.read()).decode()
+    for name in ('תמונה1.png', 'logo.png'):
+        logo_path = os.path.join(ROOT, name)
+        if os.path.exists(logo_path):
+            with open(logo_path, 'rb') as f:
+                return base64.b64encode(f.read()).decode()
     return ""
 
 LOGO_B64 = _logo_b64()
@@ -64,7 +65,7 @@ html, body {{ direction: rtl; }}
 }}
 [data-testid="stSidebar"] {{
     direction: rtl;
-    background: #1e293b;
+    background: #1a2d38;
 }}
 [data-testid="stSidebar"] * {{ color: #e2e8f0 !important; }}
 /* input / select text — black so it shows on white background */
@@ -77,7 +78,7 @@ html, body {{ direction: rtl; }}
 [data-testid="stSidebar"] .stCheckbox label {{ color: #cbd5e1 !important; }}
 [data-testid="stSidebar"] .stMarkdown h2,
 [data-testid="stSidebar"] .stMarkdown h3 {{ color: #f1f5f9 !important; }}
-[data-testid="stSidebar"] hr {{ border-color: #334155; }}
+[data-testid="stSidebar"] hr {{ border-color: #2a4050; }}
 
 /* hide footer / menu */
 #MainMenu {{ visibility: hidden; }}
@@ -92,15 +93,14 @@ header {{ visibility: hidden; }}
 
 /* ── hero header ── */
 .hero {{
-    background: linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 60%, #0ea5e9 100%);
+    background: linear-gradient(135deg, #2d4a5a 0%, #4a7a8a 60%, #6a9aaa 100%);
     color: white;
     padding: 1.5rem 2rem;
     border-radius: 16px;
     margin-bottom: 1.5rem;
-    box-shadow: 0 4px 24px rgba(30,64,175,0.25);
+    box-shadow: 0 4px 24px rgba(45,74,90,0.25);
     display: flex;
     align-items: center;
-    justify-content: space-between;
     direction: rtl;
 }}
 .hero-title {{
@@ -113,22 +113,6 @@ header {{ visibility: hidden; }}
     font-size: 0.9rem;
     opacity: 0.85;
     margin: 0;
-}}
-.hero-badge {{
-    background: rgba(255,255,255,0.15);
-    border: 1px solid rgba(255,255,255,0.3);
-    border-radius: 10px;
-    padding: 0.5rem 1rem;
-    font-size: 0.8rem;
-    text-align: center;
-    direction: ltr;
-    min-width: 160px;
-}}
-.hero-badge a {{
-    color: #bfdbfe;
-    font-weight: 600;
-    font-size: 0.85rem;
-    word-break: break-all;
 }}
 
 /* ── section cards ── */
@@ -175,9 +159,9 @@ header {{ visibility: hidden; }}
     justify-content: center;
 }}
 .step-pill.active {{
-    background: #eff6ff;
-    border-color: #3b82f6;
-    color: #1d4ed8;
+    background: #eef3f5;
+    border-color: #4a7a8a;
+    color: #2d4a5a;
     font-weight: 700;
 }}
 .step-pill.done {{
@@ -204,7 +188,7 @@ header {{ visibility: hidden; }}
 .stat-num {{
     font-size: 1.75rem;
     font-weight: 800;
-    color: #1e40af;
+    color: #2d4a5a;
     line-height: 1;
     margin-bottom: 0.2rem;
 }}
@@ -216,20 +200,20 @@ header {{ visibility: hidden; }}
 
 /* ── upload zone ── */
 [data-testid="stFileUploader"] {{
-    border: 2.5px dashed #93c5fd;
+    border: 2.5px dashed #a8c8d2;
     border-radius: 12px;
     padding: 0.5rem;
-    background: #eff6ff;
+    background: #eef3f5;
     transition: border-color 0.2s;
 }}
 [data-testid="stFileUploader"]:hover {{
-    border-color: #3b82f6;
-    background: #dbeafe;
+    border-color: #4a7a8a;
+    background: #d5e8ec;
 }}
 [data-testid="stFileUploader"] label {{
     font-size: 0.95rem !important;
     font-weight: 600 !important;
-    color: #1d4ed8 !important;
+    color: #2d4a5a !important;
 }}
 
 /* ── download button ── */
@@ -263,13 +247,13 @@ header {{ visibility: hidden; }}
 
 /* ── info banner ── */
 .info-banner {{
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
+    background: #eef3f5;
+    border: 1px solid #b8d4da;
     border-radius: 10px;
     padding: 0.75rem 1rem;
     direction: rtl;
     font-size: 0.9rem;
-    color: #1e40af;
+    color: #2d4a5a;
     margin-bottom: 0.75rem;
 }}
 .success-banner {{
@@ -292,7 +276,7 @@ header {{ visibility: hidden; }}
     color: #94a3b8;
     margin: 1rem 0 0.25rem;
     padding-bottom: 0.2rem;
-    border-bottom: 1px solid #334155;
+    border-bottom: 1px solid #2a4050;
 }}
 
 /* ── metric overrides ── */
@@ -305,7 +289,7 @@ header {{ visibility: hidden; }}
 }}
 [data-testid="stMetricValue"] {{
     font-size: 1.6rem !important;
-    color: #1e40af !important;
+    color: #2d4a5a !important;
     font-weight: 800 !important;
 }}
 [data-testid="stMetricLabel"] {{
@@ -366,44 +350,25 @@ with st.sidebar:
 
     st.markdown('<hr style="margin:1rem 0 0.5rem;">', unsafe_allow_html=True)
 
-    # ── Network share box ─────────────────────────────────────────
-    st.markdown(
-        f'<div style="background:#0f172a;border:1px solid #1e40af;border-radius:8px;'
-        f'padding:0.6rem 0.75rem;margin-top:0.5rem;">'
-        f'<div style="font-size:0.7rem;color:#93c5fd;font-weight:700;margin-bottom:4px;">'
-        f'🔗 קישור לשיתוף עם הצוות</div>'
-        f'<div style="font-size:0.75rem;color:#bfdbfe;word-break:break-all;'
-        f'font-family:monospace;">{APP_URL}</div>'
-        f'<div style="font-size:0.65rem;color:#64748b;margin-top:4px;">'
-        f'זמין ברשת המקומית בלבד</div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
 # ══════════════════════════════════════════════════════════════════
 # HERO HEADER — defined before module imports so it always renders
 # ══════════════════════════════════════════════════════════════════
 _hero_logo = (
-    f'<div style="background:white;border-radius:8px;padding:0.4rem 0.7rem;">'
-    f'<img src="data:image/png;base64,{LOGO_B64}" style="height:48px;display:block;"></div>'
+    f'<div style="background:white;border-radius:8px;padding:0.4rem 0.7rem;margin-left:1rem;">'
+    f'<img src="data:image/png;base64,{LOGO_B64}" style="height:56px;display:block;"></div>'
     if LOGO_B64 else ''
 )
-st.markdown(f"""
+st.html(f"""
 <div class="hero">
   <div style="display:flex;align-items:center;gap:1rem;">
-    {_hero_logo}
     <div>
-      <div class="hero-title">מערכת ניתוח תוצאות מעבדה</div>
+      <div class="hero-title">מערכת לניתוח ועיבוד תוצאות מעבדה — אדמה</div>
       <div class="hero-sub">העלה קובץ דוח מעבדה · בחר ערכי סף · הורד Excel מסודר</div>
     </div>
   </div>
-  <div class="hero-badge">
-    <div style="font-size:0.65rem;margin-bottom:4px;opacity:0.7;">קישור לצוות</div>
-    <a href="{APP_URL}" target="_blank">{APP_URL}</a>
-    <div style="font-size:0.65rem;margin-top:4px;opacity:0.6;">רשת מקומית · פורט 8501</div>
-  </div>
+  {_hero_logo}
 </div>
-""", unsafe_allow_html=True)
+""")
 
 # ══════════════════════════════════════════════════════════════════
 # MODULE IMPORTS
@@ -646,7 +611,7 @@ with tab_excel:
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
                     padding:0.9rem 1rem;margin-top:1.75rem;text-align:center;">
           <div style="font-size:0.7rem;color:#94a3b8;font-weight:600;margin-bottom:4px;">מעבדה</div>
-          <div style="font-size:1.3rem;font-weight:800;color:#1e40af;">{lab}</div>
+          <div style="font-size:1.3rem;font-weight:800;color:#2d4a5a;">{lab}</div>
           <div style="font-size:0.75rem;color:#64748b;margin-top:4px;">{cat_clean}</div>
         </div>
         """, unsafe_allow_html=True)
@@ -741,7 +706,7 @@ with tab_excel:
         "SOIL_GAS_VOC": "#7c3aed", "SOIL_VOC":    "#0d9488",
         "SOIL_TPH":     "#0891b2", "SOIL_MBTEX":  "#0f766e",
         "SOIL_METALS":  "#4f46e5", "SOIL_PFAS":   "#db2777",
-        "GW_VOC":       "#2563eb", "GW_PFAS":     "#9333ea",
+        "GW_VOC":       "#4a7a8a", "GW_PFAS":     "#9333ea",
         "LOWFLOW":      "#6b7280",
     }
     badges = " ".join(
