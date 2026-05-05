@@ -191,7 +191,7 @@ class AlchemSoilParser(BaseParser):
                     flag  = "ND"
                 elif raw_val.lower() in ("<mdl", "<dl"):
                     value = lod
-                    flag  = "<MDL"
+                    flag  = "ND"
                 elif raw_val.lower() in ("<mrl", "<loq", "<rl"):
                     value = loq
                     flag  = "<LOQ"
@@ -215,24 +215,61 @@ class AlchemSoilParser(BaseParser):
 
     # ------------------------------------------------------------------
     def _parse_tph_sheet(self, xl: pd.ExcelFile, sheet_name: str) -> list[dict]:
-        """Parse TPH sheet: Sample Name | DRO | ORO | Total TPH"""
-        raw = xl.parse(sheet_name, header=0, dtype=str).fillna("")
+        """Parse TPH sheet: Sample Name | DRO | ORO | Total TPH
+
+        Supports an optional LOQ row before the data (e.g. "LOQ [mg/kg]" in
+        column 0).  When found, N.D. values use the per-column LOQ; <LOQ cells
+        are stored with flag="<LOQ" and value=loq.
+        """
+        raw = xl.parse(sheet_name, header=None, dtype=str).fillna("")
+
+        # Locate header row ("Sample Name" in col 0)
+        header_row = 0
+        for i, row in raw.iterrows():
+            if "sample name" in str(row.iloc[0]).lower():
+                header_row = i
+                break
+
+        headers = [str(v).strip() for v in raw.iloc[header_row].values]
+
+        # Build col_index → param_name for all parameter columns (skip col 0)
+        col_params: dict[int, str] = {}
+        for ci, h in enumerate(headers[1:], 1):
+            if not h or h.lower() == "nan":
+                continue
+            param = h.split("[")[0].strip()
+            if param.upper() in ("TOTAL TPH", "TOTAL-TPH", "TPH TOTAL"):
+                param = "TPH"
+            col_params[ci] = param
+
+        # Scan rows before the header for a LOQ row
+        loq_per_col: dict[int, float | None] = {}
+        for i in range(header_row):
+            if "loq" in str(raw.iloc[i, 0]).lower():
+                for ci in col_params:
+                    loq_per_col[ci] = self._parse_float(str(raw.iloc[i, ci]))
+                break
 
         records = []
-        for _, row in raw.iterrows():
+        for i in range(header_row + 1, len(raw)):
+            row = raw.iloc[i]
             sample_id = str(row.iloc[0]).strip()
-            if not sample_id or sample_id.lower() in ("nan", "sample name"):
+            if not sample_id or sample_id.lower() in ("nan", ""):
                 continue
 
-            # Each parameter as a separate compound record
-            for col_name in raw.columns[1:]:
-                raw_val = str(row[col_name]).strip()
+            for ci, param_name in col_params.items():
+                raw_val = str(row.iloc[ci]).strip()
                 if raw_val.lower() in ("nan", ""):
                     continue
 
+                loq = loq_per_col.get(ci)
+
                 if raw_val.upper() in ("N.D.", "ND", "N/D"):
-                    value = None
+                    value = loq   # use LOQ when available; None otherwise
                     flag  = "ND"
+                elif raw_val.lower() in ("<loq", "<mrl", "<rl"):
+                    value = loq
+                    flag  = "<LOQ"
                 else:
                     try:
                         value = float(raw_val)
@@ -240,17 +277,6 @@ class AlchemSoilParser(BaseParser):
                     except ValueError:
                         value, flag = self._vp.parse(raw_val)
 
-                # Extract just the parameter name (e.g. "DRO" from "DRO [mg/kg]")
-                param_name = col_name.split("[")[0].strip()
-
-                # Normalize alternate total-TPH column names → canonical "TPH"
-                # (dimer_1 uses "Total TPH", dimer_2 uses "TPH")
-                if param_name.upper() in ("TOTAL TPH", "TOTAL-TPH", "TPH TOTAL"):
-                    param_name = "TPH"
-
-                # CAS: only the combined TPH total maps to the VSL threshold
-                # (TPH - DRO + ORO (Tier 1), CAS C10-C40, VSL = 350 mg/kg).
-                # DRO and ORO have no individual VSL threshold in the file.
                 cas = "C10-C40" if param_name.upper() == "TPH" else ""
 
                 records.append({
@@ -262,7 +288,7 @@ class AlchemSoilParser(BaseParser):
                     "flag":          flag,
                     "unit":          "mg/kg",
                     "lod":           None,
-                    "loq":           None,
+                    "loq":           loq,
                     "analysis_type": "SOIL_TPH",
                 })
 
