@@ -788,9 +788,10 @@ class LabReportExcel:
                     # <DL / <MDL / <LOD in input → <actual_lod_number (no trailing .0)
                     display = f"<{_fmt_lod(lod)}" if lod is not None else "ND"
                 elif flag == "<LOQ":
-                    # <LOQ → plain LOQ number (no < prefix)
+                    # <LOQ → show numeric LOQ when known, else literal "<LOQ"
                     loq_ref = loq_val or v
-                    display = round(loq_ref, 3) if isinstance(loq_ref, float) else loq_ref
+                    display = (round(loq_ref, 3) if isinstance(loq_ref, float)
+                               else ("<LOQ" if loq_ref is None else loq_ref))
                 elif flag == "<":
                     # Explicit <numeric in input → keep < prefix
                     display = f"<{round(v, 2)}" if isinstance(v, float) else f"<{v}"
@@ -992,9 +993,10 @@ class LabReportExcel:
                     # <DL / <MDL / <LOD in input → <actual_lod_number (no trailing .0)
                     display = f"<{_fmt_lod(lod)}" if lod is not None else "ND"
                 elif flag == "<LOQ":
-                    # <LOQ → plain LOQ number (no < prefix)
+                    # <LOQ → show numeric LOQ when known, else literal "<LOQ"
                     loq_ref = loq_val or v
-                    display = round(loq_ref, 3) if isinstance(loq_ref, float) else loq_ref
+                    display = (round(loq_ref, 3) if isinstance(loq_ref, float)
+                               else ("<LOQ" if loq_ref is None else loq_ref))
                 elif flag == "<":
                     # Explicit <numeric in input → keep < prefix
                     loq_ref = loq_val or v
