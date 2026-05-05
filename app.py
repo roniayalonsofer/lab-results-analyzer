@@ -330,7 +330,8 @@ def load_threshold_manager(_mtime):
 
 try:
     from core.excel_output import LabReportExcel
-    from core.word_output  import LabReportWord
+    from core.word_output  import (LabReportWord, parse_als_file, build_word_report,
+                                   load_threshold_file, get_tier1_col, tier1_label)
     from parsers import get_parser, auto_detect_category
     _tm_py    = os.path.join(TOOL_DIR, 'core', 'threshold_manager.py')
     _tm_mtime = os.path.getmtime(_tm_py)
@@ -418,7 +419,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════
-# STEP INDICATOR
+# STEP INDICATOR (used by Excel tab)
 # ══════════════════════════════════════════════════════════════════
 def _steps(step: int):
     labels = ["① העלאת קובץ", "② בחירת ערכי סף", "③ הורדת דוח"]
@@ -429,390 +430,577 @@ def _steps(step: int):
         pills += f'<div class="step-pill {cls}">{icon}{lbl}</div>'
     st.markdown(f'<div class="step-row">{pills}</div>', unsafe_allow_html=True)
 
-_steps(1)
+# ══════════════════════════════════════════════════════════════════
+# TABS
+# tab_word must be rendered BEFORE tab_excel so that st.stop() calls
+# inside tab_excel don't prevent the Word tab from appearing.
+# ══════════════════════════════════════════════════════════════════
+tab_excel, tab_word = st.tabs(["📊 יצוא Excel", "📄 יצוא Word"])
 
 # ══════════════════════════════════════════════════════════════════
-# UPLOAD
+# WORD TAB
 # ══════════════════════════════════════════════════════════════════
-st.markdown('<div class="section-card">', unsafe_allow_html=True)
-st.markdown('<div class="section-title">📤 שלב 1 — העלאת קובץ דוח מעבדה</div>',
-            unsafe_allow_html=True)
+with tab_word:
+    st.markdown("#### 📄 יצוא דוח Word מקובץ ALS")
+    st.caption("העלה קבצי ALS מהמעבדה, בחר ערכי סף והורד דוח Word מעוצב")
+    st.markdown("---")
 
-col_up, col_meta = st.columns([3, 1])
+    # ── Threshold settings ────────────────────────────────────────
+    st.markdown("##### ⚙️ הגדרות ערכי סף")
+    wc1, wc2, wc3, wc4 = st.columns([2, 2, 2, 2])
+    with wc1:
+        w_thresh_file = st.file_uploader(
+            "📂 קובץ ערכי סף (Excel)",
+            type=["xlsx", "xls"],
+            key="w_thresh",
+            help="קובץ Excel עם ערכי VSL ו-TIER 1",
+        )
+    with wc2:
+        w_land = st.selectbox("Land Use", ["Industrial", "Residential"], key="w_land")
+    with wc3:
+        w_aquifer = st.selectbox(
+            "Aquifer Sensitivity", ["A-1, A, B", "B-1 or C"], key="w_aquifer"
+        )
+    with wc4:
+        _w_depth_opts = ["Not Applicable"] if "b-1" in w_aquifer.lower() else ["0 - 6 m", ">6 m"]
+        w_depth = st.selectbox("Depth to GW", _w_depth_opts, key="w_depth")
 
-with col_up:
-    uploaded_files = st.file_uploader(
-        "גרור קבצים לכאן או לחץ לבחירה",
-        type=["xlsx", "xls", "csv"],
+    w_t1col = get_tier1_col(w_land, w_aquifer, w_depth)
+    w_t1lbl = tier1_label(w_land, w_aquifer, w_depth)
+    st.caption(f"📌 TIER 1: **{w_land}** | {w_aquifer} | {w_depth}")
+
+    st.markdown("---")
+
+    # ── ALS file upload ───────────────────────────────────────────
+    st.markdown("##### 📤 קבצי ALS")
+    w_files = st.file_uploader(
+        "העלה קבצי ALS (Excel)",
+        type=["xlsx", "xls"],
         accept_multiple_files=True,
-        help="ניתן להעלות מספר קבצים מאותה מעבדה | XLSX / XLS / CSV",
-        label_visibility="visible",
+        key="w_als",
     )
 
-with col_meta:
-    # selected lab/category display
-    cat_clean = cat_label.split(" ", 1)[-1] if " " in cat_label else cat_label
-    st.markdown(f"""
-    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
-                padding:0.9rem 1rem;margin-top:1.75rem;text-align:center;">
-      <div style="font-size:0.7rem;color:#94a3b8;font-weight:600;margin-bottom:4px;">מעבדה</div>
-      <div style="font-size:1.3rem;font-weight:800;color:#1e40af;">{lab}</div>
-      <div style="font-size:0.75rem;color:#64748b;margin-top:4px;">{cat_clean}</div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("---")
 
-st.markdown('</div>', unsafe_allow_html=True)
+    # ── Table options (4 columns) ─────────────────────────────────
+    st.markdown("##### 📋 הגדרות טבלאות")
+    tcol1, tcol2, tcol3, tcol4 = st.columns(4)
 
-if not uploaded_files:
-    st.markdown("""
-    <div class="info-banner">
-      ℹ️ העלה קובץ דוח מעבדה כדי להתחיל — המערכת תזהה אוטומטית את סוג הניתוח
-    </div>
-    """, unsafe_allow_html=True)
-    st.stop()
+    with tcol1:
+        with st.expander("🛢️ TPH", expanded=True):
+            w_tph_inc   = st.checkbox("כלול בדוח", value=True,  key="w_tph_inc")
+            w_tph_title = st.text_input("כותרת", value="טבלה 1 – TPH",     key="w_tph_title")
+            w_tph_page  = st.selectbox("גודל דף", ["A4", "Tabloid"],        key="w_tph_page")
+            w_tph_land  = st.selectbox("כיוון", ["לרוחב", "לאורך"],        key="w_tph_orient") == "לרוחב"
 
-# ══════════════════════════════════════════════════════════════════
-# PARSE
-# ══════════════════════════════════════════════════════════════════
-all_raw: list[tuple[str, bytes]] = [(uf.name, uf.read()) for uf in uploaded_files]
-fname     = " | ".join(f for f, _ in all_raw)
-raw_bytes = all_raw[0][1]
+    with tcol2:
+        with st.expander("⚗️ Metals", expanded=True):
+            w_met_inc   = st.checkbox("כלול בדוח", value=True,  key="w_met_inc")
+            w_met_title = st.text_input("כותרת", value="טבלה 2 – מתכות",   key="w_met_title")
+            w_met_page  = st.selectbox("גודל דף", ["A4", "Tabloid"],        key="w_met_page")
+            w_met_land  = st.selectbox("כיוון", ["לרוחב", "לאורך"],        key="w_met_orient") == "לרוחב"
 
-if category_raw == 'auto':
-    category = auto_detect_category(all_raw[0][0], raw_bytes)
-    cat_info  = f"זוהה אוטומטית: **{category}**"
-else:
-    category = category_raw
-    cat_info  = f"קטגוריה: **{category}**"
+    with tcol3:
+        with st.expander("🧪 VOC+SVOC", expanded=True):
+            w_voc_inc   = st.checkbox("כלול בדוח", value=True,  key="w_voc_inc")
+            w_voc_title = st.text_input("כותרת", value="טבלה 3 – VOC+SVOC", key="w_voc_title")
+            w_voc_page  = st.selectbox("גודל דף", ["A4", "Tabloid"],         key="w_voc_page")
+            w_voc_land  = st.selectbox("כיוון", ["לרוחב", "לאורך"],         key="w_voc_orient") == "לרוחב"
 
-try:
-    try:
-        parser = get_parser(lab, category)
-    except KeyError:
-        fallback = "soil"
-        st.warning(f"⚠️ אין parser עבור {lab} / {category}. מנסה: **{fallback}**")
-        category = fallback
-        cat_info  = f"ברירת מחדל: **{fallback}**"
-        parser   = get_parser(lab, fallback)
-except Exception as e:
-    st.error(f"שגיאת טעינת parser: {e}")
-    st.exception(e)
-    st.stop()
+    with tcol4:
+        with st.expander("🔬 PFAS", expanded=True):
+            w_pfas_inc   = st.checkbox("כלול בדוח", value=True,  key="w_pfas_inc")
+            w_pfas_title = st.text_input("כותרת", value="טבלה 4 – PFAS",   key="w_pfas_title")
+            w_pfas_page  = st.selectbox("גודל דף", ["A4", "Tabloid"],       key="w_pfas_page")
+            w_pfas_land  = st.selectbox("כיוון", ["לרוחב", "לאורך"],       key="w_pfas_orient") == "לרוחב"
 
-all_records:    list[dict] = []
-file_summaries: list[dict] = []
-n_files = len(all_raw)
+    st.markdown("---")
 
-with st.spinner(f"מנתח {'קבצים' if n_files > 1 else 'קובץ'}..."):
-    for fname_i, raw_i in all_raw:
-        try:
-            file_records = parser.parse(io.BytesIO(raw_i))
-            all_records.extend(file_records)
-            file_summaries.append({"name": fname_i, "records": len(file_records), "ok": True})
-        except Exception as e:
-            st.error(f"שגיאת פרסינג: {fname_i} — {e}")
-            file_summaries.append({"name": fname_i, "records": 0, "ok": False})
+    # ── Generate button ───────────────────────────────────────────
+    _w_ready = bool(w_files and w_thresh_file)
+    if not w_files:
+        st.info("👆 העלה קבצי ALS כדי להתחיל")
+    elif not w_thresh_file:
+        st.info("👆 העלה קובץ ערכי סף כדי לצור את הדוח")
 
-records = all_records
+    if _w_ready:
+        if st.button("📄 צור דוח Word", type="primary",
+                     use_container_width=True, key="w_gen"):
+            with st.spinner("⏳ בונה דוח..."):
+                try:
+                    _thresh_dict = load_threshold_file(w_thresh_file.read())
 
-if not records:
-    st.warning("⚠️ לא נמצאו רשומות — בדוק פורמט הקובץ ובחירת מעבדה / קטגוריה")
-    st.stop()
+                    _all_dfs: dict = {"TPH": [], "Metals": [], "VOC+SVOC": [], "PFAS": []}
+                    _w_errors = []
+                    for _wf in w_files:
+                        _df, _err = parse_als_file(_wf.read(), _wf.name)
+                        if _err:
+                            _w_errors.append(f"{_wf.name}: {_err}")
+                        elif _df is not None and not _df.empty:
+                            _grp = _df["group"].str.upper().str.strip()
+                            if _grp.str.contains("PFAS", na=False).any():
+                                _all_dfs["PFAS"].append(
+                                    _df[_grp.str.contains("PFAS", na=False)]
+                                )
+                            if _grp.str.contains("VOC|SVOC|BTEX", na=False).any():
+                                _all_dfs["VOC+SVOC"].append(
+                                    _df[_grp.str.contains("VOC|SVOC|BTEX", na=False)]
+                                )
+                            if _grp.str.contains(
+                                "METAL|INORGANIC|ICP|ELEMENT", na=False
+                            ).any():
+                                _all_dfs["Metals"].append(
+                                    _df[_grp.str.contains(
+                                        "METAL|INORGANIC|ICP|ELEMENT", na=False
+                                    )]
+                                )
+                            if _grp.str.contains(
+                                "TPH|PETROLEUM|HYDROCARBON|DRO|ORO", na=False
+                            ).any():
+                                _all_dfs["TPH"].append(
+                                    _df[_grp.str.contains(
+                                        "TPH|PETROLEUM|HYDROCARBON|DRO|ORO", na=False
+                                    )]
+                                )
 
-# ── stats ─────────────────────────────────────────────────────────
-by_type  = collections.Counter(r.get('analysis_type', '?') for r in records)
-samples  = sorted(set(r['sample_id'] for r in records))
-detected = [r for r in records if r.get('flag') not in ('ND', '<LOD') and r.get('value') is not None]
+                    for _e in _w_errors:
+                        st.warning(f"⚠️ {_e}")
 
-# success line
-st.markdown(f"""
-<div class="success-banner">
-  ✅ {cat_info} &nbsp;|&nbsp; Parser: <code>{type(parser).__name__}</code>
-  {"&nbsp;|&nbsp; " + " ".join(f'<b>{s["name"]}</b>: {s["records"]} רשומות' for s in file_summaries) if n_files > 1 else ""}
-</div>
-""", unsafe_allow_html=True)
+                    _merged = {
+                        k: pd.concat(v, ignore_index=True) if v else None
+                        for k, v in _all_dfs.items()
+                    }
 
-# metric cards
-c1, c2, c3, c4 = st.columns(4)
-with c1: st.metric("סה\"כ רשומות",  f"{len(records):,}")
-with c2: st.metric("ערכים מזוהים",  f"{len(detected):,}")
-with c3: st.metric("דגימות",        f"{len(samples):,}")
-with c4: st.metric("סוגי ניתוח",   f"{len(by_type):,}")
+                    _table_cfgs = []
+                    if w_tph_inc and _merged.get("TPH") is not None and not _merged["TPH"].empty:
+                        _table_cfgs.append({"type": "TPH",      "df": _merged["TPH"],
+                                            "title": w_tph_title,  "page_size": w_tph_page,
+                                            "landscape": w_tph_land})
+                    if w_met_inc and _merged.get("Metals") is not None and not _merged["Metals"].empty:
+                        _table_cfgs.append({"type": "Metals",   "df": _merged["Metals"],
+                                            "title": w_met_title,  "page_size": w_met_page,
+                                            "landscape": w_met_land})
+                    if w_voc_inc and _merged.get("VOC+SVOC") is not None and not _merged["VOC+SVOC"].empty:
+                        _table_cfgs.append({"type": "VOC+SVOC", "df": _merged["VOC+SVOC"],
+                                            "title": w_voc_title,  "page_size": w_voc_page,
+                                            "landscape": w_voc_land})
+                    if w_pfas_inc and _merged.get("PFAS") is not None and not _merged["PFAS"].empty:
+                        _table_cfgs.append({"type": "PFAS",     "df": _merged["PFAS"],
+                                            "title": w_pfas_title, "page_size": w_pfas_page,
+                                            "landscape": w_pfas_land})
 
-# analysis-type badges
-BADGE_COLORS = {
-    "SOIL_GAS_VOC": "#7c3aed", "SOIL_VOC":    "#0d9488",
-    "SOIL_TPH":     "#0891b2", "SOIL_MBTEX":  "#0f766e",
-    "SOIL_METALS":  "#4f46e5", "SOIL_PFAS":   "#db2777",
-    "GW_VOC":       "#2563eb", "GW_PFAS":     "#9333ea",
-    "LOWFLOW":      "#6b7280",
-}
-badges = " ".join(
-    f'<span class="type-badge" style="background:{BADGE_COLORS.get(t,"#94a3b8")};">'
-    f'{t}: {cnt}</span>'
-    for t, cnt in by_type.most_common()
-)
-st.markdown(f'<div style="margin:0.5rem 0;">{badges}</div>', unsafe_allow_html=True)
+                    if not _table_cfgs:
+                        st.warning("⚠️ לא נמצאו נתונים מסווגים בקבצים שהועלו")
+                    else:
+                        _docx_bytes = build_word_report(
+                            _table_cfgs, _thresh_dict, w_t1col, w_t1lbl
+                        )
+                        st.session_state["w_docx_bytes"] = _docx_bytes
+                        st.success(f"✅ הדוח נוצר — {len(_table_cfgs)} טבלאות")
 
-_steps(2)
+                except Exception as _ex:
+                    st.error(f"❌ שגיאה: {_ex}")
+                    import traceback
+                    st.code(traceback.format_exc())
 
-# ══════════════════════════════════════════════════════════════════
-# THRESHOLD SELECTION
-# ══════════════════════════════════════════════════════════════════
-found_atypes  = list(by_type.keys())
-has_soil      = any(t in found_atypes for t in ("SOIL_VOC","SOIL_TPH","SOIL_METALS","SOIL_MBTEX"))
-has_soil_pfas = "SOIL_PFAS" in found_atypes
-has_soil_gas  = "SOIL_GAS_VOC" in found_atypes
-has_gw        = any(t.startswith("GW_") for t in found_atypes)
-
-selected_thresholds: list[str] = []
-
-_SENS_MAP  = {"רגיש מאוד": "vh", "רגיש/בינוני": "hm", "לא רגיש": "low", "—": None}
-_DEPTH_MAP = {"0-6מ'": "0_6", ">6מ'": "6"}
-
-def _soil_tier1_key(land_use: str, sens_code, depth_label) -> str | None:
-    if not sens_code:
-        return None
-    pfx = "RES" if land_use == "res" else "IND"
-    if sens_code == "vh":  return f"TIER1_{pfx}_SOIL_VH"
-    if sens_code == "hm":
-        d = _DEPTH_MAP.get(depth_label, "0_6")
-        return f"TIER1_{pfx}_SOIL_HM_{d}"
-    if sens_code == "low": return f"TIER1_{pfx}_SOIL_LOW"
-    return None
-
-any_shown = False
-
-st.markdown('<div class="section-card">', unsafe_allow_html=True)
-st.markdown('<div class="section-title">📋 שלב 2 — בחירת ערכי סף להשוואה</div>',
-            unsafe_allow_html=True)
-
-# ── Soil ─────────────────────────────────────────────────────────
-if has_soil:
-    any_shown = True
-    st.markdown("##### 🪨 קרקע")
-    col_vsl, col_t1r, col_t1i = st.columns(3)
-
-    with col_vsl:
-        st.markdown('<div style="font-size:0.85rem;font-weight:700;color:#374151;margin-bottom:6px;">VSL — ישיר</div>', unsafe_allow_html=True)
-        use_vsl = st.checkbox("VSL (Direct Contact)", value=True, key="vsl_cb")
-
-    with col_t1r:
-        st.markdown('<div style="font-size:0.85rem;font-weight:700;color:#374151;margin-bottom:6px;">Tier 1 מגורים (Residential)</div>', unsafe_allow_html=True)
-        sens_res = st.selectbox("רגישות אקוויפר", ["—","רגיש מאוד","רגיש/בינוני","לא רגיש"], key="sens_res", label_visibility="collapsed")
-        depth_res = None
-        if sens_res == "רגיש/בינוני":
-            depth_res = st.radio('עומק מי"ת', ["0-6מ'",">6מ'"], horizontal=True, key="depth_res", label_visibility="collapsed")
-
-    with col_t1i:
-        st.markdown('<div style="font-size:0.85rem;font-weight:700;color:#374151;margin-bottom:6px;">Tier 1 תעשייה (Industrial)</div>', unsafe_allow_html=True)
-        sens_ind = st.selectbox("רגישות אקוויפר", ["—","רגיש מאוד","רגיש/בינוני","לא רגיש"], key="sens_ind", label_visibility="collapsed")
-        depth_ind = None
-        if sens_ind == "רגיש/בינוני":
-            depth_ind = st.radio('עומק מי"ת', ["0-6מ'",">6מ'"], horizontal=True, key="depth_ind", label_visibility="collapsed")
-
-    if use_vsl: selected_thresholds.append("VSL_SOIL")
-    k = _soil_tier1_key("res", _SENS_MAP.get(sens_res), depth_res)
-    if k: selected_thresholds.append(k)
-    k = _soil_tier1_key("ind", _SENS_MAP.get(sens_ind), depth_ind)
-    if k: selected_thresholds.append(k)
-
-# ── Soil PFAS ─────────────────────────────────────────────────────
-if has_soil_pfas:
-    any_shown = True
-    st.markdown("##### 🧬 קרקע PFAS")
-    cp1, cp2, cp3 = st.columns(3)
-    with cp1: use_pfas_vsl    = st.checkbox("PFAS VSL",           value=True,  key="pfas_vsl")
-    with cp2: use_pfas_t1_res = st.checkbox("PFAS Tier 1 מגורים", value=False, key="pfas_t1r")
-    with cp3: use_pfas_t1_ind = st.checkbox("PFAS Tier 1 תעשייה", value=False, key="pfas_t1i")
-    if use_pfas_vsl:    selected_thresholds.append("PFAS_VSL")
-    if use_pfas_t1_res: selected_thresholds.append("PFAS_TIER1_RES")
-    if use_pfas_t1_ind: selected_thresholds.append("PFAS_TIER1_IND")
-
-# ── Soil gas ──────────────────────────────────────────────────────
-if has_soil_gas:
-    any_shown = True
-    st.markdown("##### 💨 גז קרקע VOC")
-    sg_col_r, sg_col_i = st.columns(2)
-    with sg_col_r:
-        st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 מגורים</div>', unsafe_allow_html=True)
-        sg_res_in  = st.checkbox("Indoor — פנים",  value=True,  key="sg_res_in")
-        sg_res_out = st.checkbox("Outdoor — חוץ",  value=False, key="sg_res_out")
-    with sg_col_i:
-        st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 תעשייה</div>', unsafe_allow_html=True)
-        sg_ind_in  = st.checkbox("Indoor — פנים",  value=False, key="sg_ind_in")
-        sg_ind_out = st.checkbox("Outdoor — חוץ",  value=False, key="sg_ind_out")
-    if sg_res_in:  selected_thresholds.append("GAS_INDOOR_RES")
-    if sg_res_out: selected_thresholds.append("GAS_OUTDOOR_RES")
-    if sg_ind_in:  selected_thresholds.append("GAS_INDOOR_IND")
-    if sg_ind_out: selected_thresholds.append("GAS_OUTDOOR_IND")
-
-# ── Groundwater ───────────────────────────────────────────────────
-if has_gw:
-    any_shown = True
-    st.markdown("##### 💧 מי תהום")
-    use_gw = st.checkbox('ערך סף מי"ת (GW Standard)', value=True, key="gw_cb")
-    if use_gw: selected_thresholds.append("GW")
-
-if not any_shown:
-    st.info("ℹ️ LOWFLOW — ממצאי שדה בלבד, ללא ערכי סף")
-elif not selected_thresholds:
-    st.warning("⚠️ לא נבחרו ערכי סף — הדוח ייצא ללא עמודות השוואה")
-
-# ── Combine options ───────────────────────────────────────────────
-has_tph_and_voc   = "SOIL_TPH" in found_atypes and "SOIL_VOC"   in found_atypes
-has_tph_and_mbtex = "SOIL_TPH" in found_atypes and "SOIL_MBTEX" in found_atypes
-combine_tph_voc   = False
-combine_tph_mbtex = False
-
-if has_tph_and_voc or has_tph_and_mbtex:
-    st.markdown('<div style="margin-top:0.5rem;"></div>', unsafe_allow_html=True)
-    cc1, cc2 = st.columns(2)
-    with cc1:
-        if has_tph_and_voc:
-            combine_tph_voc = st.checkbox("שלב TPH + BTEX בגיליון אחד", value=False, key="combine_tph_voc")
-    with cc2:
-        if has_tph_and_mbtex:
-            combine_tph_mbtex = st.checkbox("שלב TPH + MBTEX בגיליון אחד", value=False, key="combine_tph_mbtex")
-
-st.markdown('</div>', unsafe_allow_html=True)  # end section-card
-
-# ══════════════════════════════════════════════════════════════════
-# PREVIEW TABLE
-# ══════════════════════════════════════════════════════════════════
-with st.expander("📊 תצוגה מקדימה של הנתונים", expanded=False):
-    def build_preview(recs):
-        rows = []
-        for r in recs:
-            val = r.get('value')
-            rows.append({
-                'דגימה':   r.get('sample_id', ''),
-                'תרכובת':  r.get('compound', ''),
-                'CAS':      r.get('cas', ''),
-                'ערך':      f"{val:.4g}" if isinstance(val, float) else (str(val) if val is not None else ''),
-                'יחידות':  r.get('unit', ''),
-                'flag':     r.get('flag', ''),
-            })
-        return pd.DataFrame(rows)
-
-    analysis_types = list(by_type.keys())
-    if len(analysis_types) > 1:
-        tabs = st.tabs([f"{t} ({by_type[t]})" for t in analysis_types])
-        for tab, atype in zip(tabs, analysis_types):
-            with tab:
-                subset = [r for r in records if r.get('analysis_type') == atype]
-                st.dataframe(build_preview(subset), use_container_width=True, height=280)
-    else:
-        st.dataframe(build_preview(records), use_container_width=True, height=320)
-
-# ══════════════════════════════════════════════════════════════════
-# BUILD EXCEL + DOWNLOAD
-# ══════════════════════════════════════════════════════════════════
-_steps(3)
-
-st.markdown('<div class="section-card">', unsafe_allow_html=True)
-st.markdown('<div class="section-title">📥 שלב 3 — הורדת דוח Excel</div>', unsafe_allow_html=True)
-
-_sniff   = raw_bytes.lstrip()[:200]
-_is_kte_gw = (
-    lab == "KTE" and category == "groundwater" and
-    (b"<?xml" in _sniff or b"<Workbook" in _sniff)
-)
-
-excel_buf = io.BytesIO()
-excel_ok  = False
-word_buf  = io.BytesIO()
-word_ok   = False
-
-if _is_kte_gw:
-    try:
-        from core.excel_output import build_kte_gw_btex_simple_from_xml
-        build_kte_gw_btex_simple_from_xml(raw_bytes, excel_buf)
-        excel_ok = True
-    except Exception as e:
-        st.error(f"שגיאת בניית Excel: {e}")
-        st.exception(e)
-else:
-    thresh_display = ", ".join(tm.threshold_label(k) for k in selected_thresholds) or "ללא ערכי סף"
-    st.caption(f"📌 ערכי סף: **{thresh_display}**")
-    try:
-        builder = LabReportExcel(
-            records             = records,
-            threshold_manager   = tm,
-            output_path         = excel_buf,
-            project_name        = project_name,
-            client              = client_name,
-            report_date         = date.today().strftime('%d.%m.%Y'),
-            selected_thresholds = selected_thresholds if selected_thresholds else None,
-            combine_tph_voc     = combine_tph_voc,
-            combine_tph_mbtex   = combine_tph_mbtex,
+    if st.session_state.get("w_docx_bytes"):
+        st.download_button(
+            "⬇️ הורד דוח Word",
+            data=st.session_state["w_docx_bytes"],
+            file_name="word_report.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True,
+            key="w_dl",
         )
-        builder.build()
-        excel_buf.seek(0)
-        excel_ok = True
+
+# ══════════════════════════════════════════════════════════════════
+# EXCEL TAB  (existing flow — unchanged)
+# ══════════════════════════════════════════════════════════════════
+with tab_excel:
+    _steps(1)
+
+    # ══════════════════════════════════════════════════════════════
+    # UPLOAD
+    # ══════════════════════════════════════════════════════════════
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">📤 שלב 1 — העלאת קובץ דוח מעבדה</div>',
+                unsafe_allow_html=True)
+
+    col_up, col_meta = st.columns([3, 1])
+
+    with col_up:
+        uploaded_files = st.file_uploader(
+            "גרור קבצים לכאן או לחץ לבחירה",
+            type=["xlsx", "xls", "csv"],
+            accept_multiple_files=True,
+            help="ניתן להעלות מספר קבצים מאותה מעבדה | XLSX / XLS / CSV",
+            label_visibility="visible",
+        )
+
+    with col_meta:
+        # selected lab/category display
+        cat_clean = cat_label.split(" ", 1)[-1] if " " in cat_label else cat_label
+        st.markdown(f"""
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+                    padding:0.9rem 1rem;margin-top:1.75rem;text-align:center;">
+          <div style="font-size:0.7rem;color:#94a3b8;font-weight:600;margin-bottom:4px;">מעבדה</div>
+          <div style="font-size:1.3rem;font-weight:800;color:#1e40af;">{lab}</div>
+          <div style="font-size:0.75rem;color:#64748b;margin-top:4px;">{cat_clean}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    if not uploaded_files:
+        st.markdown("""
+        <div class="info-banner">
+          ℹ️ העלה קובץ דוח מעבדה כדי להתחיל — המערכת תזהה אוטומטית את סוג הניתוח
+        </div>
+        """, unsafe_allow_html=True)
+        st.stop()
+
+    # ══════════════════════════════════════════════════════════════
+    # PARSE
+    # ══════════════════════════════════════════════════════════════
+    all_raw: list[tuple[str, bytes]] = [(uf.name, uf.read()) for uf in uploaded_files]
+    fname     = " | ".join(f for f, _ in all_raw)
+    raw_bytes = all_raw[0][1]
+
+    if category_raw == 'auto':
+        category = auto_detect_category(all_raw[0][0], raw_bytes)
+        cat_info  = f"זוהה אוטומטית: **{category}**"
+    else:
+        category = category_raw
+        cat_info  = f"קטגוריה: **{category}**"
+
+    try:
         try:
-            LabReportWord(
+            parser = get_parser(lab, category)
+        except KeyError:
+            fallback = "soil"
+            st.warning(f"⚠️ אין parser עבור {lab} / {category}. מנסה: **{fallback}**")
+            category = fallback
+            cat_info  = f"ברירת מחדל: **{fallback}**"
+            parser   = get_parser(lab, fallback)
+    except Exception as e:
+        st.error(f"שגיאת טעינת parser: {e}")
+        st.exception(e)
+        st.stop()
+
+    all_records:    list[dict] = []
+    file_summaries: list[dict] = []
+    n_files = len(all_raw)
+
+    with st.spinner(f"מנתח {'קבצים' if n_files > 1 else 'קובץ'}..."):
+        for fname_i, raw_i in all_raw:
+            try:
+                file_records = parser.parse(io.BytesIO(raw_i))
+                all_records.extend(file_records)
+                file_summaries.append({"name": fname_i, "records": len(file_records), "ok": True})
+            except Exception as e:
+                st.error(f"שגיאת פרסינג: {fname_i} — {e}")
+                file_summaries.append({"name": fname_i, "records": 0, "ok": False})
+
+    records = all_records
+
+    if not records:
+        st.warning("⚠️ לא נמצאו רשומות — בדוק פורמט הקובץ ובחירת מעבדה / קטגוריה")
+        st.stop()
+
+    # ── stats ─────────────────────────────────────────────────────
+    by_type  = collections.Counter(r.get('analysis_type', '?') for r in records)
+    samples  = sorted(set(r['sample_id'] for r in records))
+    detected = [r for r in records if r.get('flag') not in ('ND', '<LOD') and r.get('value') is not None]
+
+    # success line
+    st.markdown(f"""
+    <div class="success-banner">
+      ✅ {cat_info} &nbsp;|&nbsp; Parser: <code>{type(parser).__name__}</code>
+      {"&nbsp;|&nbsp; " + " ".join(f'<b>{s["name"]}</b>: {s["records"]} רשומות' for s in file_summaries) if n_files > 1 else ""}
+    </div>
+    """, unsafe_allow_html=True)
+
+    # metric cards
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: st.metric("סה\"כ רשומות",  f"{len(records):,}")
+    with c2: st.metric("ערכים מזוהים",  f"{len(detected):,}")
+    with c3: st.metric("דגימות",        f"{len(samples):,}")
+    with c4: st.metric("סוגי ניתוח",   f"{len(by_type):,}")
+
+    # analysis-type badges
+    BADGE_COLORS = {
+        "SOIL_GAS_VOC": "#7c3aed", "SOIL_VOC":    "#0d9488",
+        "SOIL_TPH":     "#0891b2", "SOIL_MBTEX":  "#0f766e",
+        "SOIL_METALS":  "#4f46e5", "SOIL_PFAS":   "#db2777",
+        "GW_VOC":       "#2563eb", "GW_PFAS":     "#9333ea",
+        "LOWFLOW":      "#6b7280",
+    }
+    badges = " ".join(
+        f'<span class="type-badge" style="background:{BADGE_COLORS.get(t,"#94a3b8")};">'
+        f'{t}: {cnt}</span>'
+        for t, cnt in by_type.most_common()
+    )
+    st.markdown(f'<div style="margin:0.5rem 0;">{badges}</div>', unsafe_allow_html=True)
+
+    _steps(2)
+
+    # ══════════════════════════════════════════════════════════════
+    # THRESHOLD SELECTION
+    # ══════════════════════════════════════════════════════════════
+    found_atypes  = list(by_type.keys())
+    has_soil      = any(t in found_atypes for t in ("SOIL_VOC","SOIL_TPH","SOIL_METALS","SOIL_MBTEX"))
+    has_soil_pfas = "SOIL_PFAS" in found_atypes
+    has_soil_gas  = "SOIL_GAS_VOC" in found_atypes
+    has_gw        = any(t.startswith("GW_") for t in found_atypes)
+
+    selected_thresholds: list[str] = []
+
+    _SENS_MAP  = {"רגיש מאוד": "vh", "רגיש/בינוני": "hm", "לא רגיש": "low", "—": None}
+    _DEPTH_MAP = {"0-6מ'": "0_6", ">6מ'": "6"}
+
+    def _soil_tier1_key(land_use: str, sens_code, depth_label) -> str | None:
+        if not sens_code:
+            return None
+        pfx = "RES" if land_use == "res" else "IND"
+        if sens_code == "vh":  return f"TIER1_{pfx}_SOIL_VH"
+        if sens_code == "hm":
+            d = _DEPTH_MAP.get(depth_label, "0_6")
+            return f"TIER1_{pfx}_SOIL_HM_{d}"
+        if sens_code == "low": return f"TIER1_{pfx}_SOIL_LOW"
+        return None
+
+    any_shown = False
+
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">📋 שלב 2 — בחירת ערכי סף להשוואה</div>',
+                unsafe_allow_html=True)
+
+    # ── Soil ─────────────────────────────────────────────────────
+    if has_soil:
+        any_shown = True
+        st.markdown("##### 🪨 קרקע")
+        col_vsl, col_t1r, col_t1i = st.columns(3)
+
+        with col_vsl:
+            st.markdown('<div style="font-size:0.85rem;font-weight:700;color:#374151;margin-bottom:6px;">VSL — ישיר</div>', unsafe_allow_html=True)
+            use_vsl = st.checkbox("VSL (Direct Contact)", value=True, key="vsl_cb")
+
+        with col_t1r:
+            st.markdown('<div style="font-size:0.85rem;font-weight:700;color:#374151;margin-bottom:6px;">Tier 1 מגורים (Residential)</div>', unsafe_allow_html=True)
+            sens_res = st.selectbox("רגישות אקוויפר", ["—","רגיש מאוד","רגיש/בינוני","לא רגיש"], key="sens_res", label_visibility="collapsed")
+            depth_res = None
+            if sens_res == "רגיש/בינוני":
+                depth_res = st.radio('עומק מי"ת', ["0-6מ'",">6מ'"], horizontal=True, key="depth_res", label_visibility="collapsed")
+
+        with col_t1i:
+            st.markdown('<div style="font-size:0.85rem;font-weight:700;color:#374151;margin-bottom:6px;">Tier 1 תעשייה (Industrial)</div>', unsafe_allow_html=True)
+            sens_ind = st.selectbox("רגישות אקוויפר", ["—","רגיש מאוד","רגיש/בינוני","לא רגיש"], key="sens_ind", label_visibility="collapsed")
+            depth_ind = None
+            if sens_ind == "רגיש/בינוני":
+                depth_ind = st.radio('עומק מי"ת', ["0-6מ'",">6מ'"], horizontal=True, key="depth_ind", label_visibility="collapsed")
+
+        if use_vsl: selected_thresholds.append("VSL_SOIL")
+        k = _soil_tier1_key("res", _SENS_MAP.get(sens_res), depth_res)
+        if k: selected_thresholds.append(k)
+        k = _soil_tier1_key("ind", _SENS_MAP.get(sens_ind), depth_ind)
+        if k: selected_thresholds.append(k)
+
+    # ── Soil PFAS ─────────────────────────────────────────────────
+    if has_soil_pfas:
+        any_shown = True
+        st.markdown("##### 🧬 קרקע PFAS")
+        cp1, cp2, cp3 = st.columns(3)
+        with cp1: use_pfas_vsl    = st.checkbox("PFAS VSL",           value=True,  key="pfas_vsl")
+        with cp2: use_pfas_t1_res = st.checkbox("PFAS Tier 1 מגורים", value=False, key="pfas_t1r")
+        with cp3: use_pfas_t1_ind = st.checkbox("PFAS Tier 1 תעשייה", value=False, key="pfas_t1i")
+        if use_pfas_vsl:    selected_thresholds.append("PFAS_VSL")
+        if use_pfas_t1_res: selected_thresholds.append("PFAS_TIER1_RES")
+        if use_pfas_t1_ind: selected_thresholds.append("PFAS_TIER1_IND")
+
+    # ── Soil gas ──────────────────────────────────────────────────
+    if has_soil_gas:
+        any_shown = True
+        st.markdown("##### 💨 גז קרקע VOC")
+        sg_col_r, sg_col_i = st.columns(2)
+        with sg_col_r:
+            st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 מגורים</div>', unsafe_allow_html=True)
+            sg_res_in  = st.checkbox("Indoor — פנים",  value=True,  key="sg_res_in")
+            sg_res_out = st.checkbox("Outdoor — חוץ",  value=False, key="sg_res_out")
+        with sg_col_i:
+            st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 תעשייה</div>', unsafe_allow_html=True)
+            sg_ind_in  = st.checkbox("Indoor — פנים",  value=False, key="sg_ind_in")
+            sg_ind_out = st.checkbox("Outdoor — חוץ",  value=False, key="sg_ind_out")
+        if sg_res_in:  selected_thresholds.append("GAS_INDOOR_RES")
+        if sg_res_out: selected_thresholds.append("GAS_OUTDOOR_RES")
+        if sg_ind_in:  selected_thresholds.append("GAS_INDOOR_IND")
+        if sg_ind_out: selected_thresholds.append("GAS_OUTDOOR_IND")
+
+    # ── Groundwater ───────────────────────────────────────────────
+    if has_gw:
+        any_shown = True
+        st.markdown("##### 💧 מי תהום")
+        use_gw = st.checkbox('ערך סף מי"ת (GW Standard)', value=True, key="gw_cb")
+        if use_gw: selected_thresholds.append("GW")
+
+    if not any_shown:
+        st.info("ℹ️ LOWFLOW — ממצאי שדה בלבד, ללא ערכי סף")
+    elif not selected_thresholds:
+        st.warning("⚠️ לא נבחרו ערכי סף — הדוח ייצא ללא עמודות השוואה")
+
+    # ── Combine options ───────────────────────────────────────────
+    has_tph_and_voc   = "SOIL_TPH" in found_atypes and "SOIL_VOC"   in found_atypes
+    has_tph_and_mbtex = "SOIL_TPH" in found_atypes and "SOIL_MBTEX" in found_atypes
+    combine_tph_voc   = False
+    combine_tph_mbtex = False
+
+    if has_tph_and_voc or has_tph_and_mbtex:
+        st.markdown('<div style="margin-top:0.5rem;"></div>', unsafe_allow_html=True)
+        cc1, cc2 = st.columns(2)
+        with cc1:
+            if has_tph_and_voc:
+                combine_tph_voc = st.checkbox("שלב TPH + BTEX בגיליון אחד", value=False, key="combine_tph_voc")
+        with cc2:
+            if has_tph_and_mbtex:
+                combine_tph_mbtex = st.checkbox("שלב TPH + MBTEX בגיליון אחד", value=False, key="combine_tph_mbtex")
+
+    st.markdown('</div>', unsafe_allow_html=True)  # end section-card
+
+    # ══════════════════════════════════════════════════════════════
+    # PREVIEW TABLE
+    # ══════════════════════════════════════════════════════════════
+    with st.expander("📊 תצוגה מקדימה של הנתונים", expanded=False):
+        def build_preview(recs):
+            rows = []
+            for r in recs:
+                val = r.get('value')
+                rows.append({
+                    'דגימה':   r.get('sample_id', ''),
+                    'תרכובת':  r.get('compound', ''),
+                    'CAS':      r.get('cas', ''),
+                    'ערך':      f"{val:.4g}" if isinstance(val, float) else (str(val) if val is not None else ''),
+                    'יחידות':  r.get('unit', ''),
+                    'flag':     r.get('flag', ''),
+                })
+            return pd.DataFrame(rows)
+
+        analysis_types = list(by_type.keys())
+        if len(analysis_types) > 1:
+            tabs = st.tabs([f"{t} ({by_type[t]})" for t in analysis_types])
+            for tab, atype in zip(tabs, analysis_types):
+                with tab:
+                    subset = [r for r in records if r.get('analysis_type') == atype]
+                    st.dataframe(build_preview(subset), use_container_width=True, height=280)
+        else:
+            st.dataframe(build_preview(records), use_container_width=True, height=320)
+
+    # ══════════════════════════════════════════════════════════════
+    # BUILD EXCEL + DOWNLOAD
+    # ══════════════════════════════════════════════════════════════
+    _steps(3)
+
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">📥 שלב 3 — הורדת דוח Excel</div>', unsafe_allow_html=True)
+
+    _sniff   = raw_bytes.lstrip()[:200]
+    _is_kte_gw = (
+        lab == "KTE" and category == "groundwater" and
+        (b"<?xml" in _sniff or b"<Workbook" in _sniff)
+    )
+
+    excel_buf = io.BytesIO()
+    excel_ok  = False
+    word_buf  = io.BytesIO()
+    word_ok   = False
+
+    if _is_kte_gw:
+        try:
+            from core.excel_output import build_kte_gw_btex_simple_from_xml
+            build_kte_gw_btex_simple_from_xml(raw_bytes, excel_buf)
+            excel_ok = True
+        except Exception as e:
+            st.error(f"שגיאת בניית Excel: {e}")
+            st.exception(e)
+    else:
+        thresh_display = ", ".join(tm.threshold_label(k) for k in selected_thresholds) or "ללא ערכי סף"
+        st.caption(f"📌 ערכי סף: **{thresh_display}**")
+        try:
+            builder = LabReportExcel(
                 records             = records,
                 threshold_manager   = tm,
-                output_path         = word_buf,
+                output_path         = excel_buf,
                 project_name        = project_name,
                 client              = client_name,
                 report_date         = date.today().strftime('%d.%m.%Y'),
                 selected_thresholds = selected_thresholds if selected_thresholds else None,
                 combine_tph_voc     = combine_tph_voc,
                 combine_tph_mbtex   = combine_tph_mbtex,
-            ).build()
-            word_buf.seek(0)
-            word_ok = True
-        except Exception as e:
-            st.warning(f"⚠️ שגיאת בניית Word: {e}")
-    except Exception as e:
-        st.error(f"שגיאת בניית Excel: {e}")
-        st.exception(e)
-
-if excel_ok:
-    def _safe(s: str) -> str:
-        import re
-        return re.sub(r'[\\/*?:"<>|\s]+', '_', s.strip()).strip('_') or 'x'
-    _parts = ["lab_report"]
-    if client_name.strip():  _parts.append(_safe(client_name))
-    if project_name.strip(): _parts.append(_safe(project_name))
-    out_filename = f"{'_'.join(_parts)}.xlsx"
-    size_kb = len(excel_buf.getvalue()) / 1024
-
-    dl_col, wd_col, info_col = st.columns([2, 2, 1])
-    with dl_col:
-        st.download_button(
-            label     = "⬇️ הורד דוח Excel",
-            data      = excel_buf.getvalue(),
-            file_name = out_filename,
-            mime      = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-    with wd_col:
-        if word_ok:
-            st.download_button(
-                label     = "⬇️ הורד דוח Word",
-                data      = word_buf.getvalue(),
-                file_name = out_filename.replace(".xlsx", ".docx"),
-                mime      = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             )
-    with info_col:
-        st.markdown(f"""
-        <div style="padding:0.5rem 0;font-size:0.82rem;color:#64748b;direction:rtl;">
-          <div>📄 <b>{out_filename}</b></div>
-          <div>📦 גודל: {size_kb:.1f} KB</div>
-          <div>📅 {date.today().strftime('%d.%m.%Y')}</div>
-        </div>
-        """, unsafe_allow_html=True)
+            builder.build()
+            excel_buf.seek(0)
+            excel_ok = True
+            try:
+                LabReportWord(
+                    records             = records,
+                    threshold_manager   = tm,
+                    output_path         = word_buf,
+                    project_name        = project_name,
+                    client              = client_name,
+                    report_date         = date.today().strftime('%d.%m.%Y'),
+                    selected_thresholds = selected_thresholds if selected_thresholds else None,
+                    combine_tph_voc     = combine_tph_voc,
+                    combine_tph_mbtex   = combine_tph_mbtex,
+                ).build()
+                word_buf.seek(0)
+                word_ok = True
+            except Exception as e:
+                st.warning(f"⚠️ שגיאת בניית Word: {e}")
+        except Exception as e:
+            st.error(f"שגיאת בניית Excel: {e}")
+            st.exception(e)
 
-st.markdown('</div>', unsafe_allow_html=True)  # end section-card
+    if excel_ok:
+        def _safe(s: str) -> str:
+            import re
+            return re.sub(r'[\\/*?:"<>|\s]+', '_', s.strip()).strip('_') or 'x'
+        _parts = ["lab_report"]
+        if client_name.strip():  _parts.append(_safe(client_name))
+        if project_name.strip(): _parts.append(_safe(project_name))
+        out_filename = f"{'_'.join(_parts)}.xlsx"
+        size_kb = len(excel_buf.getvalue()) / 1024
 
-# ── footer ────────────────────────────────────────────────────────
-st.markdown(
-    f'<div style="text-align:center;color:#94a3b8;font-size:0.75rem;margin-top:1rem;">'
-    f'🔬 {lab} / {category} &nbsp;·&nbsp; '
-    f'📁 {fname[:80]}{"…" if len(fname)>80 else ""} &nbsp;·&nbsp; '
-    f'📅 {date.today().strftime("%d.%m.%Y")}'
-    f'</div>',
-    unsafe_allow_html=True,
-)
+        dl_col, wd_col, info_col = st.columns([2, 2, 1])
+        with dl_col:
+            st.download_button(
+                label     = "⬇️ הורד דוח Excel",
+                data      = excel_buf.getvalue(),
+                file_name = out_filename,
+                mime      = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        with wd_col:
+            if word_ok:
+                st.download_button(
+                    label     = "⬇️ הורד דוח Word",
+                    data      = word_buf.getvalue(),
+                    file_name = out_filename.replace(".xlsx", ".docx"),
+                    mime      = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+        with info_col:
+            st.markdown(f"""
+            <div style="padding:0.5rem 0;font-size:0.82rem;color:#64748b;direction:rtl;">
+              <div>📄 <b>{out_filename}</b></div>
+              <div>📦 גודל: {size_kb:.1f} KB</div>
+              <div>📅 {date.today().strftime('%d.%m.%Y')}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)  # end section-card
+
+    # ── footer ────────────────────────────────────────────────────
+    st.markdown(
+        f'<div style="text-align:center;color:#94a3b8;font-size:0.75rem;margin-top:1rem;">'
+        f'🔬 {lab} / {category} &nbsp;·&nbsp; '
+        f'📁 {fname[:80]}{"…" if len(fname)>80 else ""} &nbsp;·&nbsp; '
+        f'📅 {date.today().strftime("%d.%m.%Y")}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
