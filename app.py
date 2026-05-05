@@ -328,20 +328,8 @@ def load_threshold_manager(_mtime):
     pfas_path     = PFAS_THRESH if os.path.exists(PFAS_THRESH) else None
     return ThresholdManager(MAIN_THRESH, pfas_path=pfas_path, vsl_full_path=vsl_full_path)
 
-try:
-    from core.excel_output import LabReportExcel
-    from core.word_output  import (LabReportWord, parse_als_file, build_word_report,
-                                   load_threshold_file, get_tier1_col, tier1_label)
-    from parsers import get_parser, auto_detect_category
-    _tm_py    = os.path.join(TOOL_DIR, 'core', 'threshold_manager.py')
-    _tm_mtime = os.path.getmtime(_tm_py)
-    tm = load_threshold_manager(_tm_mtime)
-except Exception as e:
-    st.error(f"שגיאת טעינת מודולים: {e}")
-    st.stop()
-
 # ══════════════════════════════════════════════════════════════════
-# SIDEBAR
+# SIDEBAR — defined before module imports so it always renders
 # ══════════════════════════════════════════════════════════════════
 with st.sidebar:
     st.markdown(
@@ -376,7 +364,6 @@ with st.sidebar:
                                 label_visibility="collapsed")
     category_raw = category_display[cat_label]
 
-
     st.markdown('<hr style="margin:1rem 0 0.5rem;">', unsafe_allow_html=True)
 
     # ── Network share box ─────────────────────────────────────────
@@ -394,7 +381,7 @@ with st.sidebar:
     )
 
 # ══════════════════════════════════════════════════════════════════
-# HERO HEADER
+# HERO HEADER — defined before module imports so it always renders
 # ══════════════════════════════════════════════════════════════════
 _hero_logo = (
     f'<div style="background:white;border-radius:8px;padding:0.4rem 0.7rem;">'
@@ -417,6 +404,21 @@ st.markdown(f"""
   </div>
 </div>
 """, unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════
+# MODULE IMPORTS
+# ══════════════════════════════════════════════════════════════════
+try:
+    from core.excel_output import LabReportExcel
+    from core.word_output  import (LabReportWord, parse_als_file, build_word_report,
+                                   load_threshold_file, get_tier1_col, tier1_label)
+    from parsers import get_parser, auto_detect_category
+    _tm_py    = os.path.join(TOOL_DIR, 'core', 'threshold_manager.py')
+    _tm_mtime = os.path.getmtime(_tm_py)
+    tm = load_threshold_manager(_tm_mtime)
+except Exception as e:
+    st.error(f"שגיאת טעינת מודולים: {e}")
+    st.stop()
 
 # ══════════════════════════════════════════════════════════════════
 # STEP INDICATOR (used by Excel tab)
