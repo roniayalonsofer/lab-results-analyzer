@@ -333,8 +333,8 @@ SHEET_CONFIG: dict[str, dict] = {
         "filter_nd_safe":  False,
         "units_in_header": True,
     },
-    "SOIL_VOC":       {"name": "קרקע VOCs",          "unit": "mg/kg"},
-    "SOIL_SVOC":      {"name": "קרקע SVOC",          "unit": "mg/kg"},
+    "SOIL_VOC":       {"name": "קרקע VOC",  "unit": "mg/kg", "include_lod_row": True},
+    "SOIL_SVOC":      {"name": "קרקע SVOC", "unit": "mg/kg", "include_lod_row": True},
     "SOIL_MBTEX":     {"name": "קרקע MBTEX",         "unit": "mg/kg"},
     "SOIL_TPH":       {"name": "קרקע TPH",           "unit": "mg/kg"},
     "SOIL_TPH_VOC":   {"name": "קרקע TPH+BTEX",      "unit": "mg/kg"},
@@ -675,7 +675,7 @@ class LabReportExcel:
         else:
             # ── Row 1: merged project info header ─────────────────────
             self._write_header_row(ws, 1, total_cols, hinfo)
-            # ── Rows 2-4: sample metadata ──────────────────────────────
+            # ── Rows 2-N: sample metadata ──────────────────────────────
             # Sort samples: ק first, נ second, others; within group by number then depth
             split_p = {sid: _split_sample_depth(sid) for sid in samples}
             samples = sorted(samples,
@@ -688,6 +688,13 @@ class LabReportExcel:
                 ("עומק [מ']",       depths),
                 ("קריאת PID [ppm]", [""] * len(samples)),
             ]
+            if cfg.get("include_lod_row"):
+                # Minimum LOD across all compounds for each sample column
+                def _min_sample_lod(sid):
+                    vals = [pivot[c][sid][2] for c in compounds if sid in pivot.get(c, {})]
+                    vals = [v for v in vals if v is not None]
+                    return round(min(vals), 3) if vals else ""
+                meta_rows.append((f"LOD [{unit}]", [_min_sample_lod(sid) for sid in samples]))
             for ri, (label, vals) in enumerate(meta_rows, 2):
                 ws.merge_cells(start_row=ri, start_column=1,
                                end_row=ri,   end_column=N_FIXED)
@@ -701,15 +708,15 @@ class LabReportExcel:
                     cell = ws.cell(row=ri, column=ci)
                     cell.border    = THIN
                     cell.alignment = CENTER
-                    if v:
+                    if v != "":
                         cell.value = v
                         if not isinstance(v, CellRichText):
                             cell.font = _font(v)
-            # ── Row 5: column headers ──────────────────────────────────
+            # ── Column headers row (after all meta rows) ───────────────
+            hdr_row = 2 + len(meta_rows)
             headers = (["תרכובת", "CAS Number"]
                        + thresh_labels
                        + samples)
-            hdr_row = 5
 
         # Write fixed column headers (no fill on any)
         for ci, h in enumerate(headers[:N_FIXED], 1):
@@ -841,7 +848,7 @@ class LabReportExcel:
             ws.cell(row=note_row, column=1,
                     value="* ספי חש מוגדרים לפי תקנות איכות אויר").font = Font(
                         **FHE, italic=True, color="808080")
-        self._auto_width(ws, N_FIXED + len(samples), hdr_row=5)
+        self._auto_width(ws, N_FIXED + len(samples), hdr_row=hdr_row)
 
     # ------------------------------------------------------------------
     # Landscape layout: samples as rows (when n_samples > n_compounds)
@@ -1095,7 +1102,7 @@ class LabReportExcel:
     @staticmethod
     def _write_legend(ws, start_row: int, include_gray: bool = True):
         items = [
-            ("חריגה מערך סף",           ORANGE),
+            ("חריגה מערך VSL",           ORANGE),
         ]
         if include_gray:
             items.append(("ערך הסף גדול מסף הגילוי", GRAY))
