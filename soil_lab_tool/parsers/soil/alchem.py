@@ -191,7 +191,7 @@ class AlchemSoilParser(BaseParser):
                     flag  = "ND"
                 elif raw_val.lower() in ("<mdl", "<dl"):
                     value = lod
-                    flag  = "ND"
+                    flag  = "<MDL"
                 elif raw_val.lower() in ("<mrl", "<loq", "<rl"):
                     value = loq
                     flag  = "<LOQ"

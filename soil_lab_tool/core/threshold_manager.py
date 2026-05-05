@@ -101,6 +101,7 @@ ANALYSIS_THRESHOLDS: dict[str, list[str]] = {
                      "GAS_INDOOR_IND",  "GAS_OUTDOOR_IND"],
     # Soil types: VSL direct-contact + all aquifer-sensitivity variants
     "SOIL_VOC":       ["VSL_SOIL"] + _SOIL_TIER1_KEYS,
+    "SOIL_SVOC":      ["VSL_SOIL"] + _SOIL_TIER1_KEYS,
     "SOIL_MBTEX":     ["VSL_SOIL"] + _SOIL_TIER1_KEYS,
     "SOIL_TPH":       ["VSL_SOIL"] + _SOIL_TIER1_KEYS,
     "SOIL_METALS":    ["VSL_SOIL"] + _SOIL_TIER1_KEYS,

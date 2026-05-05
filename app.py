@@ -940,7 +940,7 @@ with tab_excel:
                 project_name        = project_name,
                 client              = client_name,
                 report_date         = date.today().strftime('%d.%m.%Y'),
-                selected_thresholds = selected_thresholds if selected_thresholds else None,
+                selected_thresholds = selected_thresholds,
                 combine_tph_voc     = combine_tph_voc,
                 combine_tph_mbtex   = combine_tph_mbtex,
             )
@@ -955,7 +955,7 @@ with tab_excel:
                     project_name        = project_name,
                     client              = client_name,
                     report_date         = date.today().strftime('%d.%m.%Y'),
-                    selected_thresholds = selected_thresholds if selected_thresholds else None,
+                    selected_thresholds = selected_thresholds,
                     combine_tph_voc     = combine_tph_voc,
                     combine_tph_mbtex   = combine_tph_mbtex,
                 ).build()
