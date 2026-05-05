@@ -350,7 +350,7 @@ with st.sidebar:
                                   placeholder="שם האתר (לדוג׳: צומת שמשון)")
 
     st.markdown('<div class="sidebar-label">🏭 מעבדה וקטגוריה</div>', unsafe_allow_html=True)
-    lab = st.selectbox("מעבדה", ["KTE", "מכון הנפט", "בקטוכם", "Alchem"],
+    lab = st.selectbox("מעבדה", ["🔍 זיהוי אוטומטי", "KTE", "מכון הנפט", "בקטוכם", "Alchem"],
                        label_visibility="collapsed")
     category_display = {
         "🔍 זיהוי אוטומטי":           "auto",
@@ -412,7 +412,7 @@ try:
     from core.excel_output import LabReportExcel
     from core.word_output  import (LabReportWord, parse_als_file, build_word_report,
                                    load_threshold_file, get_tier1_col, tier1_label)
-    from parsers import get_parser, auto_detect_category
+    from parsers import get_parser, auto_detect_category, auto_detect_lab
     _tm_py    = os.path.join(TOOL_DIR, 'core', 'threshold_manager.py')
     _tm_mtime = os.path.getmtime(_tm_py)
     tm = load_threshold_manager(_tm_mtime)
@@ -667,6 +667,13 @@ with tab_excel:
     all_raw: list[tuple[str, bytes]] = [(uf.name, uf.read()) for uf in uploaded_files]
     fname     = " | ".join(f for f, _ in all_raw)
     raw_bytes = all_raw[0][1]
+
+    # Resolve auto-detected lab
+    if lab == "🔍 זיהוי אוטומטי":
+        detected_lab = auto_detect_lab(all_raw[0][0], raw_bytes)
+        lab      = detected_lab or "KTE"
+        lab_info = f"מעבדה זוהתה: **{lab}**" if detected_lab else "⚠️ מעבדה לא זוהתה, ברירת מחדל: **KTE**"
+        st.info(lab_info)
 
     if category_raw == 'auto':
         category = auto_detect_category(all_raw[0][0], raw_bytes)

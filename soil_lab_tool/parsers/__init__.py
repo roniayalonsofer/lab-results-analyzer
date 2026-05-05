@@ -4,6 +4,8 @@ parsers/__init__.py
 Central registry that maps (lab_name, category) → parser class.
 """
 
+import re as _re
+
 from parsers.base import BaseParser
 
 from parsers.soil_gas.alchem    import AlchemSoilGasParser
@@ -29,6 +31,45 @@ _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
     ("בקטוכם",       "groundwater"): BactochemGroundwaterParser,
     ("bactochem",     "groundwater"): BactochemGroundwaterParser,
 }
+
+
+# Sheet names Alchem uses: "<job_number>-VOC", "<job_number>-SVOC", etc.
+_ALCHEM_SHEET_RE = _re.compile(r'^\d+-(?:VOC|SVOC|TPH|ICP|PH|METALS)$', _re.IGNORECASE)
+
+
+def _is_alchem_excel(sheet_names: list[str]) -> bool:
+    return any(_ALCHEM_SHEET_RE.match(s) for s in sheet_names)
+
+
+def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | None:
+    """
+    Attempt to identify the lab from filename and/or file content.
+    Returns a lab key matching _REGISTRY (e.g. 'alchem', 'kte'), or None if uncertain.
+    """
+    n = filename.lower()
+
+    # Filename hints
+    if "alchem" in n:
+        return "alchem"
+    if any(k in n for k in ("kte", "excel_generic")):
+        return "kte"
+    if any(k in n for k in ("בקטוכם", "bactochem")):
+        return "בקטוכם"
+    if any(k in n for k in ("מכון הנפט", "machon", "haneft", "neft")):
+        return "מכון הנפט"
+
+    # Content-based: check Excel sheet names
+    if file_bytes is not None and (n.endswith(".xlsx") or n.endswith(".xls")):
+        try:
+            import io
+            import pandas as pd
+            xl = pd.ExcelFile(io.BytesIO(file_bytes))
+            if _is_alchem_excel(xl.sheet_names):
+                return "alchem"
+        except Exception:
+            pass
+
+    return None
 
 
 def get_parser(lab: str, category: str) -> BaseParser:
@@ -81,6 +122,11 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
                                  names=list(range(30)), engine="python").fillna("")
             else:
                 xl = pd.ExcelFile(io.BytesIO(file_bytes))
+
+                # Alchem soil files: sheet names like "40752-VOC", "40752-SVOC", etc.
+                if _is_alchem_excel(xl.sheet_names):
+                    return "soil"
+
                 df = xl.parse(xl.sheet_names[0], header=None, dtype=str,
                               nrows=6).fillna("")
 
