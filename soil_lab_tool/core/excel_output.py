@@ -741,20 +741,29 @@ class LabReportExcel:
             c.alignment = WRAP_C
             c.border    = THIN
 
-        # Merge sample columns in header row → "final conc. [unit]"
+        # Sample column headers
         if len(samples) > 0:
             sample_start = N_FIXED + 1
             sample_end   = N_FIXED + len(samples)
-            if sample_end > sample_start:
-                ws.merge_cells(start_row=hdr_row, start_column=sample_start,
-                               end_row=hdr_row,   end_column=sample_end)
-            conc_hdr = ws.cell(row=hdr_row, column=sample_start,
-                               value=f"Final conc. [{unit}]")
-            conc_hdr.font      = _font(f"Final conc. [{unit}]", bold=True)
-            conc_hdr.alignment = CENTER
-            conc_hdr.border    = THIN
-            for ci in range(sample_start + 1, sample_end + 1):
-                ws.cell(row=hdr_row, column=ci).border = THIN
+            if include_lod_loq:
+                # Gas format: sample IDs already in meta rows → merge header with "Final conc."
+                if sample_end > sample_start:
+                    ws.merge_cells(start_row=hdr_row, start_column=sample_start,
+                                   end_row=hdr_row,   end_column=sample_end)
+                conc_hdr = ws.cell(row=hdr_row, column=sample_start,
+                                   value=f"Final conc. [{unit}]")
+                conc_hdr.font      = _font(f"Final conc. [{unit}]", bold=True)
+                conc_hdr.alignment = CENTER
+                conc_hdr.border    = THIN
+                for ci in range(sample_start + 1, sample_end + 1):
+                    ws.cell(row=hdr_row, column=ci).border = THIN
+            else:
+                # Soil/GW format: individual sample IDs as column headers
+                for ci, sid in enumerate(samples, sample_start):
+                    c = ws.cell(row=hdr_row, column=ci, value=sid)
+                    c.font      = _font(sid, bold=True)
+                    c.alignment = CENTER
+                    c.border    = THIN
 
         # ── Data rows ─────────────────────────────────────────────────
         data_row = hdr_row + 1
