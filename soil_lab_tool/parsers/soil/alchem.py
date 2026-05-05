@@ -100,9 +100,12 @@ class AlchemSoilParser(BaseParser):
         voc_sheet = _find_sheet("voc")
         if voc_sheet:
             records.extend(self._parse_voc_sheet(xl, voc_sheet))
-        else:
-            # Fallback: try first sheet
-            records.extend(self._parse_voc_sheet(xl, xl.sheet_names[0]))
+
+        # --- Parse SVOC sheet (semi-volatiles: PAHs, phenols, etc.) ---
+        # Same layout as VOC; kept separate because Alchem reports both sheets.
+        svoc_sheet = _find_sheet("svoc")
+        if svoc_sheet and svoc_sheet != voc_sheet:
+            records.extend(self._parse_voc_sheet(xl, svoc_sheet))
 
         # --- Parse TPH sheet ---
         tph_sheet = _find_sheet("tph")
