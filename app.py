@@ -606,9 +606,9 @@ with tab_excel:
     with col_up:
         uploaded_files = st.file_uploader(
             "גרור קבצים לכאן או לחץ לבחירה",
-            type=["xlsx", "xls", "csv"],
+            type=["xlsx", "xls", "csv", "pdf"],
             accept_multiple_files=True,
-            help="ניתן להעלות מספר קבצים מאותה מעבדה | XLSX / XLS / CSV",
+            help="ניתן להעלות מספר קבצים מאותה מעבדה | XLSX / XLS / CSV / PDF",
             label_visibility="visible",
         )
 
