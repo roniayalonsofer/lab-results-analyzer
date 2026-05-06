@@ -449,21 +449,22 @@ class LabReportExcel:
         lod_map:  dict[str, float | None] = {}
         loq_map:  dict[str, float | None] = {}
         unit_map: dict[str, str]  = {}
+
+        # Pre-pass: collect first non-None lod/loq per compound from all records
+        for r in records:
+            cmp = r["compound"]
+            if lod_map.get(cmp) is None and r.get("lod") is not None:
+                lod_map[cmp] = r["lod"]
+            if loq_map.get(cmp) is None and r.get("loq") is not None:
+                loq_map[cmp] = r["loq"]
+
         for r in records:
             cmp = r["compound"]
             sid = r["sample_id"]
             if cmp not in pivot:
                 pivot[cmp]    = {}
                 cas_map[cmp]  = r.get("cas", "")
-                lod_map[cmp]  = r.get("lod")
-                loq_map[cmp]  = r.get("loq")
                 unit_map[cmp] = r.get("unit", cfg.get("unit", ""))
-            else:
-                # Update lod/loq with first non-None value found across records
-                if lod_map[cmp] is None and r.get("lod") is not None:
-                    lod_map[cmp] = r.get("lod")
-                if loq_map[cmp] is None and r.get("loq") is not None:
-                    loq_map[cmp] = r.get("loq")
             pivot[cmp][sid] = (r.get("value"), r.get("flag", ""), r.get("lod"))
 
         # Get thresholds per compound
@@ -783,8 +784,8 @@ class LabReportExcel:
             # LOD / LOQ (rounded to 3 dp for display — preserves values like 0.009)
             lod_val = lod_map.get(cmp)
             loq_val = loq_map.get(cmp)
-            lod_disp = round(lod_val, 3) if isinstance(lod_val, float) else lod_val
-            loq_disp = round(loq_val, 3) if isinstance(loq_val, float) else loq_val
+            lod_disp = round(lod_val, 3) if isinstance(lod_val, float) else (lod_val if lod_val is not None else "")
+            loq_disp = round(loq_val, 3) if isinstance(loq_val, float) else (loq_val if loq_val is not None else "")
 
             # Threshold values (one per selected threshold key)
             thresh_row = [

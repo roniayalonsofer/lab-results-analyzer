@@ -9,6 +9,7 @@ import re as _re
 from parsers.base import BaseParser
 
 from parsers.soil_gas.alchem    import AlchemSoilGasParser
+from parsers.soil_gas.kte       import KTESoilGasParser
 from parsers.soil.alchem        import AlchemSoilParser
 from parsers.soil.kte           import KTESoilParser
 from parsers.soil.kte_pr        import KTEPRParser
@@ -21,6 +22,7 @@ from parsers.pfas.kte               import KTEPFASParser
 
 _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
     ("alchem",        "soil_gas"):    AlchemSoilGasParser,
+    ("kte",           "soil_gas"):    KTESoilGasParser,
     ("alchem",        "soil"):        AlchemSoilParser,
     ("kte",           "soil"):        KTESoilParser,
     ("kte",           "groundwater"): KTEGroundwaterParser,
@@ -39,29 +41,37 @@ _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
 # Sheet names Alchem uses: "<job_number>-VOC", "<job_number>-SVOC", etc.
 _ALCHEM_SHEET_RE = _re.compile(r'^\d+-(?:VOC|SVOC|TPH|ICP|PH|METALS)$', _re.IGNORECASE)
 
+# KTE TO-15 soil gas sheets: "<job_number>-TO-15-..." or contain "ppbv"
+_KTE_SOIL_GAS_RE = _re.compile(r'TO-15|ppbv', _re.IGNORECASE)
+
 
 def _is_alchem_excel(sheet_names: list[str]) -> bool:
     return any(_ALCHEM_SHEET_RE.match(s) for s in sheet_names)
+
+
+def _is_kte_soil_gas_excel(sheet_names: list[str]) -> bool:
+    return any(_KTE_SOIL_GAS_RE.search(s) for s in sheet_names)
 
 
 def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | None:
     """
     Attempt to identify the lab from filename and/or file content.
     Returns a lab key matching _REGISTRY (e.g. 'alchem', 'kte'), or None if uncertain.
+    Content-based checks run before filename-based KTE check so that ALS/etc.
+    files are not misidentified even when the filename has no useful hints.
     """
     n = filename.lower()
 
-    # Filename hints
+    # Unambiguous filename hints (checked first — these are specific enough)
     if "alchem" in n:
         return "alchem"
-    if any(k in n for k in ("kte", "excel_generic")):
-        return "kte"
     if any(k in n for k in ("בקטוכם", "bactochem")):
         return "בקטוכם"
     if any(k in n for k in ("מכון הנפט", "machon", "haneft", "neft")):
         return "מכון הנפט"
 
-    # Content-based: check Excel sheet names
+    # Content-based detection (runs BEFORE "kte" filename fallback so that
+    # ALS files whose filenames happen to match "kte" patterns are caught here)
     if file_bytes is not None and (n.endswith(".xlsx") or n.endswith(".xls")):
         try:
             import io
@@ -71,8 +81,14 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
                 return "alchem"
             if any("Client SOIL" in s for s in xl.sheet_names):
                 return "als"
+            if _is_kte_soil_gas_excel(xl.sheet_names):
+                return "kte"
         except Exception:
             pass
+
+    # Filename fallback for KTE (after content checks)
+    if any(k in n for k in ("kte", "excel_generic")):
+        return "kte"
 
     return None
 
@@ -105,7 +121,7 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
         return "pr"
     if "pfas" in n:
         return "pfas"
-    if any(k in n for k in ("soil_gas", "canister", "to-15", "to15")):
+    if any(k in n for k in ("soil_gas", "canister", "to-15", "to15", "ppbv")):
         return "soil_gas"
     if any(k in n for k in ("gw", "groundwater", "mei_tehom", "lowflow", "תלפיות")):
         return "groundwater"
@@ -134,18 +150,24 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
 
                 # ALS files: "Client SOIL" sheet name
                 if any("Client SOIL" in s for s in xl.sheet_names):
-                    # Peek to distinguish grain-size from regular soil
+                    # Peek to distinguish grain-size from regular soil.
+                    # Check first few columns since compound column may be 0 or 1.
                     try:
                         sheet = next(s for s in xl.sheet_names if "Client SOIL" in s)
                         peek = xl.parse(sheet, header=None, dtype=str,
-                                        nrows=30).fillna("")
-                        for ri in range(13, min(30, len(peek))):
-                            cmp = str(peek.iloc[ri, 0]).strip().lower()
-                            if "fraction" in cmp:
-                                return "grain_size"
+                                        nrows=35).fillna("")
+                        for ri in range(10, min(35, len(peek))):
+                            for ci in range(min(4, peek.shape[1])):
+                                cell = str(peek.iloc[ri, ci]).strip().lower()
+                                if "fraction" in cell or "physical parameter" in cell:
+                                    return "grain_size"
                     except Exception:
                         pass
                     return "soil"
+
+                # KTE TO-15 soil gas
+                if _is_kte_soil_gas_excel(xl.sheet_names):
+                    return "soil_gas"
 
                 df = xl.parse(xl.sheet_names[0], header=None, dtype=str,
                               nrows=6).fillna("")
