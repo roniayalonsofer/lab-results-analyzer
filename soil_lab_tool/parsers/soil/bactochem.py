@@ -63,6 +63,40 @@ _PAGE_FOOTER_RE = re.compile(r"Page\s+\d+\s+of\s+\d+", re.I)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+_HEBREW_RE = re.compile(r"[א-תיִ-פֿ]")
+
+
+def _fix_rtl(text: str) -> str:
+    """
+    Correct RTL-reversed text extracted from a Hebrew PDF by pdfplumber.
+
+    pdfplumber returns characters in visual (left-to-right) order.  For Hebrew
+    text this means:
+      • individual Hebrew words have their characters reversed
+      • the word order across the whole string is also reversed
+
+    Algorithm:
+      1. If the string contains no Hebrew characters it is purely
+         English/numeric — pdfplumber already gives these in the right order,
+         so return unchanged.
+      2. Otherwise reverse the list of whitespace-separated tokens, then
+         reverse the character sequence of every token that contains Hebrew.
+         English tokens (element symbols, abbreviations) keep their characters
+         intact but move with the overall reversal.
+
+    Examples
+    --------
+    'ףסכ (Ag)'   →  '(Ag) כסף'     (silver)
+    'B1 עקרק'   →  'קרקע B1'       (soil borehole)
+    'Benzene'    →  'Benzene'        (pure English — unchanged)
+    """
+    if not _HEBREW_RE.search(text):
+        return text
+    tokens = text.split()
+    tokens.reverse()
+    return " ".join(t[::-1] if _HEBREW_RE.search(t) else t for t in tokens)
+
+
 def _analysis_type(section: str | None, unit: str) -> str:
     is_soil = "kg" in unit
     if section == "ICP_SOIL":
@@ -150,7 +184,7 @@ def _parse_lines(lines: list[str]) -> list[dict]:
         m = _SAMPLE_RE.search(line)
         if m:
             sample_id   = m.group("sid").strip()
-            sample_name = m.group("sname").strip()
+            sample_name = _fix_rtl(m.group("sname").strip())
             section     = None
             continue
 
@@ -171,7 +205,7 @@ def _parse_lines(lines: list[str]) -> list[dict]:
         loq_raw  = m2.group("loq") or ""
         unit     = m2.group("unit").strip()
         res_raw  = m2.group("result").strip()
-        compound = (m2.group("compound") or "").strip()
+        compound = _fix_rtl((m2.group("compound") or "").strip())
 
         try:
             loq: float | None = float(loq_raw) if loq_raw else None
