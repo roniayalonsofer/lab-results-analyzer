@@ -147,12 +147,26 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
                 import io, pandas as pd
                 xl    = pd.ExcelFile(io.BytesIO(file_bytes))
                 sheet = next(s for s in xl.sheet_names if "Client SOIL" in s)
-                peek  = xl.parse(sheet, header=None, dtype=str, nrows=35).fillna("")
-                for ri in range(10, min(35, len(peek))):
-                    for ci in range(min(4, peek.shape[1])):
-                        cell = str(peek.iloc[ri, ci]).strip().lower()
-                        if "fraction" in cell or "physical parameter" in cell:
-                            return "grain_size"
+                raw   = xl.parse(sheet, header=None, dtype=str).fillna("")
+
+                # Locate header row and compound column (mirrors _parse_als_sheet)
+                hdr_row_idx  = 12
+                compound_col = 0
+                for ri in range(8, min(20, len(raw))):
+                    row_vals = [str(v).strip().upper() for v in raw.iloc[ri]]
+                    if "LOR" in row_vals or "PARAMETER" in row_vals:
+                        hdr_row_idx = ri
+                        for ci, h in enumerate(row_vals):
+                            if h in ("PARAMETER", "COMPOUND", "ANALYTE"):
+                                compound_col = ci
+                                break
+                        break
+
+                # grain_size if any compound name contains "Fraction"
+                for ri in range(hdr_row_idx + 1, len(raw)):
+                    compound = str(raw.iloc[ri, compound_col]).strip()
+                    if "Fraction" in compound:
+                        return "grain_size"
             except Exception:
                 pass
             return "soil"
