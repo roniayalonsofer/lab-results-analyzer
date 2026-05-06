@@ -15,6 +15,7 @@ from parsers.soil.kte           import KTESoilParser
 from parsers.soil.kte_pr        import KTEPRParser
 from parsers.soil.machon_haneft import MachonHaneftSoilParser
 from parsers.soil.als           import ALSSoilParser, ALSGrainSizeParser
+from parsers.soil.bactochem     import BactochemSoilParser
 from parsers.groundwater.kte        import KTEGroundwaterParser
 from parsers.groundwater.bactochem  import BactochemGroundwaterParser
 from parsers.pfas.kte               import KTEPFASParser
@@ -33,6 +34,8 @@ _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
     ("machon_haneft", "soil"):        MachonHaneftSoilParser,
     ("בקטוכם",       "groundwater"): BactochemGroundwaterParser,
     ("bactochem",     "groundwater"): BactochemGroundwaterParser,
+    ("בקטוכם",       "soil"):        BactochemSoilParser,
+    ("bactochem",     "soil"):        BactochemSoilParser,
     ("als",           "soil"):        ALSSoilParser,
     ("als",           "grain_size"):  ALSGrainSizeParser,
 }
@@ -89,6 +92,17 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
     if any(k in n for k in ("מכון הנפט", "machon", "haneft", "neft")):
         return "מכון הנפט"
 
+    # PDF content-based detection (Bactochem PDFs have no lab name in filename)
+    if file_bytes is not None and n.endswith(".pdf"):
+        try:
+            import io as _io, pdfplumber as _plumber
+            with _plumber.open(_io.BytesIO(file_bytes)) as _pdf:
+                first_text = (_pdf.pages[0].extract_text() or "").lower()
+            if "bactochem" in first_text:
+                return "בקטוכם"
+        except Exception:
+            pass
+
     # Content-based detection (runs BEFORE "kte" filename fallback so that
     # ALS files whose filenames happen to match "kte" patterns are caught here)
     if file_bytes is not None and (n.endswith(".xlsx") or n.endswith(".xls")):
@@ -136,6 +150,17 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
     ALS/Alchem/KTE files are not mis-detected by filename patterns (e.g. "pr*").
     """
     n = filename.lower()
+
+    # ── Bactochem PDF: always "soil" (parser handles both soil and GW samples) ──
+    if file_bytes is not None and n.endswith(".pdf"):
+        try:
+            import io as _io, pdfplumber as _plumber
+            with _plumber.open(_io.BytesIO(file_bytes)) as _pdf:
+                first_text = (_pdf.pages[0].extract_text() or "").lower()
+            if "bactochem" in first_text:
+                return "soil"
+        except Exception:
+            pass
 
     # ── Content-based detection for Excel (runs BEFORE any filename logic) ──────
     if file_bytes is not None and (n.endswith(".xlsx") or n.endswith(".xls")):
