@@ -469,7 +469,7 @@ class ThresholdManager:
             row  = df[mask]
             if row.empty and len(name_lo) > 4:
                 # Only partial-match for names longer than 4 chars to avoid abbreviation collisions
-                mask = df[name_col].str.strip().str.lower().str.contains(name_lo, na=False, regex=False)
+                mask = df[name_col].apply(lambda x: name_lo in str(x).strip().lower() if x is not None else False)
                 row  = df[mask]
             if not row.empty:
                 val = self._to_float(row.iloc[0][col_name])
