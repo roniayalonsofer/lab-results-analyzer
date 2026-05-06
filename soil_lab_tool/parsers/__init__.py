@@ -13,6 +13,7 @@ from parsers.soil.alchem        import AlchemSoilParser
 from parsers.soil.kte           import KTESoilParser
 from parsers.soil.kte_pr        import KTEPRParser
 from parsers.soil.machon_haneft import MachonHaneftSoilParser
+from parsers.soil.als           import ALSSoilParser, ALSGrainSizeParser
 from parsers.groundwater.kte        import KTEGroundwaterParser
 from parsers.groundwater.bactochem  import BactochemGroundwaterParser
 from parsers.pfas.kte               import KTEPFASParser
@@ -30,6 +31,8 @@ _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
     ("machon_haneft", "soil"):        MachonHaneftSoilParser,
     ("בקטוכם",       "groundwater"): BactochemGroundwaterParser,
     ("bactochem",     "groundwater"): BactochemGroundwaterParser,
+    ("als",           "soil"):        ALSSoilParser,
+    ("als",           "grain_size"):  ALSGrainSizeParser,
 }
 
 
@@ -66,6 +69,8 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
             xl = pd.ExcelFile(io.BytesIO(file_bytes))
             if _is_alchem_excel(xl.sheet_names):
                 return "alchem"
+            if any("Client SOIL" in s for s in xl.sheet_names):
+                return "als"
         except Exception:
             pass
 
@@ -125,6 +130,21 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
 
                 # Alchem soil files: sheet names like "40752-VOC", "40752-SVOC", etc.
                 if _is_alchem_excel(xl.sheet_names):
+                    return "soil"
+
+                # ALS files: "Client SOIL" sheet name
+                if any("Client SOIL" in s for s in xl.sheet_names):
+                    # Peek to distinguish grain-size from regular soil
+                    try:
+                        sheet = next(s for s in xl.sheet_names if "Client SOIL" in s)
+                        peek = xl.parse(sheet, header=None, dtype=str,
+                                        nrows=30).fillna("")
+                        for ri in range(13, min(30, len(peek))):
+                            cmp = str(peek.iloc[ri, 0]).strip().lower()
+                            if "fraction" in cmp:
+                                return "grain_size"
+                    except Exception:
+                        pass
                     return "soil"
 
                 df = xl.parse(xl.sheet_names[0], header=None, dtype=str,

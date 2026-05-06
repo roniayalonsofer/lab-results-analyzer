@@ -342,6 +342,7 @@ SHEET_CONFIG: dict[str, dict] = {
     "SOIL_TPH_VOC":   {"name": "קרקע TPH+BTEX",      "unit": "mg/kg"},
     "SOIL_TPH_MBTEX": {"name": "קרקע TPH+MBTEX",     "unit": "mg/kg"},
     "SOIL_METALS":    {"name": "קרקע מתכות",         "unit": "mg/kg DW"},
+    "SOIL_GRAIN_SIZE":{"name": "גרנולומטריה",        "unit": "%"},
     "SOIL_PFAS":   {"name": "קרקע PFAS",       "unit": "ng/kg"},
     "GW_VOC":      {"name": "מי תהום BTEX",    "unit": "mg/L"},
     "GW_PFAS":     {"name": "מי תהום PFAS",    "unit": "ng/L"},
@@ -457,6 +458,12 @@ class LabReportExcel:
                 lod_map[cmp]  = r.get("lod")
                 loq_map[cmp]  = r.get("loq")
                 unit_map[cmp] = r.get("unit", cfg.get("unit", ""))
+            else:
+                # Update lod/loq with first non-None value found across records
+                if lod_map[cmp] is None and r.get("lod") is not None:
+                    lod_map[cmp] = r.get("lod")
+                if loq_map[cmp] is None and r.get("loq") is not None:
+                    loq_map[cmp] = r.get("loq")
             pivot[cmp][sid] = (r.get("value"), r.get("flag", ""), r.get("lod"))
 
         # Get thresholds per compound

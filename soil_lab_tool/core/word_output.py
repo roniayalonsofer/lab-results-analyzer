@@ -110,16 +110,25 @@ def _set_rtl_para(para) -> None:
     bidi.set(qn("w:val"), "1")
 
 
+def _get_or_create_tblPr(tbl):
+    """Return the w:tblPr element, creating it if absent (python-docx compat)."""
+    tblPr = tbl.find(qn("w:tblPr"))
+    if tblPr is None:
+        tblPr = OxmlElement("w:tblPr")
+        tbl.insert(0, tblPr)
+    return tblPr
+
+
 def _set_rtl_table(table) -> None:
     """Set bidiVisual on a table so columns display right-to-left."""
-    tblPr = table._tbl.get_or_add_tblPr()
+    tblPr = _get_or_create_tblPr(table._tbl)
     if tblPr.find(qn("w:bidiVisual")) is None:
         tblPr.append(OxmlElement("w:bidiVisual"))
 
 
 def _set_table_full_width(table) -> None:
     """Stretch table to 100 % of the text area."""
-    tblPr = table._tbl.get_or_add_tblPr()
+    tblPr = _get_or_create_tblPr(table._tbl)
     for ex in tblPr.findall(qn("w:tblW")):
         tblPr.remove(ex)
     tblW = OxmlElement("w:tblW")

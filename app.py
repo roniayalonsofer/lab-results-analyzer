@@ -96,9 +96,9 @@ header {{ visibility: hidden; }}
     background: linear-gradient(135deg, #2d4a5a 0%, #4a7a8a 60%, #6a9aaa 100%);
     color: white;
     padding: 1.5rem 2rem;
-    border-radius: 16px;
+    border-radius: 2px;
     margin-bottom: 1.5rem;
-    box-shadow: 0 4px 24px rgba(45,74,90,0.25);
+    box-shadow: 0 2px 12px rgba(45,74,90,0.2);
     display: flex;
     align-items: center;
     direction: rtl;
@@ -118,19 +118,21 @@ header {{ visibility: hidden; }}
 /* ── section cards ── */
 .section-card {{
     background: white;
-    border-radius: 12px;
+    border-radius: 2px;
     border: 1px solid #e2e8f0;
     padding: 1.25rem 1.5rem;
     margin-bottom: 1.25rem;
     box-shadow: 0 1px 4px rgba(0,0,0,0.06);
 }}
 .section-title {{
-    font-size: 1rem;
+    font-size: 0.85rem;
     font-weight: 700;
-    color: #1e293b;
+    color: #2d4a5a;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
     margin: 0 0 0.75rem;
     padding-bottom: 0.5rem;
-    border-bottom: 2px solid #e2e8f0;
+    border-bottom: 2px solid #4a7a8a;
     direction: rtl;
     display: flex;
     align-items: center;
@@ -150,7 +152,7 @@ header {{ visibility: hidden; }}
     gap: 0.4rem;
     background: #f1f5f9;
     border: 1.5px solid #cbd5e1;
-    border-radius: 20px;
+    border-radius: 2px;
     padding: 0.3rem 0.9rem;
     font-size: 0.8rem;
     color: #64748b;
@@ -168,6 +170,7 @@ header {{ visibility: hidden; }}
     background: #f0fdf4;
     border-color: #22c55e;
     color: #15803d;
+    border-radius: 2px;
 }}
 
 /* ── stat cards ── */
@@ -180,7 +183,7 @@ header {{ visibility: hidden; }}
 .stat-card {{
     background: white;
     border: 1px solid #e2e8f0;
-    border-radius: 10px;
+    border-radius: 2px;
     padding: 0.9rem 1rem;
     text-align: center;
     box-shadow: 0 1px 3px rgba(0,0,0,0.05);
@@ -204,6 +207,7 @@ header {{ visibility: hidden; }}
     border-radius: 12px;
     padding: 0.5rem;
     background: #eef3f5;
+    border-radius: 2px;
     transition: border-color 0.2s;
 }}
 [data-testid="stFileUploader"]:hover {{
@@ -223,11 +227,11 @@ header {{ visibility: hidden; }}
     color: white;
     font-weight: 700;
     font-size: 1rem;
-    border-radius: 10px;
+    border-radius: 2px;
     border: none;
     padding: 0.75rem;
-    letter-spacing: 0.3px;
-    box-shadow: 0 2px 8px rgba(22,163,74,0.3);
+    letter-spacing: 0.5px;
+    box-shadow: 0 2px 6px rgba(22,163,74,0.25);
 }}
 .stDownloadButton button:hover {{
     background: linear-gradient(135deg, #15803d, #166534);
@@ -237,10 +241,11 @@ header {{ visibility: hidden; }}
 /* ── type badge ── */
 .type-badge {{
     display: inline-block;
-    padding: 3px 12px;
-    border-radius: 20px;
-    font-size: 0.78rem;
+    padding: 3px 10px;
+    border-radius: 2px;
+    font-size: 0.75rem;
     font-weight: 600;
+    letter-spacing: 0.3px;
     margin: 2px 3px;
     color: white;
 }}
@@ -249,22 +254,24 @@ header {{ visibility: hidden; }}
 .info-banner {{
     background: #eef3f5;
     border: 1px solid #b8d4da;
-    border-radius: 10px;
+    border-radius: 2px;
     padding: 0.75rem 1rem;
     direction: rtl;
-    font-size: 0.9rem;
+    font-size: 0.875rem;
     color: #2d4a5a;
     margin-bottom: 0.75rem;
+    border-right: 3px solid #4a7a8a;
 }}
 .success-banner {{
     background: #f0fdf4;
     border: 1px solid #86efac;
-    border-radius: 10px;
+    border-radius: 2px;
     padding: 0.75rem 1rem;
     direction: rtl;
-    font-size: 0.9rem;
+    font-size: 0.875rem;
     color: #15803d;
     margin-bottom: 0.75rem;
+    border-right: 3px solid #16a34a;
 }}
 
 /* ── sidebar label ── */
@@ -283,7 +290,7 @@ header {{ visibility: hidden; }}
 [data-testid="metric-container"] {{
     background: white;
     border: 1px solid #e2e8f0;
-    border-radius: 10px;
+    border-radius: 2px;
     padding: 0.75rem 1rem;
     box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }}
@@ -318,7 +325,7 @@ def load_threshold_manager(_mtime):
 with st.sidebar:
     st.markdown(
         f'<div style="text-align:center;padding:0.5rem 0 0.75rem;">'
-        f'<div style="background:white;border-radius:10px;padding:0.6rem 0.8rem;'
+        f'<div style="background:white;border-radius:2px;padding:0.6rem 0.8rem;'
         f'margin-bottom:0.5rem;display:inline-block;width:90%;">'
         f'{LOGO_TAG}</div>'
         f'<div style="font-size:0.7rem;color:#94a3b8;margin-top:4px;">Lab Results Analyzer</div>'
@@ -334,7 +341,7 @@ with st.sidebar:
                                   placeholder="שם האתר (לדוג׳: צומת שמשון)")
 
     st.markdown('<div class="sidebar-label">🏭 מעבדה וקטגוריה</div>', unsafe_allow_html=True)
-    lab = st.selectbox("מעבדה", ["🔍 זיהוי אוטומטי", "KTE", "מכון הנפט", "בקטוכם", "Alchem"],
+    lab = st.selectbox("מעבדה", ["🔍 זיהוי אוטומטי", "KTE", "מכון הנפט", "בקטוכם", "Alchem", "ALS"],
                        label_visibility="collapsed")
     category_display = {
         "🔍 זיהוי אוטומטי":           "auto",
@@ -343,6 +350,7 @@ with st.sidebar:
         "🧬 PFAS":                    "pfas",
         "📊 PR format (KTE מתכות)":   "pr",
         "💨 גז קרקע (soil_gas)":      "soil_gas",
+        "🪨 גרנולומטריה (grain_size)": "grain_size",
     }
     cat_label    = st.selectbox("קטגוריה", list(category_display.keys()),
                                 label_visibility="collapsed")
@@ -354,7 +362,7 @@ with st.sidebar:
 # HERO HEADER — defined before module imports so it always renders
 # ══════════════════════════════════════════════════════════════════
 _hero_logo = (
-    f'<div style="background:white;border-radius:8px;padding:0.4rem 0.7rem;margin-left:1rem;">'
+    f'<div style="background:white;border-radius:2px;padding:0.4rem 0.7rem;margin-left:1rem;">'
     f'<img src="data:image/png;base64,{LOGO_B64}" style="height:56px;display:block;"></div>'
     if LOGO_B64 else ''
 )
@@ -605,14 +613,26 @@ with tab_excel:
         )
 
     with col_meta:
-        # selected lab/category display
+        # Detect lab early if auto-detect mode and files are already available
+        _display_lab = lab
+        if uploaded_files and lab == "🔍 זיהוי אוטומטי":
+            try:
+                _peek = uploaded_files[0].getvalue()
+                _det  = auto_detect_lab(uploaded_files[0].name, _peek)
+                _display_lab = _det or "KTE"
+            except Exception:
+                _display_lab = "?"
+        elif lab == "🔍 זיהוי אוטומטי":
+            _display_lab = "—"
+
         cat_clean = cat_label.split(" ", 1)[-1] if " " in cat_label else cat_label
         st.markdown(f"""
-        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:2px;
                     padding:0.9rem 1rem;margin-top:1.75rem;text-align:center;">
-          <div style="font-size:0.7rem;color:#94a3b8;font-weight:600;margin-bottom:4px;">מעבדה</div>
-          <div style="font-size:1.3rem;font-weight:800;color:#2d4a5a;">{lab}</div>
-          <div style="font-size:0.75rem;color:#64748b;margin-top:4px;">{cat_clean}</div>
+          <div style="font-size:0.65rem;color:#94a3b8;font-weight:700;letter-spacing:0.8px;
+                      text-transform:uppercase;margin-bottom:4px;">מעבדה</div>
+          <div style="font-size:1.2rem;font-weight:800;color:#2d4a5a;">{_display_lab}</div>
+          <div style="font-size:0.7rem;color:#64748b;margin-top:4px;">{cat_clean}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -636,9 +656,7 @@ with tab_excel:
     # Resolve auto-detected lab
     if lab == "🔍 זיהוי אוטומטי":
         detected_lab = auto_detect_lab(all_raw[0][0], raw_bytes)
-        lab      = detected_lab or "KTE"
-        lab_info = f"מעבדה זוהתה: **{lab}**" if detected_lab else "⚠️ מעבדה לא זוהתה, ברירת מחדל: **KTE**"
-        st.info(lab_info)
+        lab = detected_lab or "KTE"
 
     if category_raw == 'auto':
         category = auto_detect_category(all_raw[0][0], raw_bytes)
@@ -678,7 +696,8 @@ with tab_excel:
     records = all_records
 
     if not records:
-        st.warning("⚠️ לא נמצאו רשומות — בדוק פורמט הקובץ ובחירת מעבדה / קטגוריה")
+        st.markdown('<div class="info-banner">⚠️ לא נמצאו רשומות — בדוק פורמט הקובץ ובחירת מעבדה / קטגוריה</div>',
+                    unsafe_allow_html=True)
         st.stop()
 
     # ── stats ─────────────────────────────────────────────────────
