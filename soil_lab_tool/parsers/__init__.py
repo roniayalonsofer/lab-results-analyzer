@@ -162,11 +162,19 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
                                 break
                         break
 
-                # grain_size if any compound name contains "Fraction"
-                for ri in range(hdr_row_idx + 1, len(raw)):
-                    compound = str(raw.iloc[ri, compound_col]).strip()
-                    if "Fraction" in compound:
-                        return "grain_size"
+                # grain_size only if majority of compounds are grain-size parameters
+                compounds = [
+                    str(raw.iloc[ri, compound_col]).strip()
+                    for ri in range(hdr_row_idx + 1, len(raw))
+                    if str(raw.iloc[ri, compound_col]).strip()
+                    and str(raw.iloc[ri, compound_col]).strip().lower() not in ("nan", "parameter", "compound", "analyte")
+                ]
+                grain_count = sum(
+                    1 for c in compounds
+                    if "Fraction" in c or "Physical Parameters" in c
+                )
+                if compounds and grain_count > len(compounds) / 2:
+                    return "grain_size"
             except Exception:
                 pass
             return "soil"
