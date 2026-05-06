@@ -341,13 +341,13 @@ SHEET_CONFIG: dict[str, dict] = {
         "filter_nd_safe":  False,
         "units_in_header": True,
     },
-    "SOIL_VOC":   {"name": "קרקע VOC",  "unit": "mg/kg", "lod_loq_mode": "both"},
-    "SOIL_SVOC":  {"name": "קרקע SVOC", "unit": "mg/kg", "lod_loq_mode": "both"},
+    "SOIL_VOC":   {"name": "קרקע VOC",  "unit": "mg/kg", "lod_loq_mode": "both", "nd_shows_loq": True},
+    "SOIL_SVOC":  {"name": "קרקע SVOC", "unit": "mg/kg", "lod_loq_mode": "both", "nd_shows_loq": True},
     "SOIL_MBTEX": {"name": "קרקע MBTEX",         "unit": "mg/kg"},
     "SOIL_TPH":   {"name": "קרקע TPH",            "unit": "mg/kg", "lod_loq_mode": "loq"},
     "SOIL_TPH_VOC":   {"name": "קרקע TPH+BTEX",      "unit": "mg/kg"},
     "SOIL_TPH_MBTEX": {"name": "קרקע TPH+MBTEX",     "unit": "mg/kg"},
-    "SOIL_METALS":    {"name": "קרקע מתכות",         "unit": "mg/kg DW"},
+    "SOIL_METALS":    {"name": "קרקע מתכות",         "unit": "mg/kg DW", "nd_shows_loq": True},
     "SOIL_GRAIN_SIZE":{"name": "גרנולומטריה",        "unit": "%"},
     "SOIL_PFAS":   {"name": "קרקע PFAS",       "unit": "ng/kg"},
     "GW_VOC":      {"name": "מי תהום BTEX",    "unit": "mg/L"},
@@ -804,8 +804,10 @@ class LabReportExcel:
             for sid in samples:
                 v, flag, lod = pivot.get(cmp, {}).get(sid, (None, "ND", None))
                 if flag == "ND" or (v is None and flag not in ("<LOD", "<LOQ")):
-                    # Not detected → show LOD number when available, else "ND"
-                    display = _round_sf(lod) if lod is not None else "ND"
+                    if cfg.get("nd_shows_loq") and loq_val is not None:
+                        display = _round_sf(loq_val)
+                    else:
+                        display = _round_sf(lod) if lod is not None else "ND"
                 elif flag == "<LOD":
                     # <DL / <MDL / <LOD in input → <actual_lod_number (no trailing .0)
                     display = f"<{_fmt_lod(lod)}" if lod is not None else "ND"
@@ -1009,8 +1011,10 @@ class LabReportExcel:
                 v, flag, lod = pivot.get(cmp, {}).get(sid, (None, "ND", None))
                 loq_val = loq_map.get(cmp)
                 if flag == "ND" or (v is None and flag not in ("<LOD", "<LOQ")):
-                    # Not detected → show LOD number when available, else "ND"
-                    display = _round_sf(lod) if lod is not None else "ND"
+                    if cfg.get("nd_shows_loq") and loq_val is not None:
+                        display = _round_sf(loq_val)
+                    else:
+                        display = _round_sf(lod) if lod is not None else "ND"
                 elif flag == "<LOD":
                     # <DL / <MDL / <LOD in input → <actual_lod_number (no trailing .0)
                     display = f"<{_fmt_lod(lod)}" if lod is not None else "ND"
