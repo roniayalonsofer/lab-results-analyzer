@@ -53,6 +53,25 @@ def _is_kte_soil_gas_excel(sheet_names: list[str]) -> bool:
     return any(_KTE_SOIL_GAS_RE.search(s) for s in sheet_names)
 
 
+def _xlsx_sheet_names(file_bytes: bytes) -> list[str]:
+    """Return sheet names from Excel bytes. Tries pandas first, zipfile XML fallback."""
+    import io as _io
+    try:
+        import pandas as _pd
+        return _pd.ExcelFile(_io.BytesIO(file_bytes)).sheet_names
+    except Exception:
+        pass
+    try:
+        import zipfile as _zf
+        with _zf.ZipFile(_io.BytesIO(file_bytes)) as zf:
+            if "xl/workbook.xml" in zf.namelist():
+                wb = zf.read("xl/workbook.xml").decode("utf-8", errors="ignore")
+                return _re.findall(r'<sheet\b[^>]*\bname="([^"]*)"', wb)
+    except Exception:
+        pass
+    return []
+
+
 def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | None:
     """
     Attempt to identify the lab from filename and/or file content.
@@ -113,10 +132,38 @@ def list_parsers() -> list[dict]:
 def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
     """
     Guess analysis category from filename, and optionally peek at file content.
-    If file_bytes is supplied (for KTE XLSX/CSV), inspects the analysis code in
-    the first data row to distinguish soil / groundwater / pfas.
+    Content-based Excel checks always run BEFORE filename-based checks so that
+    ALS/Alchem/KTE files are not mis-detected by filename patterns (e.g. "pr*").
     """
     n = filename.lower()
+
+    # ── Content-based detection for Excel (runs BEFORE any filename logic) ──────
+    if file_bytes is not None and (n.endswith(".xlsx") or n.endswith(".xls")):
+        sheet_names = _xlsx_sheet_names(file_bytes)
+
+        # ALS: sheet name contains "Client SOIL"
+        if any("Client SOIL" in s for s in sheet_names):
+            try:
+                import io, pandas as pd
+                xl    = pd.ExcelFile(io.BytesIO(file_bytes))
+                sheet = next(s for s in xl.sheet_names if "Client SOIL" in s)
+                peek  = xl.parse(sheet, header=None, dtype=str, nrows=35).fillna("")
+                for ri in range(10, min(35, len(peek))):
+                    for ci in range(min(4, peek.shape[1])):
+                        cell = str(peek.iloc[ri, ci]).strip().lower()
+                        if "fraction" in cell or "physical parameter" in cell:
+                            return "grain_size"
+            except Exception:
+                pass
+            return "soil"
+
+        if _is_alchem_excel(sheet_names):
+            return "soil"
+
+        if _is_kte_soil_gas_excel(sheet_names):
+            return "soil_gas"
+
+    # ── Filename-based checks (run only after content checks) ────────────────────
     if "excel_generic" in n or n.startswith("pr"):
         return "pr"
     if "pfas" in n:
@@ -127,13 +174,12 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
         return "groundwater"
 
     # KTE "EXCEL_GENERIC.XLS" uploads are often SpreadsheetML XML (not real .xls).
-    # When the filename is generic (e.g., "upload.xls"), detect via content.
     if file_bytes is not None:
         head = file_bytes.lstrip()[:512]
         if head.startswith(b"<?xml") and b"urn:schemas-microsoft-com:office:spreadsheet" in file_bytes[:4096]:
             return "pr"
 
-    # Peek at file content for format-level detection
+    # Content peek for CSV and remaining Excel cases (KTE analysis code detection)
     if file_bytes is not None and (n.endswith(".xlsx") or n.endswith(".xls") or n.endswith(".csv")):
         try:
             import io, pandas as pd
@@ -143,43 +189,11 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
                                  names=list(range(30)), engine="python").fillna("")
             else:
                 xl = pd.ExcelFile(io.BytesIO(file_bytes))
-
-                # Alchem soil files: sheet names like "40752-VOC", "40752-SVOC", etc.
-                if _is_alchem_excel(xl.sheet_names):
-                    return "soil"
-
-                # ALS files: "Client SOIL" sheet name
-                if any("Client SOIL" in s for s in xl.sheet_names):
-                    # Peek to distinguish grain-size from regular soil.
-                    # Check first few columns since compound column may be 0 or 1.
-                    try:
-                        sheet = next(s for s in xl.sheet_names if "Client SOIL" in s)
-                        peek = xl.parse(sheet, header=None, dtype=str,
-                                        nrows=35).fillna("")
-                        for ri in range(10, min(35, len(peek))):
-                            for ci in range(min(4, peek.shape[1])):
-                                cell = str(peek.iloc[ri, ci]).strip().lower()
-                                if "fraction" in cell or "physical parameter" in cell:
-                                    return "grain_size"
-                    except Exception:
-                        pass
-                    return "soil"
-
-                # KTE TO-15 soil gas
-                if _is_kte_soil_gas_excel(xl.sheet_names):
-                    return "soil_gas"
-
                 df = xl.parse(xl.sheet_names[0], header=None, dtype=str,
                               nrows=6).fillna("")
-
-            # Flatten all peeked text for keyword scanning
             peek = " ".join(str(v) for v in df.values.flat).lower()
-
-            # Alchem soil-gas indicator: "Canister Number" row (unique to TO-15 format)
             if "canister number" in peek:
                 return "soil_gas"
-
-            # For KTE files: inspect analysis code in row 2, col 2
             if df.shape[0] >= 3:
                 acode = str(df.iloc[2, 2]).strip().upper()
                 if "PFAS" in acode:

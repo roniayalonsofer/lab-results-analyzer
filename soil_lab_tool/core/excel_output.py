@@ -85,20 +85,26 @@ def _font(val, bold=False) -> Font:
 
 
 def _round_thresh(v) -> float | None:
-    """
-    Round a threshold value to 2 decimal places for display.
-
-    Examples
-    --------
-    90.94     → 90.94
-    350       → 350.0
-    0.45      → 0.45
-    0.8       → 0.8
-    None      → None
-    """
+    """Round a threshold value to 2 decimal places for display."""
     if v is None or not isinstance(v, (int, float)):
         return v
     return round(v, 2)
+
+
+def _round_sf(v, sf: int = 2):
+    """Round v to sf significant figures (decimal places floored at 0).
+
+    Examples (sf=2):
+      0.809      → 0.81
+      27809.52   → 27810
+      0.00123    → 0.0012
+    """
+    if v is None or not isinstance(v, (int, float)):
+        return v
+    if v == 0:
+        return 0
+    d = math.ceil(math.log10(abs(v)))
+    return round(v, max(0, sf - d))
 
 
 def _num_fmt_data(val) -> str:
@@ -709,7 +715,7 @@ class LabReportExcel:
                 def _min_sample_lod(sid):
                     vals = [pivot[c][sid][2] for c in compounds if sid in pivot.get(c, {})]
                     vals = [v for v in vals if v is not None]
-                    return round(min(vals), 3) if vals else ""
+                    return _round_sf(min(vals)) if vals else ""
                 meta_rows.append((f"LOD [{unit}]", [_min_sample_lod(sid) for sid in samples]))
             for ri, (label, vals) in enumerate(meta_rows, 2):
                 ws.merge_cells(start_row=ri, start_column=1,
@@ -781,11 +787,10 @@ class LabReportExcel:
             cas    = cas_map.get(cmp, "")
             t_vals = thresh_vals.get(cmp, {})
 
-            # LOD / LOQ (rounded to 3 dp for display — preserves values like 0.009)
             lod_val = lod_map.get(cmp)
             loq_val = loq_map.get(cmp)
-            lod_disp = round(lod_val, 3) if isinstance(lod_val, float) else (lod_val if lod_val is not None else "")
-            loq_disp = round(loq_val, 3) if isinstance(loq_val, float) else (loq_val if loq_val is not None else "")
+            lod_disp = _round_sf(lod_val) if isinstance(lod_val, float) else (lod_val if lod_val is not None else "")
+            loq_disp = _round_sf(loq_val) if isinstance(loq_val, float) else (loq_val if loq_val is not None else "")
 
             # Threshold values (one per selected threshold key)
             thresh_row = [
@@ -800,14 +805,14 @@ class LabReportExcel:
                 v, flag, lod = pivot.get(cmp, {}).get(sid, (None, "ND", None))
                 if flag == "ND" or (v is None and flag not in ("<LOD", "<LOQ")):
                     # Not detected → show LOD number when available, else "ND"
-                    display = round(lod, 3) if lod is not None else "ND"
+                    display = _round_sf(lod) if lod is not None else "ND"
                 elif flag == "<LOD":
                     # <DL / <MDL / <LOD in input → <actual_lod_number (no trailing .0)
                     display = f"<{_fmt_lod(lod)}" if lod is not None else "ND"
                 elif flag == "<LOQ":
                     # <LOQ → show numeric LOQ when known, else literal "<LOQ"
                     loq_ref = loq_val or v
-                    display = (round(loq_ref, 3) if isinstance(loq_ref, float)
+                    display = (_round_sf(loq_ref) if isinstance(loq_ref, float)
                                else ("<LOQ" if loq_ref is None else loq_ref))
                 elif flag == "<":
                     # Explicit <numeric in input → keep < prefix
@@ -947,7 +952,7 @@ class LabReportExcel:
                 ws.cell(row=data_row, column=fc).border = THIN
             for ci, cmp in enumerate(compounds, cmp_col_start):
                 loq_val  = loq_map.get(cmp)
-                loq_disp = round(loq_val, 3) if isinstance(loq_val, float) else ""
+                loq_disp = _round_sf(loq_val) if isinstance(loq_val, float) else ""
                 c = ws.cell(row=data_row, column=ci)
                 c.value     = loq_disp
                 c.font      = _font(loq_disp)
@@ -1005,14 +1010,14 @@ class LabReportExcel:
                 loq_val = loq_map.get(cmp)
                 if flag == "ND" or (v is None and flag not in ("<LOD", "<LOQ")):
                     # Not detected → show LOD number when available, else "ND"
-                    display = round(lod, 3) if lod is not None else "ND"
+                    display = _round_sf(lod) if lod is not None else "ND"
                 elif flag == "<LOD":
                     # <DL / <MDL / <LOD in input → <actual_lod_number (no trailing .0)
                     display = f"<{_fmt_lod(lod)}" if lod is not None else "ND"
                 elif flag == "<LOQ":
                     # <LOQ → show numeric LOQ when known, else literal "<LOQ"
                     loq_ref = loq_val or v
-                    display = (round(loq_ref, 3) if isinstance(loq_ref, float)
+                    display = (_round_sf(loq_ref) if isinstance(loq_ref, float)
                                else ("<LOQ" if loq_ref is None else loq_ref))
                 elif flag == "<":
                     # Explicit <numeric in input → keep < prefix
