@@ -41,52 +41,55 @@ from core.lab_value_parser import LabValueParser
 from core.cas_lookup import name_to_cas
 
 
-# ── Compound → (CAS, analysis_type) ──────────────────────────────────────────
-_COMPOUND_MAP: dict[str, tuple[str, str]] = {
+# ── Compound → (CAS, analysis_type, canonical_english_name) ──────────────────
+# canonical_english_name is what goes into the Excel output — must match what
+# other labs (Bactochem, KTE) use so threshold lookups and sheet labels are
+# identical regardless of which lab's file was uploaded.
+_COMPOUND_MAP: dict[str, tuple[str, str, str]] = {
     # BTEX / MTBE / aromatics — GW_VOC
-    "mtbe":               ("1634-04-4", "GW_VOC"),
-    "btex":               ("",          "GW_VOC"),
-    "btex + mtbe":        ("",          "GW_VOC"),
-    "btex+mtbe":          ("",          "GW_VOC"),
-    "benzene":            ("71-43-2",   "GW_VOC"),
-    "בנזן":               ("71-43-2",   "GW_VOC"),
-    "toluene":            ("108-88-3",  "GW_VOC"),
-    "טולואן":             ("108-88-3",  "GW_VOC"),
-    "ethyl benzene":      ("100-41-4",  "GW_VOC"),
-    "ethylbenzene":       ("100-41-4",  "GW_VOC"),
-    "אתיל בנזן":          ("100-41-4",  "GW_VOC"),
-    "אתיל-בנזן":          ("100-41-4",  "GW_VOC"),
-    "אתילבנזן":           ("100-41-4",  "GW_VOC"),
-    "xylene":             ("1330-20-7", "GW_VOC"),
-    "xylenes":            ("1330-20-7", "GW_VOC"),
-    "קסילן":              ("1330-20-7", "GW_VOC"),
-    "קסילנים":            ("1330-20-7", "GW_VOC"),
-    "o-xylene":           ("95-47-6",   "GW_VOC"),
-    "m-xylene":           ("108-38-3",  "GW_VOC"),
-    "p-xylene":           ("106-42-3",  "GW_VOC"),
-    "naphthalene":        ("91-20-3",   "GW_VOC"),
-    "נפטלן":              ("91-20-3",   "GW_VOC"),
-    "styrene":            ("100-42-5",  "GW_VOC"),
-    "סטירן":              ("100-42-5",  "GW_VOC"),
+    "mtbe":               ("1634-04-4", "GW_VOC",  "MTBE"),
+    "btex":               ("",          "GW_VOC",  "BTEX"),
+    "btex + mtbe":        ("",          "GW_VOC",  "BTEX + MTBE"),
+    "btex+mtbe":          ("",          "GW_VOC",  "BTEX + MTBE"),
+    "benzene":            ("71-43-2",   "GW_VOC",  "Benzene"),
+    "בנזן":               ("71-43-2",   "GW_VOC",  "Benzene"),
+    "toluene":            ("108-88-3",  "GW_VOC",  "Toluene"),
+    "טולואן":             ("108-88-3",  "GW_VOC",  "Toluene"),
+    "ethyl benzene":      ("100-41-4",  "GW_VOC",  "Ethyl Benzene"),
+    "ethylbenzene":       ("100-41-4",  "GW_VOC",  "Ethyl Benzene"),
+    "אתיל בנזן":          ("100-41-4",  "GW_VOC",  "Ethyl Benzene"),
+    "אתיל-בנזן":          ("100-41-4",  "GW_VOC",  "Ethyl Benzene"),
+    "אתילבנזן":           ("100-41-4",  "GW_VOC",  "Ethyl Benzene"),
+    "xylene":             ("1330-20-7", "GW_VOC",  "Xylene"),
+    "xylenes":            ("1330-20-7", "GW_VOC",  "Xylenes"),
+    "קסילן":              ("1330-20-7", "GW_VOC",  "Xylene"),
+    "קסילנים":            ("1330-20-7", "GW_VOC",  "Xylenes"),
+    "o-xylene":           ("95-47-6",   "GW_VOC",  "o-Xylene"),
+    "m-xylene":           ("108-38-3",  "GW_VOC",  "m-Xylene"),
+    "p-xylene":           ("106-42-3",  "GW_VOC",  "p-Xylene"),
+    "naphthalene":        ("91-20-3",   "GW_VOC",  "Naphthalene"),
+    "נפטלן":              ("91-20-3",   "GW_VOC",  "Naphthalene"),
+    "styrene":            ("100-42-5",  "GW_VOC",  "Styrene"),
+    "סטירן":              ("100-42-5",  "GW_VOC",  "Styrene"),
     # Field parameters — LOWFLOW (no environmental threshold)
-    "ph":                 ("", "LOWFLOW"),
-    "חומציות":            ("", "LOWFLOW"),
-    "conductivity":       ("", "LOWFLOW"),
-    "מוליכות":            ("", "LOWFLOW"),
-    "מוליכות חשמלית":     ("", "LOWFLOW"),
-    "temperature":        ("", "LOWFLOW"),
-    "טמפרטורה":           ("", "LOWFLOW"),
-    "temp":               ("", "LOWFLOW"),
-    "do":                 ("", "LOWFLOW"),
-    "dissolved oxygen":   ("", "LOWFLOW"),
-    "חמצן מומס":          ("", "LOWFLOW"),
-    "orp":                ("", "LOWFLOW"),
-    "turbidity":          ("", "LOWFLOW"),
-    "עכירות":             ("", "LOWFLOW"),
-    "depth to water":     ("", "LOWFLOW"),
-    "depth":              ("", "LOWFLOW"),
-    "עומק":               ("", "LOWFLOW"),
-    "עומק מי תהום":       ("", "LOWFLOW"),
+    "ph":                 ("", "LOWFLOW", "pH"),
+    "חומציות":            ("", "LOWFLOW", "pH"),
+    "conductivity":       ("", "LOWFLOW", "Conductivity"),
+    "מוליכות":            ("", "LOWFLOW", "Conductivity"),
+    "מוליכות חשמלית":     ("", "LOWFLOW", "Conductivity"),
+    "temperature":        ("", "LOWFLOW", "Temperature"),
+    "טמפרטורה":           ("", "LOWFLOW", "Temperature"),
+    "temp":               ("", "LOWFLOW", "Temperature"),
+    "do":                 ("", "LOWFLOW", "Dissolved Oxygen"),
+    "dissolved oxygen":   ("", "LOWFLOW", "Dissolved Oxygen"),
+    "חמצן מומס":          ("", "LOWFLOW", "Dissolved Oxygen"),
+    "orp":                ("", "LOWFLOW", "ORP"),
+    "turbidity":          ("", "LOWFLOW", "Turbidity"),
+    "עכירות":             ("", "LOWFLOW", "Turbidity"),
+    "depth to water":     ("", "LOWFLOW", "Depth to Water"),
+    "depth":              ("", "LOWFLOW", "Depth to Water"),
+    "עומק":               ("", "LOWFLOW", "Depth to Water"),
+    "עומק מי תהום":       ("", "LOWFLOW", "Depth to Water"),
 }
 
 _HEBREW_RE = re.compile(r"[א-ת]")
@@ -123,14 +126,20 @@ def _cell_contains(cell: str, keywords: tuple) -> bool:
 # ── Compound classification ───────────────────────────────────────────────────
 
 def _classify(name: str) -> tuple[str, str, str]:
-    """Return (display_name, cas, analysis_type)."""
+    """Return (canonical_english_name, cas, analysis_type).
+
+    The canonical name is the English display name used in the Excel output
+    — identical to what Bactochem / KTE produce so threshold lookups,
+    sheet labels, and pivot column names are consistent across labs.
+    """
     key = name.strip().lower()
     if key in _COMPOUND_MAP:
-        cas, atype = _COMPOUND_MAP[key]
-        return name, cas or name_to_cas(key) or "", atype
-    for k, (cas, atype) in _COMPOUND_MAP.items():
+        cas, atype, canonical = _COMPOUND_MAP[key]
+        return canonical, cas or name_to_cas(key) or "", atype
+    for k, (cas, atype, canonical) in _COMPOUND_MAP.items():
         if k and (k in key or key.startswith(k)):
-            return name, cas or name_to_cas(k) or "", atype
+            return canonical, cas or name_to_cas(k) or "", atype
+    # Unknown compound — preserve original name, infer type from CAS lookup
     cas   = name_to_cas(key) or ""
     atype = "GW_VOC" if cas else "LOWFLOW"
     return name, cas, atype
@@ -180,9 +189,12 @@ def _make_record(
         value, flag = None, "ND"
 
     compound, cas, atype = _classify(name)
-    unit = _fix_rtl(raw_units.strip()) if raw_units else ""
-    if not unit:
-        unit = "mg/L" if atype == "GW_VOC" else ""
+
+    # Unit: GW_VOC always "mg/L" (same as Bactochem/KTE), LOWFLOW "" or from PDF
+    if atype == "GW_VOC":
+        unit = "mg/L"
+    else:
+        unit = _fix_rtl(raw_units.strip()) if raw_units else ""
 
     return {
         "lab":           "Aminolab",
