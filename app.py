@@ -34,7 +34,7 @@ st.set_page_config(
     page_title="מערכת ניתוח תוצאות מעבדה",
     page_icon="🧪",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ── detect LAN IP for sharing ─────────────────────────────────────
@@ -56,73 +56,16 @@ APP_URL = f"http://{LAN_IP}:8501"
 # ══════════════════════════════════════════════════════════════════
 st.markdown(f"""
 <style>
-/* ── base layout ── */
-/* Apply RTL only to content, not to root — prevents RTL from fighting
-   Streamlit's LTR CSS grid and causing the sidebar/main overlap.       */
+/* ── base layout — no sidebar, full-width main area ── */
 html, body {{ direction: ltr; }}
 [data-testid="stMain"] {{ direction: rtl; }}
 [data-testid="stMain"] .block-container {{
     direction: rtl;
     padding-top: 1rem;
-    max-width: 1200px;
+    max-width: 1400px;
     padding-left: 2rem;
     padding-right: 2rem;
-    /* do not use margin: 0 auto here — let Streamlit control horizontal
-       positioning so the block never drifts under the sidebar           */
 }}
-
-/* ── sidebar — RTL position (right side) + always expanded ── */
-[data-testid="stSidebar"] {{
-    direction: rtl;
-    background: #1a2d38;
-    min-width: 15rem !important;
-    max-width: 16rem !important;
-    width: 15.5rem !important;
-    flex-shrink: 0 !important;
-    /* move sidebar to right side for Hebrew/RTL layout */
-    right: 0;
-    left: auto;
-    /* override any JS-driven collapse transform */
-    transform: none !important;
-    transition: none !important;
-    visibility: visible !important;
-    display: block !important;
-    margin-left: 0 !important;
-}}
-[data-testid="stSidebarContent"] {{
-    direction: rtl;
-}}
-/* also override the collapsed-state that Streamlit applies via aria */
-[data-testid="stSidebar"][aria-expanded="false"] {{
-    transform: none !important;
-    width: 15.5rem !important;
-    min-width: 15rem !important;
-    overflow: visible !important;
-}}
-/* hide ALL collapse/expand controls — cover every known selector variant
-   so neither the in-sidebar button nor the floating re-open button shows */
-[data-testid="stSidebarCollapseButton"],
-[data-testid="stSidebarNavCollapseButton"],
-[data-testid="collapsedControl"],
-button[aria-label="Close sidebar"],
-button[aria-label="Open sidebar"],
-button[aria-label="פתח סרגל צד"],
-button[aria-label="סגור סרגל צד"] {{
-    display: none !important;
-}}
-
-[data-testid="stSidebar"] * {{ color: #e2e8f0 !important; }}
-/* input / select text — black so it shows on white background */
-[data-testid="stSidebar"] input {{ color: #111827 !important; }}
-[data-testid="stSidebar"] input::placeholder {{ color: #6b7280 !important; }}
-[data-testid="stSidebar"] [data-baseweb="select"] span,
-[data-testid="stSidebar"] [data-baseweb="select"] div {{ color: #111827 !important; }}
-[data-testid="stSidebar"] .stSelectbox label,
-[data-testid="stSidebar"] .stTextInput label,
-[data-testid="stSidebar"] .stCheckbox label {{ color: #cbd5e1 !important; }}
-[data-testid="stSidebar"] .stMarkdown h2,
-[data-testid="stSidebar"] .stMarkdown h3 {{ color: #f1f5f9 !important; }}
-[data-testid="stSidebar"] hr {{ border-color: #2a4050; }}
 
 /* hide footer / menu / header toolbar
    use display:none (not visibility:hidden) so these elements are fully
@@ -374,46 +317,7 @@ def load_threshold_manager(_mtime):
     return ThresholdManager(MAIN_THRESH, pfas_path=pfas_path, vsl_full_path=vsl_full_path)
 
 # ══════════════════════════════════════════════════════════════════
-# SIDEBAR — defined before module imports so it always renders
-# ══════════════════════════════════════════════════════════════════
-with st.sidebar:
-    st.markdown(
-        f'<div style="text-align:center;padding:0.5rem 0 0.75rem;">'
-        f'<div style="background:white;border-radius:2px;padding:0.6rem 0.8rem;'
-        f'margin-bottom:0.5rem;display:inline-block;width:90%;">'
-        f'{LOGO_TAG}</div>'
-        f'<div style="font-size:0.7rem;color:#94a3b8;margin-top:4px;">Lab Results Analyzer</div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown('<hr style="margin:0.5rem 0 1rem;">', unsafe_allow_html=True)
-
-    st.markdown('<div class="sidebar-label">📋 פרטי פרויקט</div>', unsafe_allow_html=True)
-    client_name  = st.text_input("שם לקוח",  value="", label_visibility="collapsed",
-                                  placeholder="שם לקוח (לדוג׳: סונול)")
-    project_name = st.text_input("שם האתר",  value="", label_visibility="collapsed",
-                                  placeholder="שם האתר (לדוג׳: צומת שמשון)")
-
-    st.markdown('<div class="sidebar-label">🏭 מעבדה וקטגוריה</div>', unsafe_allow_html=True)
-    lab = st.selectbox("מעבדה", ["🔍 זיהוי אוטומטי", "KTE", "מכון הנפט", "בקטוכם", "Alchem", "ALS"],
-                       label_visibility="collapsed")
-    category_display = {
-        "🔍 זיהוי אוטומטי":           "auto",
-        "🪨 קרקע (soil)":             "soil",
-        "💧 מי תהום (groundwater)":   "groundwater",
-        "🧬 PFAS":                    "pfas",
-        "📊 PR format (KTE מתכות)":   "pr",
-        "💨 גז קרקע (soil_gas)":      "soil_gas",
-        "🪨 גרנולומטריה (grain_size)": "grain_size",
-    }
-    cat_label    = st.selectbox("קטגוריה", list(category_display.keys()),
-                                label_visibility="collapsed")
-    category_raw = category_display[cat_label]
-
-    st.markdown('<hr style="margin:1rem 0 0.5rem;">', unsafe_allow_html=True)
-
-# ══════════════════════════════════════════════════════════════════
-# HERO HEADER — defined before module imports so it always renders
+# HERO HEADER + SETTINGS ROW — defined before module imports
 # ══════════════════════════════════════════════════════════════════
 _hero_logo = (
     f'<div style="background:white;border-radius:2px;padding:0.4rem 0.7rem;margin-left:1rem;">'
@@ -431,6 +335,34 @@ st.html(f"""
   {_hero_logo}
 </div>
 """)
+
+# ── Project + lab settings row (replaces sidebar) ─────────────────
+# Two columns, right-aligned via a left spacer (RTL layout).
+_sp, _pc1, _pc2 = st.columns([1, 2, 2])
+with _pc1:
+    st.markdown('<div class="sidebar-label">📋 פרטי פרויקט</div>', unsafe_allow_html=True)
+    client_name  = st.text_input("שם לקוח",  value="", label_visibility="collapsed",
+                                  placeholder="שם לקוח (לדוג׳: סונול)")
+    project_name = st.text_input("שם האתר",  value="", label_visibility="collapsed",
+                                  placeholder="שם האתר (לדוג׳: צומת שמשון)")
+with _pc2:
+    st.markdown('<div class="sidebar-label">🏭 מעבדה וקטגוריה</div>', unsafe_allow_html=True)
+    lab = st.selectbox("מעבדה", ["🔍 זיהוי אוטומטי", "KTE", "מכון הנפט", "בקטוכם", "Alchem", "ALS"],
+                       label_visibility="collapsed")
+    category_display = {
+        "🔍 זיהוי אוטומטי":           "auto",
+        "🪨 קרקע (soil)":             "soil",
+        "💧 מי תהום (groundwater)":   "groundwater",
+        "🧬 PFAS":                    "pfas",
+        "📊 PR format (KTE מתכות)":   "pr",
+        "💨 גז קרקע (soil_gas)":      "soil_gas",
+        "🪨 גרנולומטריה (grain_size)": "grain_size",
+    }
+    cat_label    = st.selectbox("קטגוריה", list(category_display.keys()),
+                                label_visibility="collapsed")
+    category_raw = category_display[cat_label]
+
+st.markdown('<hr style="margin:0.25rem 0 1rem;">', unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════
 # MODULE IMPORTS
