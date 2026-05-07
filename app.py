@@ -480,6 +480,98 @@ def _build_pivot_table(recs):
         return df[['תרכובת', 'sample_id', 'value']]
 
 
+_PREVIEW_LEGEND = (
+    '<div style="font-size:0.75rem;direction:rtl;margin-top:6px;display:flex;'
+    'gap:10px;align-items:center;">'
+    '<span style="background:#FFFF00;padding:2px 10px;border-radius:2px;'
+    'border:1px solid #ccc;">מעל VSL</span>'
+    '<span style="background:#FFC000;padding:2px 10px;border-radius:2px;'
+    'border:1px solid #ccc;">מעל Tier 1</span>'
+    '</div>'
+)
+
+
+def _build_styled_pivot(recs: list[dict], tm, selected_thresholds: list[str]):
+    """Return (Styler, has_any_color) for a compound × sample_id pivot.
+
+    Yellow (#FFFF00) = value exceeds the selected VSL threshold.
+    Orange (#FFC000) = value exceeds a selected Tier-1 threshold (takes
+                       priority over yellow when both are exceeded).
+    """
+    if not recs:
+        return pd.DataFrame().style, False
+
+    rows_d, rows_n, cas_map = [], [], {}
+    for r in recs:
+        val      = r.get('value')
+        flag     = r.get('flag', '')
+        loq      = r.get('loq')
+        compound = r.get('compound', '')
+        sample   = r.get('sample_id', '')
+        cas      = r.get('cas', '')
+
+        if flag in ('ND', '<LOD', '<LOQ') and loq is not None:
+            disp = f"<{loq}"
+        elif val is not None:
+            disp = f"{val:.4g}" if isinstance(val, (int, float)) else str(val)
+        else:
+            disp = flag or ''
+
+        rows_d.append({'תרכובת': compound, '_s': sample, '_v': disp})
+        rows_n.append({'תרכובת': compound, '_s': sample,
+                       '_v': val if isinstance(val, (int, float)) else None})
+        cas_map.setdefault(compound, cas)
+
+    try:
+        piv_d = (pd.DataFrame(rows_d)
+                 .pivot_table(index='תרכובת', columns='_s', values='_v', aggfunc='first'))
+        piv_n = (pd.DataFrame(rows_n)
+                 .pivot_table(index='תרכובת', columns='_s', values='_v', aggfunc='first'))
+        piv_d.columns.name = None
+        piv_n.columns.name = None
+    except Exception:
+        return pd.DataFrame(rows_d).style, False
+
+    # VSL keys → yellow; everything else (Tier1, GW, GAS_*) → orange
+    vsl_keys   = [k for k in selected_thresholds if 'VSL' in k]
+    tier1_keys = [k for k in selected_thresholds if k not in vsl_keys]
+    has_colors = bool((vsl_keys or tier1_keys) and tm is not None)
+
+    colors = pd.DataFrame('', index=piv_d.index, columns=piv_d.columns)
+
+    if has_colors:
+        for compound in piv_d.index:
+            cas = cas_map.get(compound, '')
+            for sample in piv_d.columns:
+                try:
+                    raw = piv_n.loc[compound, sample]
+                    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+                        continue
+                    num_val = float(raw)
+                except (TypeError, ValueError, KeyError):
+                    continue
+
+                # Orange: any Tier-1 key exceeded (checked first — higher priority)
+                for tk in tier1_keys:
+                    thresh = tm.get_threshold_with_name(cas, tk, compound)
+                    if thresh is not None and num_val > thresh:
+                        colors.loc[compound, sample] = 'background-color: #FFC000'
+                        break
+
+                if colors.loc[compound, sample]:
+                    continue
+
+                # Yellow: any VSL key exceeded
+                for vk in vsl_keys:
+                    thresh = tm.get_threshold_with_name(cas, vk, compound)
+                    if thresh is not None and num_val > thresh:
+                        colors.loc[compound, sample] = 'background-color: #FFFF00'
+                        break
+
+    styled = piv_d.style.apply(lambda _: colors, axis=None)
+    return styled, has_colors
+
+
 def _steps(step: int):
     labels = ["① העלאת קובץ", "② בחירת ערכי סף", "③ הורדת דוח"]
     pills = ""
@@ -1081,9 +1173,17 @@ with tab_excel:
                     for _ptab, _patype in zip(_preview_tabs, _preview_atypes):
                         with _ptab:
                             _subset = [r for r in records if r.get('analysis_type') == _patype]
-                            st.dataframe(_build_pivot_table(_subset), use_container_width=True)
+                            _styled, _has_clr = _build_styled_pivot(
+                                _subset, tm, selected_thresholds)
+                            st.dataframe(_styled, use_container_width=True)
+                            if _has_clr:
+                                st.markdown(_PREVIEW_LEGEND, unsafe_allow_html=True)
                 else:
-                    st.dataframe(_build_pivot_table(records), use_container_width=True)
+                    _styled, _has_clr = _build_styled_pivot(
+                        records, tm, selected_thresholds)
+                    st.dataframe(_styled, use_container_width=True)
+                    if _has_clr:
+                        st.markdown(_PREVIEW_LEGEND, unsafe_allow_html=True)
 
     st.markdown('</div>', unsafe_allow_html=True)  # end section-card
 
