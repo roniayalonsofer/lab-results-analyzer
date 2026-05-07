@@ -350,9 +350,10 @@ SHEET_CONFIG: dict[str, dict] = {
     "SOIL_METALS":    {"name": "קרקע מתכות",         "unit": "mg/kg DW", "nd_shows_loq": True},
     "SOIL_GRAIN_SIZE":{"name": "גרנולומטריה",        "unit": "%"},
     "SOIL_PFAS":   {"name": "קרקע PFAS",       "unit": "ng/kg"},
-    "GW_VOC":      {"name": "מי תהום BTEX",    "unit": "mg/L"},
-    "GW_PFAS":     {"name": "מי תהום PFAS",    "unit": "ng/L"},
-    "LOWFLOW":     {"name": "pH",               "unit": ""},
+    "GW_VOC":          {"name": "מי תהום BTEX",    "unit": "mg/L"},
+    "GW_PFAS":         {"name": "מי תהום PFAS",    "unit": "ng/L"},
+    "LOWFLOW":         {"name": "pH",               "unit": ""},
+    "GW_FIELD_PARAMS": {"name": "פרמטרי שדה",       "unit": ""},
 }
 
 
@@ -433,6 +434,8 @@ class LabReportExcel:
 
             if atype == "LOWFLOW":
                 self._write_lowflow_sheet(sheet, recs, cfg)
+            elif atype == "GW_FIELD_PARAMS":
+                self._write_field_params_sheet(sheet, recs, cfg)
             else:
                 self._write_data_sheet(sheet, recs, cfg, thresh_keys)
 
@@ -607,6 +610,68 @@ class LabReportExcel:
         note.font = Font(**FHE, italic=True, color="808080")
 
         self._auto_width(ws, total_cols, hdr_row=4)
+
+    def _write_field_params_sheet(self, ws, records, cfg):
+        """פרמטרי שדה — Aminolab field parameters.
+
+        Simple 3-column table:  פרמטר | יחידות | תוצאה
+        No threshold comparison; one row per parameter; no sample pivoting
+        (Aminolab reports are single-sample, so value goes straight into תוצאה).
+        Parameters are shown in PDF extraction order (first occurrence wins).
+        """
+        total_cols = 3
+
+        # Row 1: merged project/date/client header
+        self._write_header_row(ws, 1, total_cols)
+
+        # Row 2: column headers
+        hdr_row = 2
+        for ci, h in enumerate(["פרמטר", "יחידות", "תוצאה"], 1):
+            c = ws.cell(row=hdr_row, column=ci, value=h)
+            c.font      = Font(**FHE, bold=True)
+            c.alignment = WRAP_C
+            c.border    = THIN
+
+        # Data rows — deduplicate by compound name, preserve PDF order
+        seen: set[str] = set()
+        row_num = hdr_row + 1
+        for r in records:
+            param = r.get("compound", "").strip()
+            if not param or param in seen:
+                continue
+            seen.add(param)
+
+            unit  = r.get("unit", "")
+            v     = r.get("value")
+            flag  = r.get("flag", "")
+
+            if flag == "ND" or v is None:
+                display = "N.D."
+            elif isinstance(v, float):
+                display = round(v, 3)
+            else:
+                display = v
+
+            row_vals = [param, unit, display]
+            for ci, val in enumerate(row_vals, 1):
+                c = ws.cell(row=row_num, column=ci, value=val)
+                c.font      = _font(val)
+                c.border    = THIN
+                # Parameter column: right-aligned (RTL); value/unit: centered
+                c.alignment = WRAP_L if ci == 1 else CENTER
+            row_num += 1
+
+        # Note
+        note = ws.cell(row=row_num + 1, column=1,
+                       value="* ממצאי שדה בלבד, ללא השוואה לערכי סף")
+        note.font = Font(**FHE, italic=True, color="808080")
+
+        # Column widths
+        ws.column_dimensions["A"].width = 42
+        ws.column_dimensions["B"].width = 12
+        ws.column_dimensions["C"].width = 12
+        ws.row_dimensions[1].height     = 20
+        ws.row_dimensions[hdr_row].height = 22
 
     # ------------------------------------------------------------------
     # Portrait layout: compounds as rows

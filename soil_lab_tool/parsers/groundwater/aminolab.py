@@ -71,25 +71,37 @@ _COMPOUND_MAP: dict[str, tuple[str, str, str]] = {
     "נפטלן":              ("91-20-3",   "GW_VOC",  "Naphthalene"),
     "styrene":            ("100-42-5",  "GW_VOC",  "Styrene"),
     "סטירן":              ("100-42-5",  "GW_VOC",  "Styrene"),
-    # Field parameters — LOWFLOW (no environmental threshold)
-    "ph":                 ("", "LOWFLOW", "pH"),
-    "חומציות":            ("", "LOWFLOW", "pH"),
-    "conductivity":       ("", "LOWFLOW", "Conductivity"),
-    "מוליכות":            ("", "LOWFLOW", "Conductivity"),
-    "מוליכות חשמלית":     ("", "LOWFLOW", "Conductivity"),
-    "temperature":        ("", "LOWFLOW", "Temperature"),
-    "טמפרטורה":           ("", "LOWFLOW", "Temperature"),
-    "temp":               ("", "LOWFLOW", "Temperature"),
-    "do":                 ("", "LOWFLOW", "Dissolved Oxygen"),
-    "dissolved oxygen":   ("", "LOWFLOW", "Dissolved Oxygen"),
-    "חמצן מומס":          ("", "LOWFLOW", "Dissolved Oxygen"),
-    "orp":                ("", "LOWFLOW", "ORP"),
-    "turbidity":          ("", "LOWFLOW", "Turbidity"),
-    "עכירות":             ("", "LOWFLOW", "Turbidity"),
-    "depth to water":     ("", "LOWFLOW", "Depth to Water"),
-    "depth":              ("", "LOWFLOW", "Depth to Water"),
-    "עומק":               ("", "LOWFLOW", "Depth to Water"),
-    "עומק מי תהום":       ("", "LOWFLOW", "Depth to Water"),
+    # Field parameters — GW_FIELD_PARAMS → "פרמטרי שדה" sheet
+    # Hebrew display names are kept (not normalised to English) because this sheet
+    # is Aminolab-specific and should mirror the PDF parameter names exactly.
+    "ph":                                      ("", "GW_FIELD_PARAMS", "הגבה pH"),
+    "הגבה ph":                                 ("", "GW_FIELD_PARAMS", "הגבה pH"),
+    "חומציות":                                 ("", "GW_FIELD_PARAMS", "הגבה pH"),
+    "conductivity":                            ("", "GW_FIELD_PARAMS", "מוליכות"),
+    "מוליכות":                                 ("", "GW_FIELD_PARAMS", "מוליכות"),
+    "מוליכות חשמלית":                          ("", "GW_FIELD_PARAMS", "מוליכות"),
+    "temperature":                             ("", "GW_FIELD_PARAMS", "טמפרטורה"),
+    "טמפרטורה":                                ("", "GW_FIELD_PARAMS", "טמפרטורה"),
+    "temp":                                    ("", "GW_FIELD_PARAMS", "טמפרטורה"),
+    "do":                                      ("", "GW_FIELD_PARAMS", "חמצן מומס DO"),
+    "dissolved oxygen":                        ("", "GW_FIELD_PARAMS", "חמצן מומס DO"),
+    "חמצן מומס":                               ("", "GW_FIELD_PARAMS", "חמצן מומס DO"),
+    "orp":                                     ("", "GW_FIELD_PARAMS", "רדוקס"),
+    "redox":                                   ("", "GW_FIELD_PARAMS", "רדוקס"),
+    "רדוקס":                                   ("", "GW_FIELD_PARAMS", "רדוקס"),
+    "turbidity":                               ("", "GW_FIELD_PARAMS", "עכירות"),
+    "עכירות":                                  ("", "GW_FIELD_PARAMS", "עכירות"),
+    "depth to water":                          ("", "GW_FIELD_PARAMS", "עומק פני המים"),
+    "depth":                                   ("", "GW_FIELD_PARAMS", "עומק פני המים"),
+    "עומק":                                    ("", "GW_FIELD_PARAMS", "עומק פני המים"),
+    "עומק מי תהום":                            ("", "GW_FIELD_PARAMS", "עומק פני המים"),
+    "עומק פני המים":                           ("", "GW_FIELD_PARAMS", "עומק פני המים"),
+    "עומק פני המים בסיום":                     ("", "GW_FIELD_PARAMS", "עומק פני המים בסיום"),
+    "עומק הדיגום מקצה הצינור":                 ("", "GW_FIELD_PARAMS", "עומק הדיגום מקצה הצינור"),
+    "עומק קידוח":                              ("", "GW_FIELD_PARAMS", "עומק קידוח"),
+    "קוטר קידוח":                              ("", "GW_FIELD_PARAMS", "קוטר קידוח"),
+    "נפח שאיבה בפועל":                         ("", "GW_FIELD_PARAMS", "נפח שאיבה בפועל"),
+    "עומק המים מפני הדיגום בקידוח":            ("", "GW_FIELD_PARAMS", "עומק המים מפני הדיגום בקידוח"),
 }
 
 _HEBREW_RE = re.compile(r"[א-ת]")
@@ -463,7 +475,7 @@ class AminolabGroundwaterParser(BaseParser):
     """Aminolab groundwater PDF parser — matches KTE/Bactochem record format."""
 
     LAB_NAME       = "Aminolab"
-    ANALYSIS_TYPES = ["GW_VOC", "LOWFLOW"]
+    ANALYSIS_TYPES = ["GW_VOC", "GW_FIELD_PARAMS"]
 
     def __init__(self, debug: bool | None = None):
         self._vp    = LabValueParser()
