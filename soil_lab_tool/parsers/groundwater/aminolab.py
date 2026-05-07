@@ -129,15 +129,9 @@ _BTEX_COMPONENTS: list[tuple[str, str]] = [
 
 
 def _expand_btex(rec: dict) -> list[dict]:
-    """Expand a BTEX / BTEX+MTBE group record into one record per component."""
-    compound = rec.get("compound", "")
-    if compound == "BTEX":
-        components = _BTEX_COMPONENTS
-    elif compound == "BTEX + MTBE":
-        components = _BTEX_COMPONENTS + [("MTBE", "1634-04-4")]
-    else:
-        return [rec]
-    return [{**rec, "compound": name, "cas": cas} for name, cas in components]
+    """Expansion is handled in AminolabGroundwaterParser.parse() to avoid
+    duplicates when the PDF already contains individual compound rows."""
+    return [rec]
 
 
 # ── Transposed field-params detection ─────────────────────────────────────────
@@ -655,27 +649,27 @@ def _parse_field_params_words(page, sample_id: str, vp: LabValueParser,
         raw_texts = [w["text"] for w in group]
         if not any(_hits_field_param(t) for t in raw_texts):
             continue
-        # RTL layout (left→right in PDF coords): value  unit  name
-        val_idx = next(
-            (i for i, t in enumerate(raw_texts)
-             if re.match(r"^[<>]?-?[\d.]", t) or _ND_RE.match(t)),
+        # RTL layout: name is RIGHTMOST (highest x0), value is middle,
+        # unit is to the left of value.  Use page midpoint to split.
+        page_mid = page.width / 2
+
+        val_word = next(
+            (w for w in group
+             if re.match(r"^[<>]?-?[\d.]", w["text"]) or _ND_RE.match(w["text"])),
             None,
         )
-        if val_idx is None:
+        if val_word is None:
             continue
-        val_str = raw_texts[val_idx]
-        rest = raw_texts[val_idx + 1:]
-        if not rest:
+        val_str = val_word["text"]
+
+        name_words = [w for w in group if w["x0"] > page_mid and w is not val_word]
+        unit_words  = [w for w in group if w["x0"] <= page_mid and w is not val_word]
+
+        if not name_words:
             continue
-        name_tokens: list[str] = []
-        unit_tokens: list[str] = []
-        for t in reversed(rest):
-            if _HEBREW_RE.search(t) or _hits_field_param(t):
-                name_tokens.insert(0, t)
-            else:
-                unit_tokens.insert(0, t)
-        name_str = _fix_rtl(" ".join(name_tokens)) if name_tokens else ""
-        unit_str = " ".join(unit_tokens)
+
+        name_str = _fix_rtl(" ".join(w["text"] for w in name_words))
+        unit_str  = " ".join(w["text"] for w in unit_words)
         if not name_str:
             continue
         rec = _make_record(name_str, unit_str, val_str, "", sample_id, vp)
@@ -755,14 +749,39 @@ class AminolabGroundwaterParser(BaseParser):
 
                 records.extend(page_recs)
 
-        # Expand BTEX / BTEX+MTBE group records into individual components
+        # BTEX/BTEX+MTBE: expand only when the individual compounds are absent.
+        # The PDF often contains both a BTEX group row AND separate rows for each
+        # component; expanding the group would produce duplicates.  Check first.
+        _btex_set   = {"Benzene", "Toluene", "Ethyl Benzene", "Xylene"}
+        _btex_mtbe  = _btex_set | {"MTBE"}
+        direct_cpds = {r["compound"] for r in records
+                       if r["compound"] not in ("BTEX", "BTEX + MTBE")}
         expanded: list[dict] = []
         for r in records:
-            sub = _expand_btex(r)
-            if len(sub) > 1 and self._debug:
-                print(f"[AMINOLAB DEBUG] Expanded {r['compound']!r} → "
-                      f"{[s['compound'] for s in sub]}")
-            expanded.extend(sub)
+            cmp = r.get("compound", "")
+            if cmp == "BTEX":
+                if _btex_set.issubset(direct_cpds):
+                    if self._debug:
+                        print("[AMINOLAB DEBUG] Dropping BTEX — "
+                              "individual compounds already present")
+                else:
+                    for name, cas in _BTEX_COMPONENTS:
+                        expanded.append({**r, "compound": name, "cas": cas})
+                    if self._debug:
+                        print("[AMINOLAB DEBUG] Expanded BTEX → "
+                              f"{[n for n, _ in _BTEX_COMPONENTS]}")
+            elif cmp == "BTEX + MTBE":
+                if _btex_mtbe.issubset(direct_cpds):
+                    if self._debug:
+                        print("[AMINOLAB DEBUG] Dropping BTEX+MTBE — "
+                              "individual compounds already present")
+                else:
+                    for name, cas in _BTEX_COMPONENTS + [("MTBE", "1634-04-4")]:
+                        expanded.append({**r, "compound": name, "cas": cas})
+                    if self._debug:
+                        print("[AMINOLAB DEBUG] Expanded BTEX+MTBE")
+            else:
+                expanded.append(r)
         records = expanded
 
         if self._debug:
