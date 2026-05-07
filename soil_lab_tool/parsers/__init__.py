@@ -108,6 +108,36 @@ def _is_kte_soil_gas_excel(sheet_names: list[str]) -> bool:
     return any(_KTE_SOIL_GAS_RE.search(s) for s in sheet_names)
 
 
+# "אמינולאב" reversed char-by-char — pdfplumber extracts Hebrew RTL text visually,
+# so logical order "אמינולאב" arrives as visual order "בלאונימא".
+_AMINOLAB_HE_REVERSED = "אמינולאב"[::-1]
+
+
+def _is_aminolab_pdf(file_bytes: bytes) -> bool:
+    """Return True if the PDF content identifies this as an Aminolab report.
+
+    Scans the first 3 pages.  Checks:
+      - "aminolab" (Latin, LTR — not reversed by pdfplumber)
+      - "אמינולאב"  (Hebrew logical order — modern Unicode PDFs)
+      - reversed form (Hebrew visual order — older PDFs where pdfplumber
+        extracts characters left-to-right, reversing RTL words)
+    """
+    try:
+        import io as _io, pdfplumber as _plumber
+        with _plumber.open(_io.BytesIO(file_bytes)) as _pdf:
+            for page in _pdf.pages[:3]:
+                t = (page.extract_text() or "").lower()
+                if "aminolab" in t:
+                    return True
+                if "אמינולאב" in t:
+                    return True
+                if _AMINOLAB_HE_REVERSED in t:
+                    return True
+    except Exception:
+        pass
+    return False
+
+
 def _xlsx_sheet_names(file_bytes: bytes) -> list[str]:
     """Return sheet names from Excel bytes. Tries pandas first, zipfile XML fallback."""
     import io as _io
@@ -148,12 +178,12 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
 
     # PDF content-based detection
     if file_bytes is not None and n.endswith(".pdf"):
+        if _is_aminolab_pdf(file_bytes):
+            return "aminolab"
         try:
             import io as _io, pdfplumber as _plumber
             with _plumber.open(_io.BytesIO(file_bytes)) as _pdf:
                 first_text = (_pdf.pages[0].extract_text() or "").lower()
-            if "aminolab" in first_text or "אמינולאב" in first_text:
-                return "aminolab"
             if "bactochem" in first_text:
                 return "בקטוכם"
         except Exception:
@@ -211,12 +241,12 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
 
     # ── PDF content-based detection ──────────────────────────────────────────────
     if file_bytes is not None and n.endswith(".pdf"):
+        if _is_aminolab_pdf(file_bytes):
+            return "groundwater"
         try:
             import io as _io, pdfplumber as _plumber
             with _plumber.open(_io.BytesIO(file_bytes)) as _pdf:
                 first_text = (_pdf.pages[0].extract_text() or "").lower()
-            if "aminolab" in first_text or "אמינולאב" in first_text:
-                return "groundwater"
             if "bactochem" in first_text:
                 return "soil"
         except Exception:
