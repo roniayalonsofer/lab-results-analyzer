@@ -57,16 +57,35 @@ APP_URL = f"http://{LAN_IP}:8501"
 st.markdown(f"""
 <style>
 /* ── base layout ── */
-html, body {{ direction: rtl; }}
-.main .block-container {{
+/* Apply RTL only to content, not to root — prevents RTL from fighting
+   Streamlit's LTR CSS grid and causing the sidebar/main overlap.       */
+html, body {{ direction: ltr; }}
+[data-testid="stMain"] {{ direction: rtl; }}
+[data-testid="stMain"] .block-container {{
     direction: rtl;
     padding-top: 1rem;
-    max-width: 1300px;
+    max-width: 1200px;
+    padding-left: 2rem;
+    padding-right: 2rem;
+    /* do not use margin: 0 auto here — let Streamlit control horizontal
+       positioning so the block never drifts under the sidebar           */
 }}
+
+/* ── sidebar — fixed width, always visible ── */
 [data-testid="stSidebar"] {{
     direction: rtl;
     background: #1a2d38;
+    min-width: 15rem !important;
+    max-width: 16rem !important;
+    width: 15.5rem !important;
+    flex-shrink: 0 !important;
 }}
+/* hide the collapse/expand toggle so the sidebar cannot be hidden */
+[data-testid="stSidebarCollapseButton"],
+[data-testid="collapsedControl"] {{
+    display: none !important;
+}}
+
 [data-testid="stSidebar"] * {{ color: #e2e8f0 !important; }}
 /* input / select text — black so it shows on white background */
 [data-testid="stSidebar"] input {{ color: #111827 !important; }}
@@ -85,11 +104,19 @@ html, body {{ direction: rtl; }}
 footer {{ visibility: hidden; }}
 header {{ visibility: hidden; }}
 
-/* ── typography ── */
-.stMarkdown p, .stMarkdown li {{ direction: rtl; text-align: right; }}
+/* ── typography — explicit RTL for all text elements ── */
+.stMarkdown p, .stMarkdown li,
+.stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 {{
+    direction: rtl; text-align: right;
+}}
 .stTextInput label, .stSelectbox label,
 .stMultiSelect label, .stFileUploader label,
-.stCheckbox label, .stRadio label {{ direction: rtl; text-align: right; }}
+.stCheckbox label, .stRadio label,
+.stMetric label, .stMetric div,
+[data-testid="stMetricLabel"], [data-testid="stMetricValue"],
+[data-testid="stCaptionContainer"] {{
+    direction: rtl; text-align: right;
+}}
 
 /* ── hero header ── */
 .hero {{
