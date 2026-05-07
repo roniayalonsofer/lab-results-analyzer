@@ -396,6 +396,36 @@ except Exception as e:
 # ══════════════════════════════════════════════════════════════════
 # STEP INDICATOR (used by Excel tab)
 # ══════════════════════════════════════════════════════════════════
+def _build_pivot_table(recs):
+    """Build a compound × sample_id pivot DataFrame for preview."""
+    rows = []
+    for r in recs:
+        val  = r.get('value')
+        flag = r.get('flag', '')
+        loq  = r.get('loq')
+        if flag in ('ND', '<LOD', '<LOQ') and loq is not None:
+            display_val = f"<{loq}"
+        elif val is not None:
+            display_val = f"{val:.4g}" if isinstance(val, (int, float)) else str(val)
+        else:
+            display_val = flag or ''
+        rows.append({
+            'תרכובת':    r.get('compound', ''),
+            'sample_id': r.get('sample_id', ''),
+            'value':     display_val,
+        })
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    try:
+        pivot = df.pivot_table(index='תרכובת', columns='sample_id',
+                               values='value', aggfunc='first')
+        pivot.columns.name = None
+        return pivot
+    except Exception:
+        return df[['תרכובת', 'sample_id', 'value']]
+
+
 def _steps(step: int):
     labels = ["① העלאת קובץ", "② בחירת ערכי סף", "③ הורדת דוח"]
     pills = ""
@@ -961,7 +991,7 @@ with tab_excel:
         out_filename = f"{'_'.join(_parts)}.xlsx"
         size_kb = len(excel_buf.getvalue()) / 1024
 
-        dl_col, wd_col, info_col = st.columns([2, 2, 1])
+        dl_col, wd_col, prev_col, info_col = st.columns([2, 2, 1.5, 1])
         with dl_col:
             st.download_button(
                 label     = "⬇️ הורד דוח Excel",
@@ -977,6 +1007,9 @@ with tab_excel:
                     file_name = out_filename.replace(".xlsx", ".docx"),
                     mime      = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 )
+        with prev_col:
+            if st.button("👁️ תצוגה מקדימה", use_container_width=True, key="xl_preview_btn"):
+                st.session_state["xl_show_preview"] = not st.session_state.get("xl_show_preview", False)
         with info_col:
             st.markdown(f"""
             <div style="padding:0.5rem 0;font-size:0.82rem;color:#64748b;direction:rtl;">
@@ -985,6 +1018,18 @@ with tab_excel:
               <div>📅 {date.today().strftime('%d.%m.%Y')}</div>
             </div>
             """, unsafe_allow_html=True)
+
+        if st.session_state.get("xl_show_preview", False):
+            with st.expander("📊 תצוגה מקדימה — נתונים מורחבת", expanded=True):
+                _preview_atypes = list(by_type.keys())
+                if len(_preview_atypes) > 1:
+                    _preview_tabs = st.tabs([f"{t} ({by_type[t]})" for t in _preview_atypes])
+                    for _ptab, _patype in zip(_preview_tabs, _preview_atypes):
+                        with _ptab:
+                            _subset = [r for r in records if r.get('analysis_type') == _patype]
+                            st.dataframe(_build_pivot_table(_subset), use_container_width=True)
+                else:
+                    st.dataframe(_build_pivot_table(records), use_container_width=True)
 
     st.markdown('</div>', unsafe_allow_html=True)  # end section-card
 
