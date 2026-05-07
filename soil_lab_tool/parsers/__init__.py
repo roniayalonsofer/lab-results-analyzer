@@ -44,12 +44,42 @@ _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
 # Sheet names Alchem uses: "<job_number>-VOC", "<job_number>-SVOC", etc.
 _ALCHEM_SHEET_RE = _re.compile(r'^\d+-(?:VOC|SVOC|TPH|ICP|PH|METALS)$', _re.IGNORECASE)
 
+# Alchem soil-gas variant: sheets are bare job-number integers ("40344", "38276")
+_ALCHEM_SG_NUMERIC_RE = _re.compile(r'^\d+$')
+
 # KTE TO-15 soil gas sheets: "<job_number>-TO-15-..." or contain "ppbv"
 _KTE_SOIL_GAS_RE = _re.compile(r'TO-15|ppbv', _re.IGNORECASE)
 
 
 def _is_alchem_excel(sheet_names: list[str]) -> bool:
     return any(_ALCHEM_SHEET_RE.match(s) for s in sheet_names)
+
+
+def _is_alchem_soil_gas_numeric(sheet_names: list[str], file_bytes: bytes) -> bool:
+    """Detect Alchem soil-gas files whose sheets are bare job-number integers.
+
+    Confirmation: peek at the first numeric sheet and verify that row 4
+    (index 3) contains the characteristic Alchem soil-gas header columns
+    'Compound Name', 'CAS', and 'LOD [ug/m^3]'.
+    """
+    numeric_sheets = [s for s in sheet_names if _ALCHEM_SG_NUMERIC_RE.match(s)]
+    if not numeric_sheets:
+        return False
+    try:
+        import io as _io
+        import pandas as _pd
+        xl  = _pd.ExcelFile(_io.BytesIO(file_bytes))
+        df  = xl.parse(numeric_sheets[0], header=None, dtype=str, nrows=6).fillna("")
+        if len(df) < 4:
+            return False
+        row4 = [str(v).strip() for v in df.iloc[3]]
+        return (
+            any("Compound Name" in v for v in row4) and
+            any(v.upper() == "CAS" for v in row4) and
+            any("LOD" in v and "ug/m" in v for v in row4)
+        )
+    except Exception:
+        return False
 
 
 def _is_kte_soil_gas_excel(sheet_names: list[str]) -> bool:
@@ -111,6 +141,8 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
             import pandas as pd
             xl = pd.ExcelFile(io.BytesIO(file_bytes))
             if _is_alchem_excel(xl.sheet_names):
+                return "alchem"
+            if _is_alchem_soil_gas_numeric(xl.sheet_names, file_bytes):
                 return "alchem"
             if any("Client SOIL" in s for s in xl.sheet_names):
                 return "als"
@@ -203,6 +235,9 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
             except Exception:
                 pass
             return "soil"
+
+        if _is_alchem_soil_gas_numeric(sheet_names, file_bytes):
+            return "soil_gas"
 
         if _is_alchem_excel(sheet_names):
             return "soil"
