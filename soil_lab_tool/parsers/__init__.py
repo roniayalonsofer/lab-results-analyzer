@@ -18,6 +18,7 @@ from parsers.soil.als           import ALSSoilParser, ALSGrainSizeParser
 from parsers.soil.bactochem     import BactochemSoilParser
 from parsers.groundwater.kte        import KTEGroundwaterParser
 from parsers.groundwater.bactochem  import BactochemGroundwaterParser
+from parsers.groundwater.aminolab   import AminolabGroundwaterParser
 from parsers.pfas.kte               import KTEPFASParser
 
 
@@ -38,6 +39,8 @@ _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
     ("bactochem",     "soil"):        BactochemSoilParser,
     ("als",           "soil"):        ALSSoilParser,
     ("als",           "grain_size"):  ALSGrainSizeParser,
+    ("aminolab",      "groundwater"): AminolabGroundwaterParser,
+    ("אמינולאב",     "groundwater"): AminolabGroundwaterParser,
 }
 
 
@@ -136,17 +139,21 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
     # Unambiguous filename hints (checked first — these are specific enough)
     if "alchem" in n:
         return "alchem"
+    if any(k in n for k in ("aminolab", "אמינולאב")):
+        return "aminolab"
     if any(k in n for k in ("בקטוכם", "bactochem")):
         return "בקטוכם"
     if any(k in n for k in ("מכון הנפט", "machon", "haneft", "neft")):
         return "מכון הנפט"
 
-    # PDF content-based detection (Bactochem PDFs have no lab name in filename)
+    # PDF content-based detection
     if file_bytes is not None and n.endswith(".pdf"):
         try:
             import io as _io, pdfplumber as _plumber
             with _plumber.open(_io.BytesIO(file_bytes)) as _pdf:
                 first_text = (_pdf.pages[0].extract_text() or "").lower()
+            if "aminolab" in first_text or "אמינולאב" in first_text:
+                return "aminolab"
             if "bactochem" in first_text:
                 return "בקטוכם"
         except Exception:
@@ -202,12 +209,14 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
     """
     n = filename.lower()
 
-    # ── Bactochem PDF: always "soil" (parser handles both soil and GW samples) ──
+    # ── PDF content-based detection ──────────────────────────────────────────────
     if file_bytes is not None and n.endswith(".pdf"):
         try:
             import io as _io, pdfplumber as _plumber
             with _plumber.open(_io.BytesIO(file_bytes)) as _pdf:
                 first_text = (_pdf.pages[0].extract_text() or "").lower()
+            if "aminolab" in first_text or "אמינולאב" in first_text:
+                return "groundwater"
             if "bactochem" in first_text:
                 return "soil"
         except Exception:
