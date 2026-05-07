@@ -16,7 +16,7 @@ Three extraction strategies are tried in order:
 
 Analysis type mapping
 ---------------------
-    pH, מוליכות, conductivity, temperature, DO, ORP  → LOWFLOW
+    pH, מוליכות, conductivity, temperature, DO, ORP  → GW_FIELD_PARAMS
     MTBE, BTEX, benzene, toluene, ethylbenzene,
     xylene, naphthalene, styrene                      → GW_VOC
 
@@ -116,6 +116,159 @@ _HEADER_NAME_KW   = ("שם", "בדיקה", "הקידב", "פרמטר", "רמטר
                       "רכיב", "name", "test", "parameter")
 _HEADER_UNITS_KW  = ("יחידות", "תודיחי", "unit")
 _HEADER_NOTES_KW  = ("הערות", "תורעה", "note", "remark", "הסבר")
+
+
+# ── BTEX expansion ────────────────────────────────────────────────────────────
+
+_BTEX_COMPONENTS: list[tuple[str, str]] = [
+    ("Benzene",       "71-43-2"  ),
+    ("Toluene",       "108-88-3" ),
+    ("Ethyl Benzene", "100-41-4" ),
+    ("Xylene",        "1330-20-7"),
+]
+
+
+def _expand_btex(rec: dict) -> list[dict]:
+    """Expand a BTEX / BTEX+MTBE group record into one record per component."""
+    compound = rec.get("compound", "")
+    if compound == "BTEX":
+        components = _BTEX_COMPONENTS
+    elif compound == "BTEX + MTBE":
+        components = _BTEX_COMPONENTS + [("MTBE", "1634-04-4")]
+    else:
+        return [rec]
+    return [{**rec, "compound": name, "cas": cas} for name, cas in components]
+
+
+# ── Transposed field-params detection ─────────────────────────────────────────
+# The Aminolab field-params section is often a transposed table where parameters
+# are columns, not rows:
+#   Row A (names):  הגבה pH | מוליכות | טמפרטורה | DO | ORP | עכירות | עומק…
+#   Row B (units):  -       | µS/cm   | °C        | mg/L | mv | NTU   | M…
+#   Row C (values): 7.2     | 845     | 19.5      | 5.2  | -120 | 3.4  | 5.2…
+# The standard row-based parser piles all unit tokens into one "units" bucket,
+# producing one garbage record instead of one record per parameter.
+
+_FIELD_PARAM_WORDS: frozenset[str] = frozenset({
+    "ph", "הגבה", "מוליכות", "טמפרטורה", "do",
+    "orp", "רדוקס", "עכירות", "עומק", "חמצן",
+    "conductivity", "temperature", "turbidity", "depth", "redox",
+})
+
+
+def _hits_field_param(text: str) -> bool:
+    raw   = text.lower()
+    fixed = _fix_rtl(text).lower()
+    return any(kw in raw or kw in fixed for kw in _FIELD_PARAM_WORDS)
+
+
+def _closest_word_text(ref: dict, candidates: list[dict]) -> str:
+    """Text of the candidate whose x-centre is nearest to ref's x-centre."""
+    if not candidates:
+        return ""
+    ref_mid = (ref["x0"] + ref["x1"]) / 2
+    return min(candidates,
+               key=lambda c: abs((c["x0"] + c["x1"]) / 2 - ref_mid))["text"]
+
+
+def _parse_transposed_field_params(
+    row_groups: list[list[dict]],
+    sample_id: str,
+    vp: "LabValueParser",
+    debug: bool = False,
+) -> tuple[list[dict], set[int]]:
+    """
+    Scan clustered word-rows for transposed field-params blocks and parse them.
+    Returns (records, set_of_consumed_row_indices).
+    A block is detected when a row has ≥ 2 words matching _FIELD_PARAM_WORDS;
+    the following rows supply units and values (matched by x-centre proximity).
+    """
+    records:  list[dict] = []
+    consumed: set[int]   = set()
+
+    i = 0
+    while i < len(row_groups):
+        if i in consumed:
+            i += 1
+            continue
+
+        group = row_groups[i]
+        if sum(1 for w in group if _hits_field_param(w["text"])) < 2:
+            i += 1
+            continue
+
+        names_row  = group
+        units_row  = row_groups[i + 1] if i + 1 < len(row_groups) else []
+        values_row = row_groups[i + 2] if i + 2 < len(row_groups) else []
+
+        def _has_numeric(rows: list[dict]) -> bool:
+            return any(re.match(r"^-?[\d.]", w["text"]) for w in rows)
+
+        if _has_numeric(values_row):
+            rows_used = {i, i + 1, i + 2}
+        elif _has_numeric(units_row):
+            values_row, units_row = units_row, []
+            rows_used = {i, i + 1}
+        else:
+            i += 1
+            continue
+
+        if debug:
+            print(f"[AMINOLAB DEBUG] transposed field-params at row {i}: "
+                  f"{[w['text'] for w in names_row]}")
+
+        for hw in names_row:
+            name = _fix_rtl(hw["text"])
+            unit = _closest_word_text(hw, units_row)
+            val  = _closest_word_text(hw, values_row)
+            if not val:
+                continue
+            rec = _make_record(name, unit, val, "", sample_id, vp)
+            if rec and rec.get("analysis_type") == "GW_FIELD_PARAMS":
+                records.append(rec)
+                if debug:
+                    print(f"  → {name!r} unit={unit!r} val={val!r} "
+                          f"→ {rec['compound']} {rec['value']} {rec['unit']}")
+
+        consumed.update(rows_used)
+        i += len(rows_used)
+
+    return records, consumed
+
+
+def _transposed_table_field_params(
+    table: list[list],
+    sample_id: str,
+    vp: "LabValueParser",
+    debug: bool = False,
+) -> list[dict]:
+    """
+    Parse a pdfplumber-extracted table whose first row holds parameter names
+    (transposed layout).  Returns GW_FIELD_PARAMS records only.
+    """
+    if len(table) < 2:
+        return []
+    first_row = [_fix_rtl(str(c or "").strip()) for c in table[0]]
+    if sum(1 for cell in first_row
+           if any(kw in cell.lower() for kw in _FIELD_PARAM_WORDS)) < 2:
+        return []
+
+    units_row  = [str(c or "").strip() for c in table[1]]
+    values_row = ([str(c or "").strip() for c in table[2]]
+                  if len(table) > 2 else [])
+    if not values_row:
+        values_row, units_row = units_row, [""] * len(first_row)
+
+    records = []
+    for idx, name in enumerate(first_row):
+        if not name or name.lower() in ("nan", "none"):
+            continue
+        unit = units_row[idx]  if idx < len(units_row)  else ""
+        val  = values_row[idx] if idx < len(values_row) else ""
+        rec = _make_record(name, unit, val, "", sample_id, vp)
+        if rec and rec.get("analysis_type") == "GW_FIELD_PARAMS":
+            records.append(rec)
+    return records
 
 
 # ── RTL helpers ───────────────────────────────────────────────────────────────
@@ -273,6 +426,8 @@ def _tables_to_records(tables, sample_id, vp, debug=False):
                           f"result={col_result} notes={col_notes}")
                 break
         if header_idx is None or col_result is None:
+            records.extend(
+                _transposed_table_field_params(table, sample_id, vp, debug))
             continue
         if col_name is None:
             col_name = len(table[header_idx]) - 1  # RTL: test name is rightmost
@@ -337,9 +492,15 @@ def _parse_page_words(page, sample_id: str, vp: LabValueParser,
             print(f"  row {ri} (top≈{g[0]['top']:.0f}): "
                   f"{[w['text'] for w in g]}")
 
-    # ── Find header row ───────────────────────────────────────────────────────
+    # ── Transposed field-params detection (before standard header search) ─────
+    fp_recs, fp_consumed = _parse_transposed_field_params(
+        row_groups, sample_id, vp, debug)
+    standard_rows = [g for j, g in enumerate(row_groups) if j not in fp_consumed]
+    records = list(fp_recs)
+
+    # ── Find header row (in remaining rows) ───────────────────────────────────
     header_idx = None
-    for i, group in enumerate(row_groups):
+    for i, group in enumerate(standard_rows):
         for word in group:
             if _cell_contains(word['text'], _HEADER_RESULT_KW):
                 header_idx = i
@@ -350,9 +511,9 @@ def _parse_page_words(page, sample_id: str, vp: LabValueParser,
     if header_idx is None:
         if debug:
             print("[AMINOLAB DEBUG] word-parser: no header row found")
-        return []
+        return records  # still return any field-params found above
 
-    header_words = row_groups[header_idx]
+    header_words = standard_rows[header_idx]
     if debug:
         print(f"[AMINOLAB DEBUG] Header row {header_idx}: "
               f"{[w['text'] for w in header_words]}")
@@ -392,8 +553,7 @@ def _parse_page_words(page, sample_id: str, vp: LabValueParser,
             print(f"  x {xs:.0f}–{xe:.0f} → {ct}")
 
     # ── Parse data rows ───────────────────────────────────────────────────────
-    records = []
-    for group in row_groups[header_idx + 1:]:
+    for group in standard_rows[header_idx + 1:]:
         buckets: dict[str, list[str]] = {
             "name": [], "units": [], "result": [], "notes": []}
         for word in group:
@@ -521,6 +681,16 @@ class AminolabGroundwaterParser(BaseParser):
                         print(f"[AMINOLAB DEBUG] Strategy 3 (text): {len(page_recs)} records")
 
                 records.extend(page_recs)
+
+        # Expand BTEX / BTEX+MTBE group records into individual components
+        expanded: list[dict] = []
+        for r in records:
+            sub = _expand_btex(r)
+            if len(sub) > 1 and self._debug:
+                print(f"[AMINOLAB DEBUG] Expanded {r['compound']!r} → "
+                      f"{[s['compound'] for s in sub]}")
+            expanded.extend(sub)
+        records = expanded
 
         if self._debug:
             print(f"\n[AMINOLAB DEBUG] Total records: {len(records)}")
