@@ -58,9 +58,10 @@ def _is_alchem_excel(sheet_names: list[str]) -> bool:
 def _is_alchem_soil_gas_numeric(sheet_names: list[str], file_bytes: bytes) -> bool:
     """Detect Alchem soil-gas files whose sheets are bare job-number integers.
 
-    Confirmation: peek at the first numeric sheet and verify that row 4
-    (index 3) contains the characteristic Alchem soil-gas header columns
-    'Compound Name', 'CAS', and 'LOD [ug/m^3]'.
+    Primary check: scan rows 2-6 for a header row containing a compound-name
+    column ('Compound Name' or 'Name'), 'CAS', and 'LOD [ug/m^3]'.
+    Fallback: when row 1 is empty (layout shifted), look for 'Analysis Time:'
+    in rows 2+ alongside LOD headers anywhere in the sheet.
     """
     numeric_sheets = [s for s in sheet_names if _ALCHEM_SG_NUMERIC_RE.match(s)]
     if not numeric_sheets:
@@ -68,16 +69,34 @@ def _is_alchem_soil_gas_numeric(sheet_names: list[str], file_bytes: bytes) -> bo
     try:
         import io as _io
         import pandas as _pd
-        xl  = _pd.ExcelFile(_io.BytesIO(file_bytes))
-        df  = xl.parse(numeric_sheets[0], header=None, dtype=str, nrows=6).fillna("")
+        xl = _pd.ExcelFile(_io.BytesIO(file_bytes))
+        df = xl.parse(numeric_sheets[0], header=None, dtype=str, nrows=8).fillna("")
         if len(df) < 4:
             return False
-        row4 = [str(v).strip() for v in df.iloc[3]]
-        return (
-            any("Compound Name" in v for v in row4) and
-            any(v.upper() == "CAS" for v in row4) and
-            any("LOD" in v and "ug/m" in v for v in row4)
-        )
+
+        # Primary: scan rows 2–6 for the characteristic header row.
+        # Accepts both "Compound Name" and bare "Name" as compound column.
+        for ri in range(2, min(7, len(df))):
+            row = [str(v).strip() for v in df.iloc[ri]]
+            has_compound = any(v == "Name" or "Compound Name" in v for v in row)
+            has_cas      = any(v.upper() == "CAS" for v in row)
+            has_lod      = any("LOD" in v and "ug/m" in v for v in row)
+            if has_compound and has_cas and has_lod:
+                return True
+
+        # Fallback: row 1 is empty → check rows 2+ for "Analysis Time:"
+        # combined with LOD headers anywhere in the peeked rows.
+        row0 = [str(v).strip() for v in df.iloc[0]]
+        if all(v in ("", "nan") for v in row0):
+            flat = " ".join(str(v) for v in df.values.flat)
+            analysis_time_found = any(
+                "Analysis Time" in "".join(str(v) for v in df.iloc[ri])
+                for ri in range(1, len(df))
+            )
+            if analysis_time_found and "LOD" in flat and "ug/m" in flat:
+                return True
+
+        return False
     except Exception:
         return False
 
