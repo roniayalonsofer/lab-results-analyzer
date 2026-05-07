@@ -137,7 +137,8 @@ def _expand_btex(rec: dict) -> list[dict]:
         components = _BTEX_COMPONENTS + [("MTBE", "1634-04-4")]
     else:
         return [rec]
-    return [{**rec, "compound": name, "cas": cas} for name, cas in components]
+    raw = rec.get("raw_value", "")
+    return [{**rec, "compound": name, "cas": cas, "value": raw} for name, cas in components]
 
 
 # ── Transposed field-params detection ─────────────────────────────────────────
@@ -367,6 +368,7 @@ def _make_record(
         "compound":      compound,
         "cas":           cas,
         "value":         value,
+        "raw_value":     raw_result,
         "flag":          flag,
         "unit":          unit,
         "lod":           None,
@@ -426,8 +428,6 @@ def _tables_to_records(tables, sample_id, vp, debug=False):
                           f"result={col_result} notes={col_notes}")
                 break
         if header_idx is None or col_result is None:
-            records.extend(
-                _transposed_table_field_params(table, sample_id, vp, debug))
             continue
         if col_name is None:
             col_name = len(table[header_idx]) - 1  # RTL: test name is rightmost
@@ -492,15 +492,9 @@ def _parse_page_words(page, sample_id: str, vp: LabValueParser,
             print(f"  row {ri} (top≈{g[0]['top']:.0f}): "
                   f"{[w['text'] for w in g]}")
 
-    # ── Transposed field-params detection (before standard header search) ─────
-    fp_recs, fp_consumed = _parse_transposed_field_params(
-        row_groups, sample_id, vp, debug)
-    standard_rows = [g for j, g in enumerate(row_groups) if j not in fp_consumed]
-    records = list(fp_recs)
-
-    # ── Find header row (in remaining rows) ───────────────────────────────────
+    # ── Find header row ───────────────────────────────────────────────────────
     header_idx = None
-    for i, group in enumerate(standard_rows):
+    for i, group in enumerate(row_groups):
         for word in group:
             if _cell_contains(word['text'], _HEADER_RESULT_KW):
                 header_idx = i
@@ -511,9 +505,9 @@ def _parse_page_words(page, sample_id: str, vp: LabValueParser,
     if header_idx is None:
         if debug:
             print("[AMINOLAB DEBUG] word-parser: no header row found")
-        return records  # still return any field-params found above
+        return []
 
-    header_words = standard_rows[header_idx]
+    header_words = row_groups[header_idx]
     if debug:
         print(f"[AMINOLAB DEBUG] Header row {header_idx}: "
               f"{[w['text'] for w in header_words]}")
@@ -553,7 +547,8 @@ def _parse_page_words(page, sample_id: str, vp: LabValueParser,
             print(f"  x {xs:.0f}–{xe:.0f} → {ct}")
 
     # ── Parse data rows ───────────────────────────────────────────────────────
-    for group in standard_rows[header_idx + 1:]:
+    records: list[dict] = []
+    for group in row_groups[header_idx + 1:]:
         buckets: dict[str, list[str]] = {
             "name": [], "units": [], "result": [], "notes": []}
         for word in group:
@@ -629,6 +624,70 @@ def _parse_page_text(page, sample_id: str, vp: LabValueParser,
     return records
 
 
+# ── Dedicated field-params word-based pass ───────────────────────────────────
+# extract_tables() merges all field-param rows into ONE row when there are no
+# horizontal borders, producing a single garbage record.  This function uses
+# word bounding-box positions (which are always accurate) to split them back
+# into one record per parameter row.
+
+def _parse_field_params_words(page, sample_id: str, vp: LabValueParser,
+                               debug: bool = False) -> list[dict]:
+    words = page.extract_words(
+        x_tolerance=4, y_tolerance=4,
+        keep_blank_chars=False, use_text_flow=False,
+    ) or []
+    if not words:
+        return []
+
+    row_groups: list[list[dict]] = []
+    for word in sorted(words, key=lambda w: (w["top"], w["x0"])):
+        for group in row_groups:
+            if abs(word["top"] - group[0]["top"]) <= _ROW_TOL:
+                group.append(word)
+                break
+        else:
+            row_groups.append([word])
+    for g in row_groups:
+        g.sort(key=lambda w: w["x0"])
+
+    records = []
+    for group in row_groups:
+        raw_texts = [w["text"] for w in group]
+        if not any(_hits_field_param(t) for t in raw_texts):
+            continue
+        # RTL layout (left→right in PDF coords): value  unit  name
+        val_idx = next(
+            (i for i, t in enumerate(raw_texts)
+             if re.match(r"^[<>]?-?[\d.]", t) or _ND_RE.match(t)),
+            None,
+        )
+        if val_idx is None:
+            continue
+        val_str = raw_texts[val_idx]
+        rest = raw_texts[val_idx + 1:]
+        if not rest:
+            continue
+        name_tokens: list[str] = []
+        unit_tokens: list[str] = []
+        for t in reversed(rest):
+            if _HEBREW_RE.search(t) or _hits_field_param(t):
+                name_tokens.insert(0, t)
+            else:
+                unit_tokens.insert(0, t)
+        name_str = _fix_rtl(" ".join(name_tokens)) if name_tokens else ""
+        unit_str = " ".join(unit_tokens)
+        if not name_str:
+            continue
+        rec = _make_record(name_str, unit_str, val_str, "", sample_id, vp)
+        if rec and rec.get("analysis_type") == "GW_FIELD_PARAMS":
+            records.append(rec)
+            if debug:
+                print(f"[AMINOLAB DEBUG] fp-words: name={name_str!r} "
+                      f"unit={unit_str!r} val={val_str!r} "
+                      f"→ {rec['compound']} {rec['value']} {rec['unit']}")
+    return records
+
+
 # ── Parser class ──────────────────────────────────────────────────────────────
 
 class AminolabGroundwaterParser(BaseParser):
@@ -679,6 +738,18 @@ class AminolabGroundwaterParser(BaseParser):
                     page_recs = _parse_page_text(page, sample_id, self._vp, self._debug)
                     if self._debug:
                         print(f"[AMINOLAB DEBUG] Strategy 3 (text): {len(page_recs)} records")
+
+                # Field-params pass: always runs because extract_tables() merges
+                # field-param rows when horizontal borders are absent.
+                existing_fp = {r["compound"] for r in page_recs
+                               if r.get("analysis_type") == "GW_FIELD_PARAMS"}
+                if not existing_fp:
+                    fp_recs = _parse_field_params_words(
+                        page, sample_id, self._vp, self._debug)
+                    if self._debug and fp_recs:
+                        print(f"[AMINOLAB DEBUG] fp-words pass: "
+                              f"{len(fp_recs)} field-param records")
+                    page_recs.extend(fp_recs)
 
                 records.extend(page_recs)
 
