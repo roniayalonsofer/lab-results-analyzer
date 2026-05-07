@@ -109,7 +109,7 @@ ANALYSIS_THRESHOLDS: dict[str, list[str]] = {
     "SOIL_TPH_VOC":   ["VSL_SOIL"] + _SOIL_TIER1_KEYS,
     "SOIL_TPH_MBTEX": ["VSL_SOIL"] + _SOIL_TIER1_KEYS,
     "SOIL_PFAS":    ["PFAS_VSL", "PFAS_TIER1_RES", "PFAS_TIER1_IND"],
-    "GW_VOC":           ["GW"],
+    "GW_VOC":           [],
     "GW_PFAS":          [],
     "LOWFLOW":          [],
     "SOIL_GRAIN_SIZE":  [],

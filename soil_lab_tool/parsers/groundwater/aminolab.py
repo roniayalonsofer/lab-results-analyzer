@@ -137,8 +137,7 @@ def _expand_btex(rec: dict) -> list[dict]:
         components = _BTEX_COMPONENTS + [("MTBE", "1634-04-4")]
     else:
         return [rec]
-    raw = rec.get("raw_value", "")
-    return [{**rec, "compound": name, "cas": cas, "value": raw} for name, cas in components]
+    return [{**rec, "compound": name, "cas": cas} for name, cas in components]
 
 
 # ── Transposed field-params detection ─────────────────────────────────────────
@@ -153,6 +152,7 @@ def _expand_btex(rec: dict) -> list[dict]:
 _FIELD_PARAM_WORDS: frozenset[str] = frozenset({
     "ph", "הגבה", "מוליכות", "טמפרטורה", "do",
     "orp", "רדוקס", "עכירות", "עומק", "חמצן",
+    "קידוח", "קוטר", "נפח", "שאיבה", "צינור", "דיגום",
     "conductivity", "temperature", "turbidity", "depth", "redox",
 })
 
@@ -697,7 +697,7 @@ class AminolabGroundwaterParser(BaseParser):
     ANALYSIS_TYPES = ["GW_VOC", "GW_FIELD_PARAMS"]
 
     def __init__(self, debug: bool | None = None):
-        self._vp    = LabValueParser()
+        self._vp    = LabValueParser(default_nd_factor=1.0)
         self._debug = debug if debug is not None else bool(os.environ.get("AMINOLAB_DEBUG"))
 
     def parse(self, file_obj: io.BytesIO) -> list[dict]:
@@ -739,17 +739,19 @@ class AminolabGroundwaterParser(BaseParser):
                     if self._debug:
                         print(f"[AMINOLAB DEBUG] Strategy 3 (text): {len(page_recs)} records")
 
-                # Field-params pass: always runs because extract_tables() merges
-                # field-param rows when horizontal borders are absent.
-                existing_fp = {r["compound"] for r in page_recs
-                               if r.get("analysis_type") == "GW_FIELD_PARAMS"}
-                if not existing_fp:
-                    fp_recs = _parse_field_params_words(
-                        page, sample_id, self._vp, self._debug)
-                    if self._debug and fp_recs:
+                # Always run dedicated field-params word pass.
+                # extract_tables() merges field-param rows into one garbage record
+                # (no horizontal borders), so we discard any GW_FIELD_PARAMS that
+                # came from table extraction and replace with the word-based results.
+                fp_recs = _parse_field_params_words(
+                    page, sample_id, self._vp, self._debug)
+                if fp_recs:
+                    page_recs = [r for r in page_recs
+                                 if r.get("analysis_type") != "GW_FIELD_PARAMS"]
+                    page_recs.extend(fp_recs)
+                    if self._debug:
                         print(f"[AMINOLAB DEBUG] fp-words pass: "
                               f"{len(fp_recs)} field-param records")
-                    page_recs.extend(fp_recs)
 
                 records.extend(page_recs)
 
