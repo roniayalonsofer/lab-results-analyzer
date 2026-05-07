@@ -71,7 +71,7 @@ html, body {{ direction: ltr; }}
        positioning so the block never drifts under the sidebar           */
 }}
 
-/* ── sidebar — always expanded, never collapse ── */
+/* ── sidebar — RTL position (right side) + always expanded ── */
 [data-testid="stSidebar"] {{
     direction: rtl;
     background: #1a2d38;
@@ -79,12 +79,18 @@ html, body {{ direction: ltr; }}
     max-width: 16rem !important;
     width: 15.5rem !important;
     flex-shrink: 0 !important;
+    /* move sidebar to right side for Hebrew/RTL layout */
+    right: 0;
+    left: auto;
     /* override any JS-driven collapse transform */
     transform: none !important;
     transition: none !important;
     visibility: visible !important;
     display: block !important;
     margin-left: 0 !important;
+}}
+[data-testid="stSidebarContent"] {{
+    direction: rtl;
 }}
 /* also override the collapsed-state that Streamlit applies via aria */
 [data-testid="stSidebar"][aria-expanded="false"] {{
