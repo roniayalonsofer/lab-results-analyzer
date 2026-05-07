@@ -71,7 +71,7 @@ html, body {{ direction: ltr; }}
        positioning so the block never drifts under the sidebar           */
 }}
 
-/* ── sidebar — fixed width, always visible ── */
+/* ── sidebar — always expanded, never collapse ── */
 [data-testid="stSidebar"] {{
     direction: rtl;
     background: #1a2d38;
@@ -79,10 +79,29 @@ html, body {{ direction: ltr; }}
     max-width: 16rem !important;
     width: 15.5rem !important;
     flex-shrink: 0 !important;
+    /* override any JS-driven collapse transform */
+    transform: none !important;
+    transition: none !important;
+    visibility: visible !important;
+    display: block !important;
+    margin-left: 0 !important;
 }}
-/* hide the collapse/expand toggle so the sidebar cannot be hidden */
+/* also override the collapsed-state that Streamlit applies via aria */
+[data-testid="stSidebar"][aria-expanded="false"] {{
+    transform: none !important;
+    width: 15.5rem !important;
+    min-width: 15rem !important;
+    overflow: visible !important;
+}}
+/* hide ALL collapse/expand controls — cover every known selector variant
+   so neither the in-sidebar button nor the floating re-open button shows */
 [data-testid="stSidebarCollapseButton"],
-[data-testid="collapsedControl"] {{
+[data-testid="stSidebarNavCollapseButton"],
+[data-testid="collapsedControl"],
+button[aria-label="Close sidebar"],
+button[aria-label="Open sidebar"],
+button[aria-label="פתח סרגל צד"],
+button[aria-label="סגור סרגל צד"] {{
     display: none !important;
 }}
 
@@ -99,10 +118,12 @@ html, body {{ direction: ltr; }}
 [data-testid="stSidebar"] .stMarkdown h3 {{ color: #f1f5f9 !important; }}
 [data-testid="stSidebar"] hr {{ border-color: #2a4050; }}
 
-/* hide footer / menu */
-#MainMenu {{ visibility: hidden; }}
-footer {{ visibility: hidden; }}
-header {{ visibility: hidden; }}
+/* hide footer / menu / header toolbar
+   use display:none (not visibility:hidden) so these elements are fully
+   removed from layout and cannot intercept sidebar-related clicks       */
+#MainMenu {{ display: none !important; }}
+footer {{ display: none !important; }}
+header {{ display: none !important; }}
 
 /* ── typography — explicit RTL for all text elements ── */
 .stMarkdown p, .stMarkdown li,
