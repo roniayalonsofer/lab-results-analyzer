@@ -467,15 +467,25 @@ class BactochemGroundwaterParser(BaseParser):
     def _extract_btex(self, page, sample_id: str) -> list[dict]:
         """Extract GW_VOC records from BTEX data lines in a PDF page.
 
-        The BTEX compounds appear as free-form text lines (not in proper PDF
-        table cells), so page.extract_text() is used.  Each line matching
-        the pattern "CAS #: {cas} {loq} mg/L {result} {compound}" becomes
-        one GW_VOC record.
+        The BTEX compounds appear as free-form text lines, so page.extract_text()
+        is used.  Within a page there may be multiple sample blocks each preceded
+        by a reversed-RTL sample-header line ("1984652 :המגודה רפסמ …"); the
+        current sample ID is updated whenever such a header is seen, so each
+        CAS record is tagged with its correct sample.
         """
         records: list[dict] = []
+        current_sample = sample_id
         text = page.extract_text() or ""
 
         for line in text.splitlines():
+            # New sample block starting on this page?
+            hdr = _BC_SAMPLE_HDR_RE.search(line)
+            if hdr:
+                current_sample = hdr.group(1)
+                if self._debug:
+                    print(f"  [BTEX] new sample block: {current_sample!r}")
+                continue
+
             m = _GW_CAS_LINE_RE.search(line)
             if not m:
                 continue
@@ -496,12 +506,12 @@ class BactochemGroundwaterParser(BaseParser):
             value, flag = self._vp.parse(result_raw)
 
             if self._debug:
-                print(f"  [BTEX] compound={compound!r}  cas={cas!r}  "
-                      f"result={result_raw!r}  →  value={value}  flag={flag!r}")
+                print(f"  [BTEX] sample={current_sample!r}  compound={compound!r}  "
+                      f"cas={cas!r}  result={result_raw!r}  →  value={value}  flag={flag!r}")
 
             records.append({
                 "lab":           self.LAB_NAME,
-                "sample_id":     sample_id,
+                "sample_id":     current_sample,
                 "compound":      compound,
                 "cas":           cas,
                 "value":         value,
