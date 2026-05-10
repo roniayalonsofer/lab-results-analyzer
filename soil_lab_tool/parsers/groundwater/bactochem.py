@@ -570,20 +570,12 @@ class BactochemGroundwaterParser(BaseParser):
         return records
 
     def _extract_btex(self, page, sample_id: str) -> list[dict]:
-        """Extract GW_VOC records from BTEX data lines in a PDF page.
-
-        The BTEX compounds appear as free-form text lines, so page.extract_text()
-        is used.  Within a page there may be multiple sample blocks each preceded
-        by a reversed-RTL sample-header line ("1984652 :המגודה רפסמ …"); the
-        current sample ID is updated whenever such a header is seen, so each
-        CAS record is tagged with its correct sample.
-        """
+        """Extract GW_VOC records from BTEX data lines (mg/L) in a PDF page."""
         records: list[dict] = []
         current_sample = sample_id
         text = page.extract_text() or ""
 
         for line in text.splitlines():
-            # New sample block starting on this page?
             hdr = _BC_SAMPLE_HDR_RE.search(line)
             if hdr:
                 current_sample = hdr.group(1)
@@ -593,6 +585,9 @@ class BactochemGroundwaterParser(BaseParser):
 
             m = _GW_CAS_LINE_RE.search(line)
             if not m:
+                continue
+            # PFAS lines share the same CAS format but use ng/L — skip them here
+            if m.group("unit").lower() != "mg/l":
                 continue
 
             cas        = m.group("cas").strip()
@@ -623,7 +618,124 @@ class BactochemGroundwaterParser(BaseParser):
                 "flag":          flag,
                 "unit":          "mg/L",
                 "lod":           None,
+                "loq":           None,
                 "analysis_type": "GW_VOC",
+            })
+
+        return records
+
+    def _extract_pfas(self, page, sample_id: str) -> list[dict]:
+        """Extract GW_PFAS records from CAS data lines with ng/L unit."""
+        records: list[dict] = []
+        current_sample = sample_id
+        text = page.extract_text() or ""
+
+        for line in text.splitlines():
+            hdr = _BC_SAMPLE_HDR_RE.search(line)
+            if hdr:
+                current_sample = hdr.group(1)
+                continue
+
+            m = _GW_CAS_LINE_RE.search(line)
+            if not m:
+                continue
+            if m.group("unit").lower() != "ng/l":
+                continue
+
+            cas        = m.group("cas").strip()
+            result_raw = m.group("result").strip()
+            loq_raw    = m.group("loq") or ""
+            name_tail  = (m.group("compound") or "").strip()
+
+            # Prefer known PFAS name from CAS dict; fall back to line tail
+            compound = PFAS_CAS.get(cas)
+            if compound is None:
+                lo = name_tail.lower()
+                if any(frag in lo for frag in _PFAS_NAME_FRAGS):
+                    compound = name_tail
+                else:
+                    compound = name_tail or cas
+            if not compound:
+                continue
+
+            try:
+                loq: float | None = float(loq_raw) if loq_raw else None
+            except ValueError:
+                loq = None
+
+            value, flag = self._vp.parse(result_raw)
+            # ND → use LOQ as the numeric value (consistent with soil parser)
+            if flag == "ND" and loq is not None:
+                value = loq
+
+            if self._debug:
+                print(f"  [PFAS] sample={current_sample!r}  compound={compound!r}  "
+                      f"cas={cas!r}  result={result_raw!r}  →  value={value}  flag={flag!r}")
+
+            records.append({
+                "lab":           self.LAB_NAME,
+                "sample_id":     current_sample,
+                "compound":      compound,
+                "cas":           cas,
+                "value":         value,
+                "flag":          flag,
+                "unit":          "ng/L",
+                "lod":           None,
+                "loq":           loq,
+                "analysis_type": "GW_PFAS",
+            })
+
+        return records
+
+    def _extract_microbiology(self, page, sample_id: str) -> list[dict]:
+        """Extract GW_MICROBIOLOGY records from bacterial count lines (CFU/mL)."""
+        records: list[dict] = []
+        current_sample = sample_id
+        text = page.extract_text() or ""
+
+        for line in text.splitlines():
+            hdr = _BC_SAMPLE_HDR_RE.search(line)
+            if hdr:
+                current_sample = hdr.group(1)
+                continue
+
+            m = _MICRO_RE.search(line)
+            if not m:
+                continue
+
+            compound   = _fix_rtl_bc(m.group("compound").strip(" :-"))
+            result_raw = m.group("result").strip()
+            raw_unit   = m.group("unit").strip()
+
+            if not compound:
+                continue
+
+            # Normalise unit spelling
+            unit_lo = raw_unit.lower()
+            if "100" in unit_lo:
+                unit = "CFU/100mL"
+            elif "mpn" in unit_lo:
+                unit = "MPN/100mL"
+            else:
+                unit = "CFU/mL"
+
+            value, flag = self._vp.parse(result_raw)
+
+            if self._debug:
+                print(f"  [MICRO] sample={current_sample!r}  compound={compound!r}  "
+                      f"result={result_raw!r}  unit={unit!r}  →  value={value}  flag={flag!r}")
+
+            records.append({
+                "lab":           self.LAB_NAME,
+                "sample_id":     current_sample,
+                "compound":      compound,
+                "cas":           "",
+                "value":         value,
+                "flag":          flag,
+                "unit":          unit,
+                "lod":           None,
+                "loq":           None,
+                "analysis_type": "GW_MICROBIOLOGY",
             })
 
         return records
