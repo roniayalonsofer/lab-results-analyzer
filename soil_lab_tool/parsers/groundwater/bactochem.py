@@ -431,15 +431,36 @@ class BactochemGroundwaterParser(BaseParser):
                 if self._debug:
                     print(f"[BC DEBUG] {len(row_groups)} row groups on page {page_num}")
 
+                # Build a y-sorted list of sample-header boundaries on this page.
+                # Each entry is (y_top, sample_id).  Rows whose y falls below a
+                # boundary inherit that boundary's sample — matching what
+                # _extract_btex does for text lines.
+                page_sample_boundaries: list[tuple[float, str]] = []
+                for grp in row_groups:
+                    joined = " ".join(w["text"] for w in grp)
+                    hdr_m = _BC_SAMPLE_HDR_RE.search(joined)
+                    if hdr_m:
+                        page_sample_boundaries.append(
+                            (grp[0]["top"], hdr_m.group(1))
+                        )
+                page_sample_boundaries.sort()
+
                 page_hits = 0
                 for gi, group in enumerate(row_groups):
                     texts = [w["text"] for w in group]
-                    rec = _parse_bc_fp_row(group, sample_id, self._vp)
+                    # Determine which sample this row belongs to
+                    row_y = group[0]["top"]
+                    row_sample = sample_id  # default: carry-forward from prev page
+                    for bound_y, sid in page_sample_boundaries:
+                        if bound_y <= row_y:
+                            row_sample = sid
+                    rec = _parse_bc_fp_row(group, row_sample, self._vp)
                     if rec is not None:
                         records.append(rec)
                         page_hits += 1
                         if self._debug:
                             print(f"  row {gi:3d} HIT  texts={texts}  "
+                                  f"sample={row_sample!r}  "
                                   f"→ compound={rec['compound']!r}  "
                                   f"value={rec['value']}  unit={rec['unit']!r}")
                     elif self._debug and any(t in _BC_FP_TOKENS for t in texts):
