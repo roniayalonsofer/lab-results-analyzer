@@ -406,10 +406,11 @@ class BactochemGroundwaterParser(BaseParser):
                       f"size={pdf.pages[0].width:.0f}×{pdf.pages[0].height:.0f}")
 
             for page_num, page in enumerate(pdf.pages):
-                if page_num == 0:
-                    sample_id = self._extract_sample_id_bc(page)
-                    if self._debug:
-                        print(f"[BC DEBUG] sample_id={sample_id!r}")
+                page_sample_id = self._extract_sample_id_bc(page)
+                if page_sample_id != "Sample":
+                    sample_id = page_sample_id
+                if self._debug:
+                    print(f"[BC DEBUG] Page {page_num}: sample_id={sample_id!r}")
 
                 words = page.extract_words(
                     x_tolerance=4, y_tolerance=4,
