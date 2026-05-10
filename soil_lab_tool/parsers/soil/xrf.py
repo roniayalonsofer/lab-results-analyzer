@@ -342,10 +342,6 @@ class XRFSoilParser(BaseParser):
                     continue
 
                 value, flag, lod = _parse_xrf_value(raw_val)
-                # Skip cells that couldn't be parsed at all (shouldn't happen)
-                if value is None and flag == "ND" and lod is None and raw_val not in ("", "nan"):
-                    # Still include as ND record so the compound appears in the sheet
-                    pass
 
                 records.append({
                     "sample_id":     sample_id,
