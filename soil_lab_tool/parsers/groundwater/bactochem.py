@@ -391,6 +391,7 @@ class BactochemGroundwaterParser(BaseParser):
     COL_RESULT   = "תוצאה"
     COL_LOCATION = "תיאור דוגמה"
     COL_DATE     = "תאריך דיגום"
+    COL_UNIT     = "יחידות"   # units column (may be absent in some file versions)
 
     def __init__(self, debug: bool | None = None):
         self._vp    = LabValueParser()
