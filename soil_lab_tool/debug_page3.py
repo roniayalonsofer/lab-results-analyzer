@@ -15,7 +15,7 @@ with open(PDF, "rb") as f:
     data = f.read()
 
 with pdfplumber.open(io.BytesIO(data)) as pdf:
-    page = pdf.pages[3]
+    page = pdf.pages[2]
     words = page.extract_words(x_tolerance=4, y_tolerance=4) or []
     # cluster
     groups = []
