@@ -1090,7 +1090,7 @@ with tab_excel:
         except Exception as e:
             st.error(f"שגיאת בניית Excel: {e}")
             st.exception(e)
-    elif lab.lower() == "xrf":
+    elif lab.lower() in ("xrf",) or lab in ("אלכם", "אלכם (XRF)"):
         try:
             build_xrf_simple_excel(
                 records,
