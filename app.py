@@ -1091,6 +1091,15 @@ with tab_excel:
         except Exception as e:
             st.error(f"שגיאת בניית Excel: {e}")
             st.exception(e)
+    elif isinstance(parser, XRFSoilParser):
+        # XRF: plain Sample × Element table — no thresholds, no CAS
+        try:
+            build_xrf_simple_excel(records, excel_buf)
+            excel_buf.seek(0)
+            excel_ok = True
+        except Exception as e:
+            st.error(f"שגיאת בניית Excel: {e}")
+            st.exception(e)
     else:
         thresh_display = ", ".join(tm.threshold_label(k) for k in selected_thresholds) or "ללא ערכי סף"
         st.caption(f"📌 ערכי סף: **{thresh_display}**")
