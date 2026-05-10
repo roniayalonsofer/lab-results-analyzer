@@ -114,6 +114,11 @@ def _analysis_type(section: str | None, unit: str) -> str:
         return "SOIL_EXPLOSIVES"
     if section == "ICP":
         return "SOIL_METALS" if is_soil else "GW_METALS"
+    if section == "PFAS":
+        return "SOIL_PFAS" if is_soil else "GW_PFAS"
+    # Fallback: use unit as guide when section not detected
+    if "ng" in unit:
+        return "SOIL_PFAS" if is_soil else "GW_PFAS"
     return "SOIL_SVOC"
 
 
