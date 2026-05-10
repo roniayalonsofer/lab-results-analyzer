@@ -224,6 +224,57 @@ def _parse_lines(lines: list[str]) -> list[dict]:
                 if pat.search(line):
                     section = key
                     break
+
+            # ── Microbiology line (CFU/MPN unit, no CAS number) ────────
+            m_micro = _MICRO_LINE_RE.search(line)
+            if m_micro:
+                compound = _fix_rtl(m_micro.group("compound").strip(" :-"))
+                res_raw  = m_micro.group("result").strip()
+                raw_unit = m_micro.group("unit").strip()
+                unit_lo  = raw_unit.lower()
+                if "100" in unit_lo:
+                    norm_unit = "CFU/100mL"
+                elif "mpn" in unit_lo:
+                    norm_unit = "MPN/100mL"
+                else:
+                    norm_unit = "CFU/mL"
+                value, flag = _parse_result(res_raw, None)
+                if compound and (value is not None or flag):
+                    records.append({
+                        "sample_id":     sample_name,
+                        "compound":      compound,
+                        "cas":           "",
+                        "value":         value,
+                        "flag":          flag,
+                        "unit":          norm_unit,
+                        "lod":           None,
+                        "loq":           None,
+                        "analysis_type": "GW_MICROBIOLOGY",
+                    })
+                continue
+
+            # ── Bare PFAS line (no CAS #: prefix) ──────────────────────
+            m_pfas = _PFAS_BARE_RE.search(line)
+            if m_pfas:
+                compound = m_pfas.group("compound").strip().upper()
+                res_raw  = m_pfas.group("result").strip()
+                unit     = m_pfas.group("unit").strip()
+                is_soil  = "kg" in unit.lower()
+                value, flag = _parse_result(res_raw, None)
+                if value is not None or flag:
+                    records.append({
+                        "sample_id":     sample_name,
+                        "compound":      compound,
+                        "cas":           "",
+                        "value":         value,
+                        "flag":          flag,
+                        "unit":          unit,
+                        "lod":           None,
+                        "loq":           None,
+                        "analysis_type": "SOIL_PFAS" if is_soil else "GW_PFAS",
+                    })
+                continue
+
             continue
 
         # ── CAS data line ───────────────────────────────────────────────────
