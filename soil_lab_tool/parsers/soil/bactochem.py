@@ -39,7 +39,7 @@ _SAMPLE_RE = re.compile(
 # CAS data line — fields in order:
 #   [footnote] CAS #: {cas} [{loq}] {unit} [X≤threshold] {result} [{n}/] {compound}
 _CAS_RE = re.compile(
-    r"CAS\s*#:\s*(?P<cas>[\w.+\-]+)"                                           # CAS / pseudo-id
+    r"CAS\s*#:\s*(?:CAS\s+)?(?P<cas>[\w.+\-]+)"                               # CAS / pseudo-id (some PDFs repeat "CAS" before the number)
     r"(?:\s+(?P<loq>[\d.]+))?"                                                  # optional LOQ
     r"\s+(?P<unit>%|ng/(?:kg|L)|mg/(?:kg(?:\s+dry(?:\s+substance)?)?|L))"      # unit (inc ng/kg, ng/L)
     r"(?:\s+X[≤≥<>≠]\s*[\d.]+(?:\s*/\s*[\d.]+)?)?"                            # optional threshold
