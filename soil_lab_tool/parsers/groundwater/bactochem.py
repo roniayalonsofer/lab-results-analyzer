@@ -12,8 +12,10 @@ File format (CSV or XLSX):
   - Column 'אנליזה'        : analysis code (may or may not be present)
 
 Analysis type mapping is done by compound name (not analysis code):
-  GW_VOC         : Benzene, Toluene, Ethyl Benzene, Xylene, MTBE, Naphthalene, TBA
-  GW_FIELD_PARAMS: pH, EC, Temperature, DO, Turbidity, Redox, depth params
+  GW_VOC           : Benzene, Toluene, Ethyl Benzene, Xylene, MTBE, Naphthalene, TBA
+  GW_FIELD_PARAMS  : pH, EC, Temperature, DO, Turbidity, Redox, depth params
+  GW_PFAS          : PFOA, PFOS, PFHxS, PFNA, PFBS, … (keywords: PFAS / PF*)
+  GW_MICROBIOLOGY  : Total coliforms, E. coli, Enterococcus, חיידקים (CFU units)
 
 GW thresholds sourced from soil_vsl_tier1_v7_2024.xlsx  "Groundwater" column:
   Benzene      1   mg/L
