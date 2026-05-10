@@ -44,6 +44,7 @@ _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
     ("אמינולאב",     "groundwater"): AminolabGroundwaterParser,
     ("xrf",           "soil"):        XRFSoilParser,
     ("אלכם",          "soil"):        XRFSoilParser,   # XRF method, lab = אלכם
+    ("אלכם (xrf)",    "soil"):        XRFSoilParser,   # dropdown display key
 }
 
 
