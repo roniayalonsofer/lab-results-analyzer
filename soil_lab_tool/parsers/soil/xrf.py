@@ -225,11 +225,11 @@ class XRFSoilParser(BaseParser):
     """
     Parse wide-format XRF soil metals reports (CSV or XLSX).
 
-    Output analysis_type: SOIL_METALS (same sheet + thresholds as ICP metals).
+    Output analysis_type: XRF (lab = אלכם, method = X-ray Fluorescence).
     """
 
-    LAB_NAME = "XRF"
-    ANALYSIS_TYPES = ["SOIL_METALS"]
+    LAB_NAME = "אלכם"
+    ANALYSIS_TYPES = ["XRF"]
 
     def parse(self, file_obj: io.BytesIO) -> list[dict]:
         file_obj.seek(0)
