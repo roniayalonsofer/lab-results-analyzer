@@ -346,14 +346,79 @@ def _build_analysis_table(
         for cmp in compounds
     }
 
+    n_thresh      = len(thresh_keys)
+    n_fixed       = 2 + n_thresh + 1   # compound | CAS | thresh(es) | unit
+    portrait_cols = n_fixed + len(samples)
+
+    # ── Transposed layout (samples as rows, compounds as columns) ─────
+    # Used when portrait would exceed Word's 63-column limit.
+    if portrait_cols > 63:
+        n_cols = 1 + len(compounds)
+        table = doc.add_table(rows=1, cols=n_cols)
+        table.style = "Table Grid"
+        _set_rtl_table(table)
+        _set_table_full_width(table)
+
+        # Row 0: column headers = compound names
+        hdr = table.rows[0].cells
+        _write_cell(hdr[0], "דגימה", bold=True, align=WD_ALIGN_PARAGRAPH.RIGHT)
+        for j, cmp in enumerate(compounds):
+            _write_cell(hdr[1 + j], cmp, bold=True, align=WD_ALIGN_PARAGRAPH.RIGHT)
+
+        # Row 1: CAS numbers
+        cas_row = table.add_row().cells
+        _write_cell(cas_row[0], "CAS", bold=True)
+        for j, cmp in enumerate(compounds):
+            _write_cell(cas_row[1 + j], cas_map.get(cmp, "") or "—", size=_SZ_SM)
+
+        # Row 2: units
+        unit_row = table.add_row().cells
+        _write_cell(unit_row[0], "יחידות", bold=True)
+        for j, cmp in enumerate(compounds):
+            _write_cell(unit_row[1 + j], unit_map.get(cmp, unit), size=_SZ_SM)
+
+        # Rows 3+: one per threshold key
+        for k in thresh_keys:
+            t_row = table.add_row().cells
+            _write_cell(t_row[0], THRESHOLD_LABELS.get(k, k), bold=True)
+            for j, cmp in enumerate(compounds):
+                tv   = thresh_vals.get(cmp, {}).get(k)
+                tv_r = round(tv, 2) if isinstance(tv, (int, float)) else None
+                text = _fmt_thresh(tv_r)
+                _write_cell(t_row[1 + j], text,
+                            italic=(text == "לא קיים"),
+                            gray_text=(text == "לא קיים"),
+                            size=_SZ_SM)
+
+        # Data rows: one per sample
+        has_gray = False
+        for sid in samples:
+            bh, dep = _split_sample_depth(sid)
+            sid_text  = f"{bh}\n{dep}" if dep else bh
+            row_cells = table.add_row().cells
+            _write_cell(row_cells[0], sid_text, align=WD_ALIGN_PARAGRAPH.RIGHT)
+
+            for j, cmp in enumerate(compounds):
+                v, flag, lod = pivot.get(cmp, {}).get(sid, (None, "ND", None))
+                display = _fmt_value(v, flag, lod)
+                cell    = row_cells[1 + j]
+                t_vals  = thresh_vals.get(cmp, {})
+                color   = _cell_color(v, flag, lod, t_vals, thresh_keys)
+                if color:
+                    _set_cell_bg(cell, color)
+                    if color == _GRAY:
+                        has_gray = True
+                _write_cell(cell, display, bold=(color in (_ORANGE, _YELLOW)), size=_SZ_SM)
+
+        doc.add_paragraph()
+        _add_legend(doc, include_gray=has_gray)
+        doc.add_paragraph()
+        return
+
+    # ── Portrait layout (compounds as rows, samples as columns) ──────
     split_map = {sid: _split_sample_depth(sid) for sid in samples}
+    n_cols    = portrait_cols
 
-    n_thresh = len(thresh_keys)
-    # Fixed cols: תרכובת(0) | CAS(1) | thresh…(2…n+1) | יחידות(n+2)
-    n_fixed  = 2 + n_thresh + 1
-    n_cols   = n_fixed + len(samples)
-
-    # ── Create table ──────────────────────────────────────────────────
     table = doc.add_table(rows=1, cols=n_cols)
     table.style = "Table Grid"
     _set_rtl_table(table)
