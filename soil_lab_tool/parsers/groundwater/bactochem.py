@@ -86,7 +86,7 @@ _MICRO_RE = re.compile(
     r"[:\s]+"
     r"(?P<result><\s*[\d.]+|Not\s+Detected|ND|[\d]+(?:\s*[×x]\s*10\^?\d+)?)"
     r"\s+"
-    r"(?P<unit>CFU/(?:100\s*)?m[Ll]|MPN/(?:100\s*)?m[Ll]|יח[\"׳']/מ[\"׳']?[לl])",
+    r"(?P<unit>CFU/(?:100\s*)?m[Ll]|MPN/(?:100\s*)?m[Ll]|m[Ll]/(?:100\s*)?CFU|יח[\"׳']/מ[\"׳']?[לl])",
     re.IGNORECASE | re.UNICODE,
 )
 
