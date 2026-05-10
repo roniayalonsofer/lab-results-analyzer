@@ -57,8 +57,30 @@ _SECTION_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"SVOC",                           re.I), "SVOC"),
     (re.compile(r"\bVOC\b",                        re.I), "VOC"),
     (re.compile(r"\bICP\b",                        re.I), "ICP"),
-    (re.compile(r"\bPFAS\b",                       re.I), "PFAS"),   # must follow VOC/ICP checks
+    # PFAS must follow VOC/ICP checks; also catches "Perfluorinated" and "PFAS Analysis"
+    (re.compile(r"\bPFAS\b|Perfluorin",            re.I), "PFAS"),
+    (re.compile(r"Microbiol|חיידקים|ביולוגי",      re.I), "MICROBIOLOGY"),
 ]
+
+# PFAS compound names that may appear without a CAS #: prefix
+_PFAS_BARE_RE = re.compile(
+    r"^(?P<compound>PF(?:OA|OS|HxS|HpA|BA|HxA|NA|DA|BS|PeA|PeS|HpS|TrDA|DoDA|TA|UnDA)"
+    r"|FOSA|FHxSA)\b"
+    r".*?"
+    r"(?P<result>Not\s+Detected|<[\d.]+|[\d.]+(?:[Ee][+\-]?\d+)?)"
+    r"\s+(?P<unit>ng/(?:kg|L))",
+    re.IGNORECASE,
+)
+
+# Microbiology result line — compound + result + CFU/MPN unit (no CAS number)
+_MICRO_LINE_RE = re.compile(
+    r"(?P<compound>[^\t<>]{3,60}?)"
+    r"[:\s]+"
+    r"(?P<result><\s*[\d.]+|Not\s+Detected|ND|[\d]+(?:[.,]\d+)?(?:\s*[×xX]\s*10\^?\d+)?)"
+    r"\s+"
+    r"(?P<unit>CFU/(?:100\s*)?m[Ll]|MPN/(?:100\s*)?m[Ll])",
+    re.IGNORECASE | re.UNICODE,
+)
 
 # Page footer — skip these lines
 _PAGE_FOOTER_RE = re.compile(r"Page\s+\d+\s+of\s+\d+", re.I)
