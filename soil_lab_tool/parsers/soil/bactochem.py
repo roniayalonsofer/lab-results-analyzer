@@ -78,7 +78,7 @@ _MICRO_LINE_RE = re.compile(
     r"[:\s]+"
     r"(?P<result><\s*[\d.]+|Not\s+Detected|ND|[\d]+(?:[.,]\d+)?(?:\s*[×xX]\s*10\^?\d+)?)"
     r"\s+"
-    r"(?P<unit>CFU/(?:100\s*)?m[Ll]|MPN/(?:100\s*)?m[Ll])",
+    r"(?P<unit>CFU/(?:100\s*)?m[Ll]|MPN/(?:100\s*)?m[Ll]|m[Ll]/(?:100\s*)?CFU)",
     re.IGNORECASE | re.UNICODE,
 )
 
