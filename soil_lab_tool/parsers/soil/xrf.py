@@ -102,6 +102,21 @@ _SKIP_COLS = frozenset({
     "date", "depth", "unit", "units", "comment", "notes", "remarks",
     "latitude", "longitude", "lat", "lon", "northing", "easting",
     "field", "method", "matrix",
+    # XRF instrument metadata columns
+    "duration", "time", "reading", "reading #", "reading#", "type",
+    "dose", "instrument", "operator", "sequence", "sequence #",
+    "application", "user", "group", "alloy", "grade", "pass/fail",
+    "pass", "fail", "quality",
+})
+
+# Column headers that identify the sample ID — checked before _SKIP_COLS
+_SAMPLE_ID_HINTS = frozenset({
+    "sample", "sample id", "sample_id", "sampleid", "id",
+    "מזהה", "מספר",
+    # Olympus / Bruker / ThermoFisher handheld XRF exports
+    "sample name", "sample_name", "label", "user label", "user_label",
+    "point id", "point_id", "no", "no.", "#", "reading #", "reading#",
+    "test #", "test#",
 })
 
 # Columns that contain the sample location / description
@@ -110,21 +125,72 @@ _LOCATION_HINTS = frozenset({
     "description", "name", "label", "תיאור", "מיקום", "קידוח",
 })
 
-# Header row indicators (row contains these → it's the header)
-_HEADER_MARKERS = frozenset({"sample", "id", "location", "site", "pb", "zn", "as", "cu", "ni"})
-
 # Unit pattern embedded in a column header, e.g. "Pb (mg/kg)" or "As [ppm]"
 _UNIT_RE = re.compile(r"\(([^)]+)\)|\[([^\]]+)\]")
+
+# Non-detect text patterns found in XRF data cells (before numeric < patterns)
+_ND_TEXT_RE = re.compile(
+    r'^(?:[<\s]*(?:lod|loq|dl|mdl|bdl|bql|nd|n\.d\.?|not\s+detected|below|'
+    r'no\s+detect|not\s+detect)|---+|-+|n/a|na)$',
+    re.IGNORECASE,
+)
+# Numeric below-detection: "< 0.001", "<0.5", "< 1.23E-4"
+_BELOW_NUM_RE = re.compile(
+    r'^[<＜]\s*(\d+\.?\d*(?:[eE][+-]?\d+)?)\s*$'
+)
+
+
+def _parse_xrf_value(raw: str) -> tuple[float | None, str, float | None]:
+    """
+    Parse one XRF data cell.
+
+    Returns (value, flag, lod) where:
+        value : float | None — numeric measurement (None for non-detects)
+        flag  : ''           — detected value
+                '<LOD'       — below numeric detection limit  (lod = the limit)
+                'ND'         — non-detect (no numeric limit given)
+                '<'          — explicit less-than with no recognised LOD keyword
+        lod   : float | None — detection limit when known
+    """
+    s = raw.strip()
+    if not s or s.lower() in ("nan", ""):
+        return None, "ND", None
+
+    # Text-based non-detects: "< LOD", "< DL", "ND", "BDL", "N/A", …
+    if _ND_TEXT_RE.match(s):
+        return None, "ND", None
+
+    # Numeric below-detection: "< 0.001"  →  lod=0.001, value=None, flag='<LOD'
+    m = _BELOW_NUM_RE.match(s)
+    if m:
+        lod_num = float(m.group(1))
+        return None, "<LOD", lod_num
+
+    # Regular positive number
+    try:
+        return float(s), "", None
+    except ValueError:
+        pass
+
+    # Fallback: still looks like a less-than but with text after (e.g. "< LOD 0.5")
+    if s.startswith("<") or s.startswith("＜"):
+        return None, "ND", None
+
+    return None, "ND", None
 
 
 def _parse_header_col(raw: str) -> tuple[str, str]:
     """
     Strip an optional unit from a column header and return (symbol_upper, unit).
     E.g. 'Pb (mg/kg)' → ('PB', 'mg/kg');  'As' → ('AS', 'mg/kg').
+    Only the FIRST word (before any space/underscore) is used as the symbol,
+    so 'Pb_ppm', 'Pb ppm', 'Pb total' all resolve to 'PB'.
     """
     m = _UNIT_RE.search(raw)
     unit = (m.group(1) or m.group(2)).strip() if m else "mg/kg"
-    sym = _UNIT_RE.sub("", raw).strip().upper()
+    # Strip unit notation, then take only the first token (handles "Pb ppm", "Pb_ppm")
+    base = _UNIT_RE.sub("", raw).strip()
+    sym  = re.split(r'[\s_\-/]', base)[0].upper()
     return sym, unit
 
 
