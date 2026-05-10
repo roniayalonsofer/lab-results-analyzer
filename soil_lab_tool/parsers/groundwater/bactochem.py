@@ -307,8 +307,12 @@ def _resolve_cas(compound: str) -> str:
 
 
 def _classify_compound(name: str) -> str | None:
-    """Return 'GW_VOC', 'GW_FIELD_PARAMS', or None (skip row)."""
+    """Return analysis type string or None (skip row)."""
     low = name.strip().lower()
+    if any(k in low for k in _PFAS_NAME_FRAGS):
+        return "GW_PFAS"
+    if any(k in low for k in _MICRO_NAME_FRAGS):
+        return "GW_MICROBIOLOGY"
     if any(k in low for k in _VOC_KEYWORDS):
         return "GW_VOC"
     if any(k in low for k in _LOWFLOW_KEYWORDS):
