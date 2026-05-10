@@ -42,6 +42,7 @@ _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
     ("als",           "grain_size"):  ALSGrainSizeParser,
     ("aminolab",      "groundwater"): AminolabGroundwaterParser,
     ("אמינולאב",     "groundwater"): AminolabGroundwaterParser,
+    ("xrf",           "soil"):        XRFSoilParser,
 }
 
 
