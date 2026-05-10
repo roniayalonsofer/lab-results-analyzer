@@ -333,7 +333,7 @@ class BactochemGroundwaterParser(BaseParser):
     """
 
     LAB_NAME = "בקטוכם"
-    ANALYSIS_TYPES = ["GW_VOC", "GW_FIELD_PARAMS"]
+    ANALYSIS_TYPES = ["GW_VOC", "GW_FIELD_PARAMS", "GW_PFAS", "GW_MICROBIOLOGY"]
 
     # Named columns used by Bactochem
     COL_COMPOUND = "רכיב"
