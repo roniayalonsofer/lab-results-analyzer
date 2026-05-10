@@ -67,9 +67,9 @@ _BC_SAMPLE_HDR_RE = re.compile(r"(\d{5,})\s+:המגודה רפסמ")
 #   CAS #: 1634-04-4  0.001  mg/L  3.200  MTBE
 #   CAS #: 335-67-1  0.001  ng/L  Not Detected  PFOA
 _GW_CAS_LINE_RE = re.compile(
-    r"CAS\s*#:\s*(?P<cas>[\w.\-]+)"                                      # CAS number
+    r"CAS\s*#:\s*(?:CAS\s+)?(?P<cas>[\w.\-]+)"                          # CAS number (some PDFs repeat "CAS" before the number)
     r"(?:\s+(?P<loq>[\d.]+))?"                                            # optional LOQ
-    r"\s+(?P<unit>ng/L|mg/L)"                                             # unit
+    r"\s+(?P<unit>ng/(?:kg|L)|mg/L)"                                     # unit (ng/kg = soil PFAS, ng/L = GW PFAS)
     r"(?:\s+X[≤≥<>≠]\s*[\d.]+)?"                                         # optional threshold
     r"\s+(?P<result>Not\s+Detected|<[\d.]+|[\d.]+(?:[Ee][+\-]?\d+)?)"
     r"(?:\s+\d+/)?"                                                        # optional sample ref
