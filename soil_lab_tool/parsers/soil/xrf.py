@@ -354,7 +354,7 @@ class XRFSoilParser(BaseParser):
                 value, flag, lod = _parse_xrf_value(raw_val)
 
                 records.append({
-                    "sample_id":     sid_raw,           # Index value (6, 7, 8 …)
+                    "sample_id":     sid_raw,           # Sample value (76, 100, 163 …)
                     "location":      loc_val,
                     "compound":      sym.capitalize(),   # proper symbol: "Mo", "Pb", "As"
                     "cas":           _ELEMENT_CAS.get(sym, ""),
