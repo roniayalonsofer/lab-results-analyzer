@@ -252,7 +252,7 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
             if _is_kte_soil_gas_excel(xl.sheet_names):
                 return "kte"
             if _is_xrf_excel(file_bytes):
-                return "xrf"
+                return "אלכם"
         except Exception:
             pass
 
