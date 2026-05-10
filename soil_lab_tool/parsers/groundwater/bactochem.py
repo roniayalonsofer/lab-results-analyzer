@@ -406,11 +406,8 @@ class BactochemGroundwaterParser(BaseParser):
                       f"size={pdf.pages[0].width:.0f}×{pdf.pages[0].height:.0f}")
 
             for page_num, page in enumerate(pdf.pages):
-                page_sample_id = self._extract_sample_id_bc(page)
-                if page_sample_id != "Sample":
-                    sample_id = page_sample_id
                 if self._debug:
-                    print(f"[BC DEBUG] Page {page_num}: sample_id={sample_id!r}")
+                    print(f"\n[BC DEBUG] Page {page_num}: carry-forward sample={sample_id!r}")
 
                 words = page.extract_words(
                     x_tolerance=4, y_tolerance=4,
@@ -418,64 +415,70 @@ class BactochemGroundwaterParser(BaseParser):
                 ) or []
 
                 if self._debug:
-                    print(f"\n[BC DEBUG] Page {page_num}: {len(words)} words")
-                    print(f"[BC DEBUG] First 20 words:")
-                    for w in words[:20]:
-                        print(f"  x0={w['x0']:6.1f} top={w['top']:6.1f} "
-                              f"text={w['text']!r}")
+                    print(f"[BC DEBUG] Page {page_num}: {len(words)} words")
 
-                if not words:
-                    continue
+                # ── Field parameters (word-cluster path) ──────────────────
+                if words:
+                    row_groups = _cluster_rows_bc(words)
 
-                row_groups = _cluster_rows_bc(words)
+                    # Build a y-sorted list of (y_top, sample_id) for every
+                    # sample-header row on this page.  Rows that appear above
+                    # the first header carry forward the previous page's sample;
+                    # rows below a header belong to that header's sample.
+                    page_sample_boundaries: list[tuple[float, str]] = []
+                    for grp in row_groups:
+                        joined = " ".join(w["text"] for w in grp)
+                        hdr_m = _BC_SAMPLE_HDR_RE.search(joined)
+                        if hdr_m:
+                            page_sample_boundaries.append(
+                                (grp[0]["top"], hdr_m.group(1))
+                            )
+                    page_sample_boundaries.sort()
+
+                    if self._debug:
+                        print(f"[BC DEBUG] Page {page_num}: {len(row_groups)} row groups  "
+                              f"boundaries={page_sample_boundaries}")
+
+                    page_hits = 0
+                    for gi, group in enumerate(row_groups):
+                        texts = [w["text"] for w in group]
+                        row_y = group[0]["top"]
+                        row_sample = sample_id          # carry-forward default
+                        for bound_y, sid in page_sample_boundaries:
+                            if bound_y <= row_y:
+                                row_sample = sid
+                        rec = _parse_bc_fp_row(group, row_sample, self._vp)
+                        if rec is not None:
+                            records.append(rec)
+                            page_hits += 1
+                            if self._debug:
+                                print(f"  row {gi:3d} HIT  sample={row_sample!r}  "
+                                      f"→ compound={rec['compound']!r}  "
+                                      f"value={rec['value']}  unit={rec['unit']!r}")
+                        elif self._debug and any(t in _BC_FP_TOKENS for t in texts):
+                            print(f"  row {gi:3d} TOKEN-MATCH-NO-VALUE  texts={texts}")
+
+                    if self._debug:
+                        print(f"[BC DEBUG] Page {page_num}: {page_hits} field-param records")
+
+                # ── BTEX (text-line path — always runs, even if no words) ─
                 if self._debug:
-                    print(f"[BC DEBUG] {len(row_groups)} row groups on page {page_num}")
-
-                # Build a y-sorted list of sample-header boundaries on this page.
-                # Each entry is (y_top, sample_id).  Rows whose y falls below a
-                # boundary inherit that boundary's sample — matching what
-                # _extract_btex does for text lines.
-                page_sample_boundaries: list[tuple[float, str]] = []
-                for grp in row_groups:
-                    joined = " ".join(w["text"] for w in grp)
-                    hdr_m = _BC_SAMPLE_HDR_RE.search(joined)
-                    if hdr_m:
-                        page_sample_boundaries.append(
-                            (grp[0]["top"], hdr_m.group(1))
-                        )
-                page_sample_boundaries.sort()
-
-                page_hits = 0
-                for gi, group in enumerate(row_groups):
-                    texts = [w["text"] for w in group]
-                    # Determine which sample this row belongs to
-                    row_y = group[0]["top"]
-                    row_sample = sample_id  # default: carry-forward from prev page
-                    for bound_y, sid in page_sample_boundaries:
-                        if bound_y <= row_y:
-                            row_sample = sid
-                    rec = _parse_bc_fp_row(group, row_sample, self._vp)
-                    if rec is not None:
-                        records.append(rec)
-                        page_hits += 1
-                        if self._debug:
-                            print(f"  row {gi:3d} HIT  texts={texts}  "
-                                  f"sample={row_sample!r}  "
-                                  f"→ compound={rec['compound']!r}  "
-                                  f"value={rec['value']}  unit={rec['unit']!r}")
-                    elif self._debug and any(t in _BC_FP_TOKENS for t in texts):
-                        print(f"  row {gi:3d} TOKEN-MATCH-NO-VALUE  texts={texts}")
-
-                if self._debug:
-                    print(f"[BC DEBUG] Page {page_num}: {page_hits} field-param records")
-
-                # ── BTEX table extraction ──────────────────────────────────
-                if self._debug:
-                    print(f"[BC DEBUG] Page {page_num}: scanning tables for BTEX…")
+                    print(f"[BC DEBUG] Page {page_num}: scanning BTEX…")
                 btex_recs = self._extract_btex(page, sample_id)
                 records.extend(btex_recs)
                 if self._debug:
                     print(f"[BC DEBUG] Page {page_num}: {len(btex_recs)} BTEX (GW_VOC) records")
+
+                # Advance carry-forward to the last sample seen on this page
+                if words and page_sample_boundaries:
+                    sample_id = page_sample_boundaries[-1][1]
+                else:
+                    # No word-based boundaries — fall back to text-line scan
+                    text = page.extract_text() or ""
+                    for line in text.splitlines():
+                        hdr = _BC_SAMPLE_HDR_RE.search(line)
+                        if hdr:
+                            sample_id = hdr.group(1)
 
         if self._debug:
             print(f"\n[BC DEBUG] PDF parse complete: {len(records)} total records")
