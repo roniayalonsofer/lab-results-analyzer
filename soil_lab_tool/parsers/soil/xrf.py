@@ -10,7 +10,7 @@ Expected file format — wide CSV or XLSX:
     Columns 2+   : Element symbols (Mo, Zr, Sr, Pb, As, …) with optional unit
                    in header, e.g. "Pb (mg/kg)" or just "Pb"
 
-  Each data row is one sample.  Values may be numeric, "<LOQ", "ND", "<DL", etc.
+  Each data row is one sample.  Values may be numeric, "< LOD", "ND", "<DL", etc.
   Units default to "mg/kg" (XRF soil standard); overridden per column if explicit.
 """
 
@@ -22,7 +22,6 @@ import re
 import pandas as pd
 
 from parsers.base import BaseParser
-from core.lab_value_parser import LabValueParser
 
 
 # ── Element → CAS registry ────────────────────────────────────────────────────
