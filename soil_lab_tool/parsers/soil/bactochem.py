@@ -5,7 +5,7 @@ Parser for Bactochem laboratory PDF reports.
 
 PDF format (Hebrew RTL, extracted with pdfplumber):
   Sample header : "{sid} :המגודה רפסמ {name} :המגודה רואית"
-  Section header: line containing ICP SOIL | SVOC | VOC | TPH-DRO+ORO | Explosives | ICP
+  Section header: line containing ICP SOIL | SVOC | VOC | TPH-DRO+ORO | Explosives | ICP | PFAS
   Data line     : "[fn] CAS #: {cas} [{loq}] {unit} [X≤threshold] {result} [{n}/] {compound}"
   Unit wrap     : "substance" on its own line is joined to the preceding "mg/kg dry" line.
 
@@ -17,6 +17,8 @@ Analysis type mapping:
   Explosives        → SOIL_EXPLOSIVES
   ICP       + mg/L  → GW_METALS
   TPH       + mg/L  → GW_TPH
+  PFAS      + ng/kg → SOIL_PFAS
+  PFAS      + ng/L  → GW_PFAS
 """
 
 from __future__ import annotations
