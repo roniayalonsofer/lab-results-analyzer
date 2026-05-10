@@ -1,16 +1,16 @@
 """
 core/xrf_output.py
 -------------------
-Professional Excel report for XRF soil-metals data.
+Excel report for XRF soil-metals data — landscape layout matching LabReportExcel.
 
-Layout (Index × Elements — transposed from the standard lab report):
-  Rows 1-3  : Project header (name, client, date)
-  Row  4    : Column headers  → "Index" | "Mo" | "Zr" | "Pb" | "As" | …
-  Row  5    : CAS numbers
-  Row  6    : Units           (mg/kg for all elements)
-  Row  7+   : One row per selected threshold (VSL, Tier-1 …)
-  Row  N+   : Data rows       → index value | measurements (highlighted on exceedance)
-  Last rows : Legend
+Layout (Index × Elements — same structure as _write_landscape in excel_output.py):
+  Row 1  : Header — שם פרויקט: | תאריך: | מזמין:  (3 merged cells)
+  Row 2  : Column headers — שם קידוח | עומק [מ'] | PID [ppm] | Mo | Zr | Pb | …
+  Row 3  : CAS numbers
+  Row 4  : Units (mg/kg for all elements)
+  Row 5+ : Threshold rows (one per selected key; before sample data)
+  Row N+ : Data rows — Index value | (empty) | (empty) | measurements
+  Legend + source footnotes
 """
 from __future__ import annotations
 
@@ -24,47 +24,52 @@ from openpyxl.utils import get_column_letter
 if TYPE_CHECKING:
     from core.threshold_manager import ThresholdManager
 
-# ── Palette ───────────────────────────────────────────────────────────────────
-_C_DARK    = "2D4A5A"   # header / column-label background
-_C_MID     = "4A7A8A"   # subtitle bar
-_C_THRESH  = "D5E8EC"   # threshold rows (VSL)
-_C_TIER1   = "FFF3E0"   # threshold rows (Tier-1)
-_C_META    = "EEF3F5"   # CAS / units rows
-_C_ALT     = "F8FAFC"   # alternate data row
-_C_WHITE   = "FFFFFF"
-_C_YELLOW  = "FFFF00"   # VSL exceedance
-_C_ORANGE  = "FFC000"   # Tier-1 exceedance
-_C_LEGEND  = "E2E8F0"   # legend strip
+# ── Style constants — identical to excel_output.py ───────────────────────────
+ORANGE = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
+GRAY   = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
+THIN   = Border(
+    left=Side(style="thin"), right=Side(style="thin"),
+    top=Side(style="thin"),  bottom=Side(style="thin"),
+)
+WRAP_C = Alignment(horizontal="center", vertical="center", wrap_text=True)
+CENTER = Alignment(horizontal="center", vertical="center")
 
-# ── Styles ────────────────────────────────────────────────────────────────────
-def _fill(hex_color: str) -> PatternFill:
-    return PatternFill("solid", fgColor=hex_color)
+FHE = {"name": "David",           "size": 9}
+FEN = {"name": "Times New Roman", "size": 8}
 
-def _font(bold=False, color="000000", size=9, name="Arial") -> Font:
-    return Font(bold=bold, color=color, size=size, name=name)
+_UNDEF_FONT = Font(name="David", size=9, color="808080", italic=True)
 
-def _align(h="center", v="center", wrap=False) -> Alignment:
-    return Alignment(horizontal=h, vertical=v, wrap_text=wrap)
-
-_THIN = Side(style="thin", color="BFCDD4")
-
-def _border(top=False, bottom=False, left=False, right=False) -> Border:
-    t = _THIN if top    else None
-    b = _THIN if bottom else None
-    l = _THIN if left   else None
-    r = _THIN if right  else None
-    return Border(top=t, bottom=b, left=l, right=r)
-
-_ALL_BORDER = Border(top=_THIN, bottom=_THIN, left=_THIN, right=_THIN)
-
-# Threshold keys that map to VSL (yellow on exceedance); others → Tier-1 (orange)
-_VSL_KEYS = frozenset({"VSL_SOIL", "GW", "PFAS_VSL"})
+_THRESHOLD_SOURCES: dict[str, str] = {
+    "VSL_SOIL":              "Soil VSL, Rev. 7, 12/24",
+    "TIER1_RES_SOIL_VH":     "Tier 1 RBTL Residential, Rev.7, 12/24",
+    "TIER1_RES_SOIL_HM_0_6": "Tier 1 RBTL Residential, Rev.7, 12/24",
+    "TIER1_RES_SOIL_HM_6":   "Tier 1 RBTL Residential, Rev.7, 12/24",
+    "TIER1_RES_SOIL_LOW":    "Tier 1 RBTL Residential, Rev.7, 12/24",
+    "TIER1_IND_SOIL_VH":     "Tier 1 RBTL Industrial/Commercial, Rev.7, 12/24",
+    "TIER1_IND_SOIL_HM_0_6": "Tier 1 RBTL Industrial/Commercial, Rev.7, 12/24",
+    "TIER1_IND_SOIL_HM_6":   "Tier 1 RBTL Industrial/Commercial, Rev.7, 12/24",
+    "TIER1_IND_SOIL_LOW":    "Tier 1 RBTL Industrial/Commercial, Rev.7, 12/24",
+    "GW":                    "Groundwater Standard, Rev.7, 12/24",
+}
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+def _font(val, bold: bool = False) -> Font:
+    """David 9 for Hebrew/mixed/numbers; Times New Roman 8 for pure English."""
+    s = str(val) if val is not None else ""
+    has_hebrew  = any('א' <= c <= 'ת' for c in s)
+    has_english = any(c.isalpha() and c.isascii() for c in s)
+    base = FEN if (has_english and not has_hebrew) else FHE
+    return Font(**base, bold=bold)
+
+
+def _round_thresh(v):
+    if v is None or not isinstance(v, (int, float)):
+        return v
+    return round(v, 2)
+
 
 def _fmt_value(value, flag: str, lod) -> object:
-    """Display value for one data cell: number, '< {lod}', or '< LOD'."""
+    """Display value: number, '< {lod}', or '< LOD'."""
     if flag == "" and value is not None:
         v = float(value)
         if v == int(v) and abs(v) < 1e9:
@@ -77,37 +82,23 @@ def _fmt_value(value, flag: str, lod) -> object:
     return "< LOD"
 
 
-def _fmt_thresh(v) -> object:
-    """Format a threshold value for display."""
-    if v is None:
-        return "—"
-    if isinstance(v, float):
-        if v == int(v):
-            return int(v)
-        return round(v, 2)
-    return v
+def _strictest(t_vals: dict):
+    vals = [v for v in t_vals.values() if v is not None]
+    return min(vals) if vals else None
 
 
-def _exceeds(raw_value, flag: str, thresh) -> bool:
-    """True when a detected value exceeds a numeric threshold."""
-    if flag != "" or raw_value is None or thresh is None:
-        return False
-    try:
-        return float(raw_value) > float(thresh)
-    except (TypeError, ValueError):
-        return False
+def _source_notes(thresh_keys: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for k in thresh_keys:
+        src = _THRESHOLD_SOURCES.get(k)
+        if src and src not in seen:
+            seen.add(src)
+            out.append(src)
+    return out
 
 
-def _write(ws, row: int, col: int, value,
-           fill=None, font=None, align=None, border=None) -> None:
-    c = ws.cell(row, col, value)
-    if fill   is not None: c.fill      = fill
-    if font   is not None: c.font      = font
-    if align  is not None: c.alignment = align
-    if border is not None: c.border    = border
-
-
-# ── Main builder ─────────────────────────────────────────────────────────────
+# ── Main builder ──────────────────────────────────────────────────────────────
 
 def build_xrf_simple_excel(
     records: list[dict],
@@ -119,24 +110,22 @@ def build_xrf_simple_excel(
     report_date: str = "",
 ) -> None:
     """
-    Write a professional Index × Element Excel table for XRF records.
+    Write a professional XRF Excel report matching the LabReportExcel landscape layout.
 
     Parameters
     ----------
     records             : parsed XRF records (sample_id=Index, compound=symbol)
     output_path         : file path or BytesIO
-    threshold_manager   : loaded ThresholdManager (optional; omit = no thresh rows)
+    threshold_manager   : loaded ThresholdManager (optional)
     selected_thresholds : list of threshold keys (e.g. ['VSL_SOIL', 'TIER1_RES_SOIL_VH'])
-    project_name        : shown in header
-    client              : shown in header
-    report_date         : shown in header (DD.MM.YYYY)
+    project_name / client / report_date : shown in header row
     """
     from core.threshold_manager import THRESHOLD_LABELS
 
     thresh_keys = selected_thresholds or []
     has_thresh  = bool(threshold_manager and thresh_keys)
 
-    # ── Collect ordered unique indices and element symbols ───────────
+    # ── Collect ordered unique indices and element symbols ────────────
     seen_idx: set  = set()
     indices:  list = []
     seen_sym: set  = set()
@@ -156,7 +145,7 @@ def build_xrf_simple_excel(
             if cas:
                 cas_map[sym] = cas
 
-    # Build lookup: index → symbol → (raw_value, flag, lod, display)
+    # lookup: index → symbol → (raw_value, flag, lod)
     lookup: dict[str, dict[str, tuple]] = {}
     for r in records:
         idx  = str(r.get("sample_id", "")).strip()
@@ -164,173 +153,191 @@ def build_xrf_simple_excel(
         val  = r.get("value")
         flag = r.get("flag", "ND")
         lod  = r.get("lod")
-        lookup.setdefault(idx, {})[sym] = (val, flag, lod, _fmt_value(val, flag, lod))
+        lookup.setdefault(idx, {})[sym] = (val, flag, lod)
 
-    # Pre-compute threshold values: thresh_key → symbol → value
+    # Pre-compute threshold values: thresh_key → symbol → numeric value or None
     thresh_vals: dict[str, dict[str, object]] = {}
     if has_thresh:
         for key in thresh_keys:
             thresh_vals[key] = {}
             for sym in symbols:
-                cas  = cas_map.get(sym, "")
-                tv   = threshold_manager.get_threshold_with_name(cas, key, compound_name=sym)
+                cas = cas_map.get(sym, "")
+                tv  = threshold_manager.get_threshold_with_name(cas, key, compound_name=sym)
                 thresh_vals[key][sym] = tv
 
-    # ── Workbook ─────────────────────────────────────────────────────
+    # ── Workbook ──────────────────────────────────────────────────────
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "XRF Results"
-    ws.right_to_left = False   # XRF table is LTR (Index on left)
+    ws.title = "XRF מתכות"
+    ws.sheet_view.rightToLeft = True
 
-    n_cols = 1 + len(symbols)   # "Index" col + one col per element
+    # Fixed columns: שם קידוח | עומק [מ'] | PID [ppm]
+    N_FIXED       = 3
+    total_cols    = N_FIXED + len(symbols)
+    cmp_col_start = N_FIXED + 1
 
-    # ── Row geometry ─────────────────────────────────────────────────
-    ROW_TITLE  = 1
-    ROW_CLIENT = 2
-    ROW_BLANK  = 3
-    ROW_HDR    = 4
-    ROW_CAS    = 5
-    ROW_UNIT   = 6
-    row_thresh_start = 7
-    row_data_start   = row_thresh_start + len(thresh_keys)
+    # ── Row 1: header (שם פרויקט | תאריך | מזמין) ────────────────────
+    parts = [
+        ("שם פרויקט:", project_name),
+        ("תאריך:",     report_date),
+        ("מזמין:",     client),
+    ]
+    span = max(1, total_cols // len(parts))
+    for i, (label, val) in enumerate(parts):
+        col_start = i * span + 1
+        col_end   = (i + 1) * span if i < len(parts) - 1 else total_cols
+        ws.merge_cells(start_row=1, start_column=col_start,
+                       end_row=1, end_column=col_end)
+        c = ws.cell(row=1, column=col_start, value=f"{label}  {val}")
+        c.font      = Font(**FHE, bold=True)
+        c.alignment = WRAP_C
+        c.border    = THIN
+    ws.row_dimensions[1].height = 20
 
-    # ── Header section ────────────────────────────────────────────────
-    # Row 1: Title
-    ws.merge_cells(start_row=ROW_TITLE, start_column=1,
-                   end_row=ROW_TITLE,   end_column=n_cols)
-    title_text = f"דוח XRF — מתכות בקרקע"
-    if project_name:
-        title_text = f"דוח XRF — {project_name}"
-    _write(ws, ROW_TITLE, 1, title_text,
-           fill  = _fill(_C_DARK),
-           font  = _font(bold=True, color=_C_WHITE, size=12, name="Arial"),
-           align = _align("right", wrap=True))
-    ws.row_dimensions[ROW_TITLE].height = 24
+    # ── Row 2: column headers ─────────────────────────────────────────
+    row2 = ["שם קידוח", "עומק [מ']", "PID [ppm]"] + symbols
+    for ci, v in enumerate(row2, 1):
+        c = ws.cell(row=2, column=ci, value=v)
+        c.font      = _font(v, bold=True)
+        c.alignment = WRAP_C
+        c.border    = THIN
+    ws.row_dimensions[2].height = 28
 
-    # Row 2: Client / Date sub-bar
-    ws.merge_cells(start_row=ROW_CLIENT, start_column=1,
-                   end_row=ROW_CLIENT,   end_column=n_cols)
-    parts = []
-    if client:      parts.append(f"לקוח: {client}")
-    if report_date: parts.append(f"תאריך: {report_date}")
-    parts.append("יחידות: mg/kg DW")
-    _write(ws, ROW_CLIENT, 1, "   |   ".join(parts),
-           fill  = _fill(_C_MID),
-           font  = _font(bold=False, color=_C_WHITE, size=9),
-           align = _align("right"))
-    ws.row_dimensions[ROW_CLIENT].height = 16
+    # ── Row 3: CAS numbers ────────────────────────────────────────────
+    row3 = ["CAS Number", "", ""] + [cas_map.get(sym, "") for sym in symbols]
+    for ci, v in enumerate(row3, 1):
+        c = ws.cell(row=3, column=ci, value=v)
+        c.font      = _font(v, bold=(ci == 1))
+        c.alignment = WRAP_C
+        c.border    = THIN
+    ws.row_dimensions[3].height = 20
 
-    # Row 3: blank separator
-    ws.row_dimensions[ROW_BLANK].height = 6
+    # ── Row 4: units ──────────────────────────────────────────────────
+    row4 = ["יחידות", "", ""] + ["mg/kg"] * len(symbols)
+    for ci, v in enumerate(row4, 1):
+        c = ws.cell(row=4, column=ci, value=v)
+        c.font      = _font(v, bold=(ci == 1))
+        c.alignment = WRAP_C
+        c.border    = THIN
+    ws.row_dimensions[4].height = 20
 
-    # ── Column-header row ─────────────────────────────────────────────
-    _write(ws, ROW_HDR, 1, "Index",
-           fill=_fill(_C_DARK), font=_font(bold=True, color=_C_WHITE),
-           align=_align("center"), border=_ALL_BORDER)
-    for ci, sym in enumerate(symbols, 2):
-        _write(ws, ROW_HDR, ci, sym,
-               fill=_fill(_C_DARK), font=_font(bold=True, color=_C_WHITE),
-               align=_align("center"), border=_ALL_BORDER)
-    ws.row_dimensions[ROW_HDR].height = 20
+    # ── Threshold rows (before sample data, matching landscape layout) ──
+    data_row = 5
+    if has_thresh:
+        for tk in thresh_keys:
+            label    = THRESHOLD_LABELS.get(tk, tk)
+            lbl_cell = ws.cell(row=data_row, column=1, value=label)
+            lbl_cell.font      = _font(label, bold=False)
+            lbl_cell.border    = THIN
+            lbl_cell.alignment = Alignment(horizontal="right", vertical="center",
+                                           wrap_text=True, readingOrder=2)
+            for fc in range(2, cmp_col_start):
+                ws.cell(row=data_row, column=fc).border = THIN
+            for ci, sym in enumerate(symbols, cmp_col_start):
+                cas  = cas_map.get(sym, "")
+                tval = _round_thresh(
+                    threshold_manager.get_threshold_with_name(cas, tk, compound_name=sym)
+                )
+                c = ws.cell(row=data_row, column=ci)
+                c.border = THIN
+                if tval is None:
+                    c.value     = "לא קיים"
+                    c.font      = _UNDEF_FONT
+                    c.alignment = CENTER
+                else:
+                    c.value         = tval
+                    c.font          = Font(**FHE)
+                    c.number_format = "#,##0.##"
+                    c.alignment     = CENTER
+            ws.row_dimensions[data_row].height = 20
+            data_row += 1
 
-    # ── CAS row ───────────────────────────────────────────────────────
-    _write(ws, ROW_CAS, 1, "CAS",
-           fill=_fill(_C_META), font=_font(bold=True, size=8),
-           align=_align("center"), border=_ALL_BORDER)
-    for ci, sym in enumerate(symbols, 2):
-        _write(ws, ROW_CAS, ci, cas_map.get(sym, "—"),
-               fill=_fill(_C_META), font=_font(size=8, color="64748B"),
-               align=_align("center"), border=_ALL_BORDER)
-    ws.row_dimensions[ROW_CAS].height = 14
+    # ── Sample data rows ──────────────────────────────────────────────
+    has_gray = False
 
-    # ── Units row ─────────────────────────────────────────────────────
-    _write(ws, ROW_UNIT, 1, "יחידות",
-           fill=_fill(_C_META), font=_font(bold=True, size=8),
-           align=_align("center"), border=_ALL_BORDER)
-    for ci in range(2, n_cols + 1):
-        _write(ws, ROW_UNIT, ci, "mg/kg",
-               fill=_fill(_C_META), font=_font(size=8, color="64748B"),
-               align=_align("center"), border=_ALL_BORDER)
-    ws.row_dimensions[ROW_UNIT].height = 14
-
-    # ── Threshold rows ────────────────────────────────────────────────
-    for ti, key in enumerate(thresh_keys):
-        row_idx  = row_thresh_start + ti
-        label    = THRESHOLD_LABELS.get(key, key)
-        row_fill = _fill(_C_THRESH) if key in _VSL_KEYS else _fill(_C_TIER1)
-
-        _write(ws, row_idx, 1, label,
-               fill=row_fill, font=_font(bold=True, size=8),
-               align=_align("right", wrap=True), border=_ALL_BORDER)
-
-        for ci, sym in enumerate(symbols, 2):
-            tv   = thresh_vals.get(key, {}).get(sym)
-            disp = _fmt_thresh(tv)
-            _write(ws, row_idx, ci, disp,
-                   fill=row_fill, font=_font(size=8),
-                   align=_align("center"), border=_ALL_BORDER)
-        ws.row_dimensions[row_idx].height = 16
-
-    # ── Data rows ─────────────────────────────────────────────────────
-    for ri, idx in enumerate(indices):
-        row_idx  = row_data_start + ri
-        alt_fill = _fill(_C_WHITE) if ri % 2 == 0 else _fill(_C_ALT)
-
-        _write(ws, row_idx, 1, idx,
-               fill=alt_fill, font=_font(bold=True, size=9),
-               align=_align("left"), border=_ALL_BORDER)
-
+    for idx in indices:
         row_data = lookup.get(idx, {})
-        for ci, sym in enumerate(symbols, 2):
+
+        # Column 1: Index value (= "שם קידוח")
+        c1 = ws.cell(row=data_row, column=1, value=idx)
+        c1.font      = _font(idx, bold=True)
+        c1.alignment = CENTER
+        c1.border    = THIN
+
+        # Columns 2-3: empty depth / PID
+        for fc in range(2, cmp_col_start):
+            ws.cell(row=data_row, column=fc).border = THIN
+
+        # Element columns
+        for ci, sym in enumerate(symbols, cmp_col_start):
             entry = row_data.get(sym)
             if entry is None:
-                _write(ws, row_idx, ci, "",
-                       fill=alt_fill, border=_ALL_BORDER)
+                ws.cell(row=data_row, column=ci).border = THIN
                 continue
 
-            raw_val, flag, lod, display = entry
+            raw_val, flag, lod = entry
+            display = _fmt_value(raw_val, flag, lod)
 
-            # Determine highlight colour (Tier-1 > VSL > none)
-            cell_fill = alt_fill
+            c = ws.cell(row=data_row, column=ci, value=display)
+            c.font      = _font(display)
+            c.alignment = CENTER
+            c.border    = THIN
+            if isinstance(display, (int, float)):
+                c.number_format = "#,##0.###"
+
+            # Colour coding — same logic as _write_landscape
             if has_thresh:
-                # Check Tier-1 keys first (orange, higher priority)
-                for key in thresh_keys:
-                    if key not in _VSL_KEYS:
-                        if _exceeds(raw_val, flag, thresh_vals.get(key, {}).get(sym)):
-                            cell_fill = _fill(_C_ORANGE)
-                            break
-                # Check VSL keys (yellow)
-                if cell_fill is alt_fill:
-                    for key in thresh_keys:
-                        if key in _VSL_KEYS:
-                            if _exceeds(raw_val, flag, thresh_vals.get(key, {}).get(sym)):
-                                cell_fill = _fill(_C_YELLOW)
-                                break
+                t_vals       = {k: thresh_vals.get(k, {}).get(sym) for k in thresh_keys}
+                thresh_limit = _strictest(t_vals)
+                if thresh_limit is not None:
+                    if flag == "" and raw_val is not None:
+                        try:
+                            if float(raw_val) > thresh_limit:
+                                c.fill = ORANGE
+                                c.font = Font(**FHE, bold=True)
+                        except (TypeError, ValueError):
+                            pass
+                    elif flag in ("<LOD", "<LOQ", "ND", "<") and lod is not None:
+                        try:
+                            if float(lod) > thresh_limit:
+                                c.fill = GRAY
+                                c.font = _font(display, bold=True)
+                                has_gray = True
+                        except (TypeError, ValueError):
+                            pass
 
-            is_bold = cell_fill.fgColor.rgb in (_C_ORANGE, _C_YELLOW)
-            _write(ws, row_idx, ci, display,
-                   fill=cell_fill, font=_font(bold=is_bold, size=9),
-                   align=_align("center"), border=_ALL_BORDER)
-
-        ws.row_dimensions[row_idx].height = 16
+        ws.row_dimensions[data_row].height = 16
+        data_row += 1
 
     # ── Legend ────────────────────────────────────────────────────────
-    if has_thresh:
-        legend_row = row_data_start + len(indices) + 1
-        ws.merge_cells(start_row=legend_row, start_column=1,
-                       end_row=legend_row,   end_column=n_cols)
-        _write(ws, legend_row, 1,
-               "🟡 ערך מעל VSL     🟠 ערך מעל Tier-1",
-               fill=_fill(_C_LEGEND), font=_font(size=8),
-               align=_align("right"))
-        ws.row_dimensions[legend_row].height = 14
+    legend_items = [("חריגה מערך סף", ORANGE)]
+    if has_gray:
+        legend_items.append(("ערך הסף גדול מסף הגילוי", GRAY))
+    for i, (label, fill) in enumerate(legend_items):
+        c = ws.cell(row=data_row + 1 + i, column=1, value=label)
+        c.font      = Font(name="David", size=9, bold=True)
+        c.fill      = fill
+        c.border    = THIN
+        c.alignment = Alignment(horizontal="right", vertical="center")
 
-    # ── Column widths ─────────────────────────────────────────────────
-    ws.column_dimensions["A"].width = 10
-    for ci in range(2, n_cols + 1):
-        ws.column_dimensions[get_column_letter(ci)].width = 8
+    # ── Source footnotes ──────────────────────────────────────────────
+    note_row = data_row + 1 + len(legend_items) + 1
+    active_keys = [k for k in thresh_keys
+                   if any(thresh_vals.get(k, {}).get(sym) is not None for sym in symbols)]
+    for note in _source_notes(active_keys):
+        ws.cell(row=note_row, column=1, value=f"* {note}").font = Font(
+            **FEN, italic=True, color="808080")
+        note_row += 1
 
-    # ── Freeze panes: keep Index col + header rows visible ────────────
-    ws.freeze_panes = ws.cell(row_data_start, 2)
+    # ── Column widths (same as _auto_width) ───────────────────────────
+    ws.column_dimensions["A"].width = 13   # שם קידוח / Index
+    ws.column_dimensions["B"].width = 11   # עומק [מ']
+    ws.column_dimensions["C"].width = 11   # PID [ppm]
+    for ci in range(4, total_cols + 1):
+        ws.column_dimensions[get_column_letter(ci)].width = 9
+
+    # ── Freeze panes: header rows + fixed cols ────────────────────────
+    freeze_row = data_row - len(indices)   # first sample row
+    ws.freeze_panes = ws.cell(row=freeze_row, column=cmp_col_start)
 
     wb.save(output_path)
