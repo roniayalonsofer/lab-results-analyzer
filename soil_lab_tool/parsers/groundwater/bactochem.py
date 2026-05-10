@@ -413,7 +413,18 @@ class BactochemGroundwaterParser(BaseParser):
             else:
                 value, flag = self._vp.parse(raw_val)
 
-            cas = _resolve_cas(compound) if atype == "GW_VOC" else ""
+            if atype == "GW_VOC":
+                cas  = _resolve_cas(compound)
+                unit = "mg/L"
+            elif atype == "GW_PFAS":
+                cas  = _resolve_cas(compound)
+                unit = "ng/L"
+            elif atype == "GW_MICROBIOLOGY":
+                cas  = ""
+                unit = "CFU/100mL"
+            else:
+                cas  = ""
+                unit = ""
 
             sample_id = (loc if loc and loc.lower() not in ("nan", "")
                          else "Sample")
@@ -428,7 +439,7 @@ class BactochemGroundwaterParser(BaseParser):
                 "cas":           cas,
                 "value":         value,
                 "flag":          flag,
-                "unit":          "mg/L" if atype == "GW_VOC" else "",
+                "unit":          unit,
                 "lod":           None,
                 "analysis_type": atype,
             })
