@@ -59,7 +59,8 @@ except Exception as e:
 
 print(f"Records: {len(records):,}")
 
-# Try to build the Excel
+# ── Test 2: Excel build ──────────────────────────────────────────────────────
+print("\n=== Test 2: Excel build ===")
 buf = io.BytesIO()
 try:
     builder = LabReportExcel(
@@ -77,3 +78,34 @@ try:
 except Exception as e:
     print(f"FAILED: {e}")
     traceback.print_exc()
+
+# ── Test 3: Word build ───────────────────────────────────────────────────────
+print("\n=== Test 3: Word build ===")
+from core.word_output import LabReportWord
+word_buf = io.BytesIO()
+try:
+    LabReportWord(
+        records             = records,
+        threshold_manager   = tm,
+        output_path         = word_buf,
+        project_name        = "Test XRF",
+        client              = "Test Client",
+        report_date         = "10.05.2026",
+        selected_thresholds = ["VSL_SOIL"],
+    ).build()
+    word_buf.seek(0)
+    size_kb = len(word_buf.getvalue()) / 1024
+    print(f"SUCCESS — Word built: {size_kb:.1f} KB")
+except Exception as e:
+    print(f"FAILED: {e}")
+    traceback.print_exc()
+
+print("\n=== Column count check ===")
+n_samples = len(set(r["sample_id"] for r in records))
+n_compounds = len(set(r["compound"] for r in records))
+n_thresh = 1  # VSL_SOIL
+n_fixed = 2 + n_thresh + 1  # compound, CAS, thresh, unit
+n_word_cols = n_fixed + n_samples
+print(f"Samples: {n_samples}  Compounds: {n_compounds}")
+print(f"Word table cols: {n_word_cols}  (Word max: 63)")
+print(f"Excel landscape cols: {1 + 0 + 1 + n_compounds}  (borehole + PID + {n_compounds} compounds)")
