@@ -351,7 +351,8 @@ SHEET_CONFIG: dict[str, dict] = {
     "SOIL_GRAIN_SIZE":{"name": "גרנולומטריה",        "unit": "%"},
     "SOIL_PFAS":   {"name": "קרקע PFAS",       "unit": "ng/kg"},
     "GW_VOC":          {"name": "מי תהום BTEX",    "unit": "mg/L"},
-    "GW_PFAS":         {"name": "מי תהום PFAS",    "unit": "ng/L"},
+    "GW_PFAS":         {"name": "מי תהום PFAS",         "unit": "ng/L"},
+    "GW_MICROBIOLOGY": {"name": "מיקרוביולוגיה מי תהום", "unit": "CFU/mL"},
     "LOWFLOW":         {"name": "pH",               "unit": ""},
     "GW_FIELD_PARAMS": {"name": "פרמטרי שדה",       "unit": ""},
 }
