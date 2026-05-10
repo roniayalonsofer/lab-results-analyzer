@@ -1090,8 +1090,8 @@ with tab_excel:
         except Exception as e:
             st.error(f"שגיאת בניית Excel: {e}")
             st.exception(e)
-    elif isinstance(parser, XRFSoilParser):
-        # XRF: plain Sample × Element table — no thresholds, no CAS
+    elif lab.lower() == "xrf":
+        # XRF: plain Index × Element table — no thresholds, no CAS
         try:
             build_xrf_simple_excel(records, excel_buf)
             excel_buf.seek(0)
