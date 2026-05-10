@@ -227,9 +227,6 @@ class XRFSoilParser(BaseParser):
     LAB_NAME = "XRF"
     ANALYSIS_TYPES = ["SOIL_METALS"]
 
-    def __init__(self):
-        self._vp = LabValueParser()
-
     def parse(self, file_obj: io.BytesIO) -> list[dict]:
         file_obj.seek(0)
         header4 = file_obj.read(4)
@@ -251,18 +248,36 @@ class XRFSoilParser(BaseParser):
     def _read_excel(self, file_obj: io.BytesIO) -> pd.DataFrame | None:
         try:
             xl = pd.ExcelFile(file_obj)
-            return xl.parse(xl.sheet_names[0], header=None, dtype=str).fillna("")
+            # Find the data sheet: prefer one with many element-symbol headers
+            best_sheet, best_score = xl.sheet_names[0], -1
+            for name in xl.sheet_names:
+                try:
+                    df = xl.parse(name, header=None, dtype=str, nrows=8).fillna("")
+                    for ri in range(len(df)):
+                        row = [str(v).strip().upper() for v in df.iloc[ri]]
+                        score = sum(1 for v in row if v in _ELEMENT_CAS)
+                        if score > best_score:
+                            best_score, best_sheet = score, name
+                except Exception:
+                    continue
+            return xl.parse(best_sheet, header=None, dtype=str).fillna("")
         except Exception:
             return None
 
     def _read_csv(self, file_obj: io.BytesIO) -> pd.DataFrame | None:
-        for enc in ("utf-8-sig", "utf-8", "cp1255", "latin-1"):
-            try:
-                file_obj.seek(0)
-                return pd.read_csv(file_obj, header=None, dtype=str,
-                                   encoding=enc).fillna("")
-            except Exception:
-                continue
+        # Try comma and semicolon separators (European CSVs use ;)
+        for sep in (",", ";", "\t"):
+            for enc in ("utf-8-sig", "utf-8", "cp1255", "latin-1"):
+                try:
+                    file_obj.seek(0)
+                    df = pd.read_csv(file_obj, header=None, dtype=str,
+                                     sep=sep, encoding=enc).fillna("")
+                    # Accept this df only if it has enough columns to plausibly
+                    # be a proper XRF file (at least 3 columns)
+                    if df.shape[1] >= 3:
+                        return df
+                except Exception:
+                    continue
         return None
 
     def _parse_wide(self, df_raw: pd.DataFrame) -> list[dict]:
@@ -271,7 +286,6 @@ class XRFSoilParser(BaseParser):
         # Build column map from the detected header row
         header_vals = [str(v).strip() for v in df_raw.iloc[hdr_idx]]
 
-        # Identify sample-ID column (leftmost non-empty, or best keyword match)
         id_col: int | None = None
         loc_col: int | None = None
         element_cols: list[tuple[int, str, str, str]] = []  # (col_idx, symbol, name, unit)
@@ -282,29 +296,38 @@ class XRFSoilParser(BaseParser):
             low = raw_hdr.strip().lower()
             sym, unit = _parse_header_col(raw_hdr)
 
-            if low in ("sample", "sample id", "sample_id", "sampleid", "id",
-                       "מזהה", "מספר"):
-                id_col = id_col if id_col is not None else ci
+            # Sample ID — check against broader hint set first
+            if low in _SAMPLE_ID_HINTS:
+                if id_col is None:
+                    id_col = ci
                 continue
-            if low in _LOCATION_HINTS:
+            # Location / site column
+            if low in _LOCATION_HINTS and low not in _SAMPLE_ID_HINTS:
                 loc_col = ci
                 continue
+            # Metadata skip
             if low in _SKIP_COLS:
                 continue
+            # Element column — symbol must exactly match _ELEMENT_CAS
             if sym in _ELEMENT_CAS:
                 name = _ELEMENT_NAME.get(sym, sym.capitalize())
-                cas  = _ELEMENT_CAS[sym]
                 element_cols.append((ci, sym, name, unit))
 
         # Fallback: treat column 0 as sample ID if nothing matched
         if id_col is None:
             id_col = 0
 
+        # If id_col and loc_col are the same (misconfigured), clear loc_col
+        if loc_col == id_col:
+            loc_col = None
+
+        _SKIP_VALUES = frozenset({"nan", "", "sample", "sample id", "id", "no", "#"})
+
         records: list[dict] = []
         for ri in range(hdr_idx + 1, len(df_raw)):
             row = df_raw.iloc[ri]
             sid_raw = str(row.iloc[id_col]).strip()
-            if not sid_raw or sid_raw.lower() in ("nan", "", "sample", "id"):
+            if not sid_raw or sid_raw.lower() in _SKIP_VALUES:
                 continue
 
             sample_id = sid_raw
@@ -318,9 +341,11 @@ class XRFSoilParser(BaseParser):
                 if not raw_val or raw_val.lower() in ("nan", ""):
                     continue
 
-                value, flag = self._vp.parse(raw_val)
-                if value is None and not flag:
-                    continue
+                value, flag, lod = _parse_xrf_value(raw_val)
+                # Skip cells that couldn't be parsed at all (shouldn't happen)
+                if value is None and flag == "ND" and lod is None and raw_val not in ("", "nan"):
+                    # Still include as ND record so the compound appears in the sheet
+                    pass
 
                 records.append({
                     "sample_id":     sample_id,
@@ -329,7 +354,7 @@ class XRFSoilParser(BaseParser):
                     "value":         value,
                     "flag":          flag,
                     "unit":          unit,
-                    "lod":           None,
+                    "lod":           lod,
                     "loq":           None,
                     "analysis_type": "SOIL_METALS",
                 })
