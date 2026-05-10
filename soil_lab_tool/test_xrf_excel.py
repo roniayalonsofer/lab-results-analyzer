@@ -60,6 +60,8 @@ except Exception as e:
 print(f"Records: {len(records):,}")
 
 # ── Test 2: Excel build ──────────────────────────────────────────────────────
+import time
+
 print("\n=== Test 2: Excel build ===")
 buf = io.BytesIO()
 try:
