@@ -514,32 +514,35 @@ class BactochemGroundwaterParser(BaseParser):
         return records
 
     def _extract_sample_id_bc(self, page) -> str:
-        """Extract a borehole/well ID from the first page of a Bactochem PDF."""
+        """Extract the sample number from a Bactochem PDF page.
+
+        pdfplumber returns Hebrew text in visual (reversed) order, so the
+        logical line "מספר הדוגמה: 1984651" arrives as "1984651 :המגודה רפסמ …".
+        We match that reversed pattern first, then fall back to well-ID codes.
+        """
         text = page.extract_text() or ""
-        if self._debug:
-            print("[BC DEBUG] First 25 lines of page 0 text:")
-            for i, ln in enumerate(text.splitlines()[:25]):
-                print(f"  {i:2d}: {ln!r}")
-        for line in text.splitlines()[:25]:
+        for line in text.splitlines()[:30]:
+            # Primary: reversed-RTL sample number (e.g. "1984651 :המגודה רפסמ")
+            m = _BC_SAMPLE_HDR_RE.search(line)
+            if m:
+                if self._debug:
+                    print(f"[BC DEBUG] sample_id matched reversed header: {m.group(1)!r}")
+                return m.group(1)
+            # Fallback: logical Hebrew (in case some PDFs aren't reversed)
             m = re.search(r'מספר הדוגמה[:\s]+(\d+)', line)
             if m:
                 if self._debug:
-                    print(f"[BC DEBUG] sample_id matched 'מספר הדוגמה': {m.group(1)!r}")
+                    print(f"[BC DEBUG] sample_id matched logical header: {m.group(1)!r}")
                 return m.group(1)
+            # Fallback: well/borehole ID codes
             m = re.search(
                 r"\b(?:GW|BH|PZ|MW|OBS|MON|BOR|קידוח|באר)[-_]?\d+\b",
                 line, re.I,
             )
             if m:
                 if self._debug:
-                    print(f"[BC DEBUG] sample_id matched well-ID pattern: {m.group(0)!r}")
+                    print(f"[BC DEBUG] sample_id matched well-ID: {m.group(0)!r}")
                 return m.group(0).upper()
-            if re.search(r"מספר\s*(קידוח|דגימה|באר|פיזומטר)", line):
-                m2 = re.search(r"[:]\s*(\S+)\s*$", line) or re.search(r"(\S+)$", line)
-                if m2:
-                    if self._debug:
-                        print(f"[BC DEBUG] sample_id matched Hebrew label: {m2.group(1)!r}")
-                    return m2.group(1)
         if self._debug:
             print("[BC DEBUG] sample_id: no pattern matched, using 'Sample'")
         return "Sample"
