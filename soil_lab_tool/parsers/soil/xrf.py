@@ -290,9 +290,12 @@ class XRFSoilParser(BaseParser):
         # Build column map from the detected header row
         header_vals = [str(v).strip() for v in df_raw.iloc[hdr_idx]]
 
-        id_col: int | None = None
-        loc_col: int | None = None
-        element_cols: list[tuple[int, str, str, str]] = []  # (col_idx, symbol, name, unit)
+        # Two-pass column classification:
+        # Pass 1 — find the best index/sample-ID column; collect elements
+        index_col: int | None = None   # preferred: "Index", "Reading #", etc.
+        id_col:    int | None = None   # fallback: "Sample", "ID", etc.
+        loc_col:   int | None = None
+        element_cols: list[tuple[int, str, str]] = []  # (col_idx, symbol, unit)
 
         for ci, raw_hdr in enumerate(header_vals):
             if not raw_hdr or raw_hdr.lower() in ("nan", ""):
@@ -300,7 +303,12 @@ class XRFSoilParser(BaseParser):
             low = raw_hdr.strip().lower()
             sym, unit = _parse_header_col(raw_hdr)
 
-            # Sample ID — check against broader hint set first
+            # Highest-priority row label: Index / Reading # columns
+            if low in _INDEX_HINTS:
+                if index_col is None:
+                    index_col = ci
+                continue
+            # Secondary sample ID hint
             if low in _SAMPLE_ID_HINTS:
                 if id_col is None:
                     id_col = ci
@@ -314,18 +322,16 @@ class XRFSoilParser(BaseParser):
                 continue
             # Element column — symbol must exactly match _ELEMENT_CAS
             if sym in _ELEMENT_CAS:
-                name = _ELEMENT_NAME.get(sym, sym.capitalize())
-                element_cols.append((ci, sym, name, unit))
+                element_cols.append((ci, sym, unit))
 
-        # Fallback: treat column 0 as sample ID if nothing matched
-        if id_col is None:
-            id_col = 0
+        # Resolve row-label column: prefer index_col, then id_col, then col 0
+        id_col = index_col if index_col is not None else (id_col if id_col is not None else 0)
 
-        # If id_col and loc_col are the same (misconfigured), clear loc_col
         if loc_col == id_col:
             loc_col = None
 
-        _SKIP_VALUES = frozenset({"nan", "", "sample", "sample id", "id", "no", "#"})
+        _SKIP_VALUES = frozenset({"nan", "", "sample", "sample id", "id", "no",
+                                   "#", "index", "reading", "reading #"})
 
         records: list[dict] = []
         for ri in range(hdr_idx + 1, len(df_raw)):
@@ -340,7 +346,7 @@ class XRFSoilParser(BaseParser):
                 if _lv and _lv.lower() not in ("nan", ""):
                     loc_val = _lv
 
-            for ci, sym, compound, unit in element_cols:
+            for ci, sym, unit in element_cols:
                 raw_val = str(row.iloc[ci]).strip()
                 if not raw_val or raw_val.lower() in ("nan", ""):
                     continue
@@ -348,9 +354,9 @@ class XRFSoilParser(BaseParser):
                 value, flag, lod = _parse_xrf_value(raw_val)
 
                 records.append({
-                    "sample_id":     sid_raw,   # raw sample number only
-                    "location":      loc_val,   # separate location field
-                    "compound":      compound,
+                    "sample_id":     sid_raw,   # Index value (6, 7, 8 …)
+                    "location":      loc_val,
+                    "compound":      sym,        # element symbol: "Mo", "Pb", "As"
                     "cas":           _ELEMENT_CAS.get(sym, ""),
                     "value":         value,
                     "flag":          flag,
