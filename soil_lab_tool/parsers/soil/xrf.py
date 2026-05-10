@@ -109,7 +109,8 @@ _SKIP_COLS = frozenset({
     "pass", "fail", "quality",
 })
 
-# Column headers that identify the sample ID — checked before _SKIP_COLS
+# Column headers that identify the sample ID — checked before _SKIP_COLS.
+# "index" is handled separately with higher priority (see _parse_wide).
 _SAMPLE_ID_HINTS = frozenset({
     "sample", "sample id", "sample_id", "sampleid", "id",
     "מזהה", "מספר",
@@ -118,6 +119,9 @@ _SAMPLE_ID_HINTS = frozenset({
     "point id", "point_id", "no", "no.", "#", "reading #", "reading#",
     "test #", "test#",
 })
+
+# Column names treated as the preferred row-label (higher priority than _SAMPLE_ID_HINTS)
+_INDEX_HINTS = frozenset({"index", "reading", "reading #", "reading#", "no", "no.", "#"})
 
 # Columns that contain the sample location / description
 _LOCATION_HINTS = frozenset({
