@@ -369,7 +369,7 @@ class XRFSoilParser(BaseParser):
                     "unit":          unit,
                     "lod":           lod,
                     "loq":           None,
-                    "analysis_type": "SOIL_METALS",
+                    "analysis_type": "XRF",
                 })
 
         return records
