@@ -16,6 +16,7 @@ from parsers.soil.kte_pr        import KTEPRParser
 from parsers.soil.machon_haneft import MachonHaneftSoilParser
 from parsers.soil.als           import ALSSoilParser, ALSGrainSizeParser
 from parsers.soil.bactochem     import BactochemSoilParser
+from parsers.soil.xrf           import XRFSoilParser
 from parsers.groundwater.kte        import KTEGroundwaterParser
 from parsers.groundwater.bactochem  import BactochemGroundwaterParser
 from parsers.groundwater.aminolab   import AminolabGroundwaterParser
