@@ -115,15 +115,31 @@ PFAS_CAS: dict[str, str] = {
 
 # Keyword fragments that identify a PFAS compound name
 _PFAS_NAME_FRAGS = (
+    # English abbreviations (short first to avoid partial-match issues)
     "pfoa", "pfos", "pfhxs", "pfhpa", "pfba", "pfhxa", "pfna", "pfda",
-    "pfbs", "pfpes", "pfhps", "pfuda", "pfdoda", "pftrda", "pfta",
-    "pfas", "perfluoro", "fosa", "fhxsa", "polyfluoro",
+    "pfbs", "pfpea", "pfpes", "pfhps", "pfoda", "pfunda", "pfdoda", "pfdoa",
+    "pftrda", "pfta", "fosa", "fhxsa",
+    # Broader English patterns
+    "pfas", "perfluoro", "polyfluoro",
+    # Hebrew transliterations
+    "פרפלואורו", "פרפלואור",
 )
 
-# Microbiology compound name keywords
+# Microbiology compound name keywords (English + Hebrew)
 _MICRO_NAME_FRAGS = (
-    "coliform", "coli", "enterococcus", "enterococci", "bacteria",
-    "streptococcus", "fecal", "חיידקים", "קוליפורם",
+    # English
+    "coliform", "enterococcus", "enterococci", "bacteria", "streptococcus",
+    "fecal", "legionella", "pseudomonas", "e. coli", "e.coli",
+    # Hebrew
+    "חיידקים",      # bacteria / germs (most common)
+    "קוליפורם",     # coliform (singular)
+    "קוליפורמים",   # coliforms (plural)
+    "ספירה כללית",  # total count (e.g. ספירה כללית של חיידקים)
+    "אירובים",      # aerobic
+    "אנאירובים",    # anaerobic
+    "ליגיונלה",     # legionella (Hebrew)
+    "פסאודומונס",   # pseudomonas (Hebrew)
+    "אנטרוקוקוס",  # enterococcus (Hebrew)
 )
 
 
