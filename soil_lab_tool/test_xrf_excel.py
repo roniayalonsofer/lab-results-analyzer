@@ -64,6 +64,7 @@ import time
 
 print("\n=== Test 2: Excel build ===")
 buf = io.BytesIO()
+t0 = time.time()
 try:
     builder = LabReportExcel(
         records             = records,
@@ -75,8 +76,9 @@ try:
         selected_thresholds = ["VSL_SOIL"],
     )
     builder.build()
+    t1 = time.time()
     size_kb = len(buf.getvalue()) / 1024
-    print(f"SUCCESS — Excel built: {size_kb:.1f} KB")
+    print(f"SUCCESS — Excel built: {size_kb:.1f} KB  time={t1-t0:.2f}s")
 except Exception as e:
     print(f"FAILED: {e}")
     traceback.print_exc()
@@ -85,6 +87,7 @@ except Exception as e:
 print("\n=== Test 3: Word build ===")
 from core.word_output import LabReportWord
 word_buf = io.BytesIO()
+t0 = time.time()
 try:
     LabReportWord(
         records             = records,
@@ -96,10 +99,12 @@ try:
         selected_thresholds = ["VSL_SOIL"],
     ).build()
     word_buf.seek(0)
+    t1 = time.time()
     size_kb = len(word_buf.getvalue()) / 1024
-    print(f"SUCCESS — Word built: {size_kb:.1f} KB")
+    print(f"SUCCESS — Word built: {size_kb:.1f} KB  time={t1-t0:.2f}s")
 except Exception as e:
-    print(f"FAILED: {e}")
+    t1 = time.time()
+    print(f"FAILED after {t1-t0:.2f}s: {e}")
     traceback.print_exc()
 
 print("\n=== Column count check ===")
