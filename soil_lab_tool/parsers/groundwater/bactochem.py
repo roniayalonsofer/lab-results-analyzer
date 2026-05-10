@@ -691,7 +691,7 @@ class BactochemGroundwaterParser(BaseParser):
         return records
 
     def _extract_pfas(self, page, sample_id: str) -> list[dict]:
-        """Extract GW_PFAS records from CAS data lines with ng/L unit."""
+        """Extract PFAS records from CAS data lines (ng/L → GW_PFAS, ng/kg → SOIL_PFAS)."""
         records: list[dict] = []
         current_sample = sample_id
         text = page.extract_text() or ""
@@ -705,8 +705,13 @@ class BactochemGroundwaterParser(BaseParser):
             m = _GW_CAS_LINE_RE.search(line)
             if not m:
                 continue
-            if m.group("unit").lower() != "ng/l":
+            unit_lo = m.group("unit").lower()
+            if "ng" not in unit_lo:
                 continue
+
+            is_soil   = "kg" in unit_lo
+            atype     = "SOIL_PFAS" if is_soil else "GW_PFAS"
+            norm_unit = "ng/kg"     if is_soil else "ng/L"
 
             cas        = m.group("cas").strip()
             result_raw = m.group("result").strip()
@@ -730,13 +735,13 @@ class BactochemGroundwaterParser(BaseParser):
                 loq = None
 
             value, flag = self._vp.parse(result_raw)
-            # ND → use LOQ as the numeric value (consistent with soil parser)
             if flag == "ND" and loq is not None:
                 value = loq
 
             if self._debug:
                 print(f"  [PFAS] sample={current_sample!r}  compound={compound!r}  "
-                      f"cas={cas!r}  result={result_raw!r}  →  value={value}  flag={flag!r}")
+                      f"cas={cas!r}  result={result_raw!r}  unit={norm_unit!r}  "
+                      f"atype={atype!r}  →  value={value}  flag={flag!r}")
 
             records.append({
                 "lab":           self.LAB_NAME,
@@ -745,10 +750,10 @@ class BactochemGroundwaterParser(BaseParser):
                 "cas":           cas,
                 "value":         value,
                 "flag":          flag,
-                "unit":          "ng/L",
+                "unit":          norm_unit,
                 "lod":           None,
                 "loq":           loq,
-                "analysis_type": "GW_PFAS",
+                "analysis_type": atype,
             })
 
         return records
