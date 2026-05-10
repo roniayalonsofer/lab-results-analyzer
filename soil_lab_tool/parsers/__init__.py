@@ -248,7 +248,13 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
             with _plumber.open(_io.BytesIO(file_bytes)) as _pdf:
                 first_text = (_pdf.pages[0].extract_text() or "").lower()
             if "bactochem" in first_text:
-                return "soil"
+                # Bactochem produces both soil PDFs (SVOC/ICP/mg/kg sections)
+                # and groundwater PDFs (BTEX field params, mg/L).
+                # Soil markers are distinctive; absent → treat as groundwater.
+                _soil_markers = ("svoc", "icp soil", "tph-dro", "mg/kg")
+                if any(m in first_text for m in _soil_markers):
+                    return "soil"
+                return "groundwater"
         except Exception:
             pass
 

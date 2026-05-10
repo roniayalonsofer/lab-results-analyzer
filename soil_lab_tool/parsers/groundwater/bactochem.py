@@ -12,8 +12,8 @@ File format (CSV or XLSX):
   - Column 'אנליזה'        : analysis code (may or may not be present)
 
 Analysis type mapping is done by compound name (not analysis code):
-  GW_VOC  : Benzene, Toluene, Ethyl Benzene, Xylene, MTBE, Naphthalene, TBA
-  LOWFLOW : pH, EC, Temperature, DO, Turbidity, Redox, depth params
+  GW_VOC         : Benzene, Toluene, Ethyl Benzene, Xylene, MTBE, Naphthalene, TBA
+  GW_FIELD_PARAMS: pH, EC, Temperature, DO, Turbidity, Redox, depth params
 
 GW thresholds sourced from soil_vsl_tier1_v7_2024.xlsx  "Groundwater" column:
   Benzene      1   mg/L
@@ -26,6 +26,7 @@ GW thresholds sourced from soil_vsl_tier1_v7_2024.xlsx  "Groundwater" column:
 from __future__ import annotations
 
 import io
+import os
 import re
 
 import pandas as pd
@@ -35,7 +36,143 @@ from core.lab_value_parser import LabValueParser
 from core.cas_lookup import name_to_cas
 
 
-# English compound names → CAS (same as KTE groundwater)
+# ── PDF field-params helpers ──────────────────────────────────────────────────
+
+_ROW_TOL   = 6
+_HEBREW_RE = re.compile(r"[א-ת]")
+
+# Raw pdfplumber-visual tokens that identify a field-parameter row.
+# pdfplumber extracts Hebrew RTL text in visual order (characters reversed),
+# so logical "מומס" arrives as visual "סמומ", "מוליכות" → "תוכילומ", etc.
+_BC_FP_TOKENS: frozenset[str] = frozenset({
+    "סמומ",      # מומס  (dissolved)     — DO
+    "ןצמח",      # חמצן  (oxygen)        — DO
+    "תוכילומ",   # מוליכות (conductivity)
+    "הרוטרפמט",  # טמפרטורה (temperature)
+    "סקודר",     # רדוקס (redox)
+    "תוריכע",    # עכירות (turbidity)
+    "קמוע",      # עומק  (depth)
+    "הביאש",     # שאיבה (pumping)
+    "LOWFLOW",
+    "pH",
+})
+
+
+def _fix_rtl_bc(text: str) -> str:
+    """Reverse visual Hebrew (pdfplumber) back to logical reading order."""
+    if not _HEBREW_RE.search(text):
+        return text
+    tokens = text.split()
+    tokens.reverse()
+    return " ".join(t[::-1] if _HEBREW_RE.search(t) else t for t in tokens)
+
+
+def _cluster_rows_bc(words: list[dict]) -> list[list[dict]]:
+    """Cluster pdfplumber word dicts into rows by y-position."""
+    groups: list[list[dict]] = []
+    for w in sorted(words, key=lambda x: (x["top"], x["x0"])):
+        for g in groups:
+            if abs(w["top"] - g[0]["top"]) <= _ROW_TOL:
+                g.append(w)
+                break
+        else:
+            groups.append([w])
+    for g in groups:
+        g.sort(key=lambda x: x["x0"])
+    return groups
+
+
+def _canonical_bc_fp(name_fixed: str) -> str | None:
+    """Map a reconstructed Hebrew name → canonical GW_FIELD_PARAMS compound.
+    Returns None if the name is not a recognised field parameter."""
+    n = name_fixed.lower()
+    if "מוליכות" in n:
+        return "מוליכות"
+    if "טמפרטורה" in n:
+        return "טמפרטורה"
+    if "רדוקס" in n:
+        return "רדוקס"
+    if "עכירות" in n:
+        return "עכירות"
+    if "חמצן" in n:
+        return "חמצן מומס DO"
+    if "ph" in n:
+        return "הגבה pH"
+    if "עומק" in n:
+        if "שאיבה" in n:
+            return "עומק שאיבה"
+        if "פני" in n or "מים" in n:
+            return "עומק פני המים"
+        if "כללי" in n:
+            return "עומק כללי קידוח"
+        if "דיגום" in n or "lowflow" in n:
+            return "עומק דיגום"
+        if "עליון" in n or "מפלס" in n:
+            return "מפלס עליון"
+        if "קידוח" in n:
+            return "עומק קידוח"
+        return "עומק"
+    if "lowflow" in n:
+        return "עומק דיגום LOWFLOW"
+    return None
+
+
+def _parse_bc_fp_row(group: list[dict], sample_id: str, vp) -> dict | None:
+    """Parse one word-row into a GW_FIELD_PARAMS record, or return None.
+
+    Row layout (left→right in PDF x-coords, RTL document):
+        unit | value | name_tokens (reversed Hebrew)
+
+    Steps:
+      1. Row must contain at least one _BC_FP_TOKENS keyword.
+      2. Numeric token (^-?[\\d.]+$) = value.
+      3. Leftmost token (index 0) = unit; if tokens 0-1 are 'pH units', use both.
+      4. All tokens after value = name → reconstruct with _fix_rtl_bc → classify.
+    """
+    texts = [w["text"] for w in group]
+
+    if not any(t in _BC_FP_TOKENS for t in texts):
+        return None
+
+    val_idx = next(
+        (i for i, t in enumerate(texts) if re.match(r"^-?[\d.]+$", t)),
+        None,
+    )
+    if val_idx is None:
+        return None
+    val_str = texts[val_idx]
+
+    if val_idx >= 2 and texts[0].lower() == "ph" and texts[1].lower() == "units":
+        unit_str = "pH units"
+    elif val_idx >= 1:
+        unit_str = texts[0]
+    else:
+        unit_str = ""
+
+    name_tokens = texts[val_idx + 1:]
+    if not name_tokens:
+        return None
+    name_fixed = _fix_rtl_bc(" ".join(name_tokens))
+
+    compound = _canonical_bc_fp(name_fixed)
+    if compound is None:
+        return None
+
+    value, flag = vp.parse(val_str)
+    return {
+        "lab":           "בקטוכם",
+        "sample_id":     sample_id,
+        "compound":      compound,
+        "cas":           "",
+        "value":         value,
+        "flag":          flag,
+        "unit":          unit_str,
+        "lod":           None,
+        "analysis_type": "GW_FIELD_PARAMS",
+    }
+
+
+# ── English compound names → CAS (same as KTE groundwater)
 GW_CAS: dict[str, str] = {
     "benzene":                    "71-43-2",
     "toluene":                    "108-88-3",
@@ -79,26 +216,29 @@ def _resolve_cas(compound: str) -> str:
 
 
 def _classify_compound(name: str) -> str | None:
-    """Return 'GW_VOC', 'LOWFLOW', or None (skip row)."""
+    """Return 'GW_VOC', 'GW_FIELD_PARAMS', or None (skip row)."""
     low = name.strip().lower()
     if any(k in low for k in _VOC_KEYWORDS):
         return "GW_VOC"
     if any(k in low for k in _LOWFLOW_KEYWORDS):
-        return "LOWFLOW"
+        return "GW_FIELD_PARAMS"
     return None
 
 
 class BactochemGroundwaterParser(BaseParser):
     """
-    Parses Bactochem groundwater lab reports (CSV or XLSX).
+    Parses Bactochem groundwater lab reports (CSV, XLSX, or PDF).
 
     Bactochem files use a **single** Hebrew header row (unlike KTE which has
     two). Compound names are English. Analysis type is inferred from the
     compound name rather than an analysis-code column.
+
+    PDF input → GW_FIELD_PARAMS records (field parameters outside BTEX table).
+    CSV/XLSX input → GW_VOC and LOWFLOW records (tabular BTEX data).
     """
 
     LAB_NAME = "בקטוכם"
-    ANALYSIS_TYPES = ["GW_VOC", "LOWFLOW"]
+    ANALYSIS_TYPES = ["GW_VOC", "GW_FIELD_PARAMS"]
 
     # Named columns used by Bactochem
     COL_COMPOUND = "רכיב"
@@ -106,16 +246,58 @@ class BactochemGroundwaterParser(BaseParser):
     COL_LOCATION = "תיאור דוגמה"
     COL_DATE     = "תאריך דיגום"
 
-    def __init__(self):
-        self._vp = LabValueParser()
+    def __init__(self, debug: bool | None = None):
+        self._vp    = LabValueParser()
+        self._debug = debug if debug is not None else bool(os.environ.get("BACTOCHEM_DEBUG"))
 
     # ------------------------------------------------------------------
     def parse(self, file_obj: io.BytesIO | str) -> list[dict]:
+        # ── Path detection ────────────────────────────────────────────
+        if isinstance(file_obj, io.BytesIO):
+            file_obj.seek(0)
+            header = file_obj.read(4)
+            file_obj.seek(0)
+            if self._debug:
+                print(f"[BC DEBUG] Input: BytesIO  header={header!r}  "
+                      f"is_pdf={header == b'%PDF'}")
+            if header == b"%PDF":
+                if self._debug:
+                    print("[BC DEBUG] → PDF path")
+                return self._parse_pdf(file_obj)
+            if self._debug:
+                print("[BC DEBUG] → CSV/XLSX path")
+        elif isinstance(file_obj, str):
+            if self._debug:
+                print(f"[BC DEBUG] Input: str path={file_obj!r}  "
+                      f"ends_pdf={file_obj.lower().endswith('.pdf')}")
+            if file_obj.lower().endswith(".pdf"):
+                if self._debug:
+                    print("[BC DEBUG] → PDF path (str)")
+                with open(file_obj, "rb") as fh:
+                    return self._parse_pdf(io.BytesIO(fh.read()))
+            if self._debug:
+                print("[BC DEBUG] → CSV/XLSX path (str)")
+        else:
+            if self._debug:
+                print(f"[BC DEBUG] Input: unexpected type {type(file_obj).__name__}")
+
+        # ── Tabular path (CSV / XLSX) ─────────────────────────────────
         df = self._read(file_obj)
         if df is None or df.empty:
+            if self._debug:
+                print("[BC DEBUG] DataFrame is empty — 0 records")
             return []
 
+        if self._debug:
+            print(f"[BC DEBUG] DataFrame shape: {df.shape}")
+            print(f"[BC DEBUG] Columns: {list(df.columns)}")
+            for col in (self.COL_COMPOUND, self.COL_RESULT,
+                        self.COL_LOCATION, self.COL_DATE):
+                present = col in df.columns
+                print(f"[BC DEBUG]   col {col!r}: {'FOUND' if present else 'MISSING'}")
+
         records: list[dict] = []
+        skipped_unknown = []
         for _, row in df.iterrows():
             compound = str(row.get(self.COL_COMPOUND, "")).strip()
             raw_val  = str(row.get(self.COL_RESULT,   "")).strip()
@@ -127,6 +309,7 @@ class BactochemGroundwaterParser(BaseParser):
 
             atype = _classify_compound(compound)
             if atype is None:
+                skipped_unknown.append(compound)
                 continue
 
             if raw_val.lower() in ("not detected", "nd", "n.d.", "n/d",
@@ -155,7 +338,114 @@ class BactochemGroundwaterParser(BaseParser):
                 "analysis_type": atype,
             })
 
+        if self._debug:
+            print(f"\n[BC DEBUG] Tabular parse complete: {len(records)} records")
+            if skipped_unknown:
+                print(f"[BC DEBUG] Skipped (unclassified): {skipped_unknown}")
+            from collections import Counter
+            for atype, cnt in Counter(r["analysis_type"] for r in records).most_common():
+                print(f"[BC DEBUG]   {atype}: {cnt}")
+
         return records
+
+    # ------------------------------------------------------------------
+    def _parse_pdf(self, file_obj: io.BytesIO) -> list[dict]:
+        """Extract GW_FIELD_PARAMS records from a Bactochem PDF."""
+        try:
+            import pdfplumber
+        except ImportError as exc:
+            raise ImportError(
+                "pdfplumber is required for PDF parsing: pip install pdfplumber"
+            ) from exc
+
+        records: list[dict] = []
+        sample_id = "Sample"
+
+        with pdfplumber.open(file_obj) as pdf:
+            if self._debug:
+                print(f"[BC DEBUG] PDF: {len(pdf.pages)} page(s)  "
+                      f"size={pdf.pages[0].width:.0f}×{pdf.pages[0].height:.0f}")
+
+            for page_num, page in enumerate(pdf.pages):
+                if page_num == 0:
+                    sample_id = self._extract_sample_id_bc(page)
+                    if self._debug:
+                        print(f"[BC DEBUG] sample_id={sample_id!r}")
+
+                words = page.extract_words(
+                    x_tolerance=4, y_tolerance=4,
+                    keep_blank_chars=False, use_text_flow=False,
+                ) or []
+
+                if self._debug:
+                    print(f"\n[BC DEBUG] Page {page_num}: {len(words)} words")
+                    print(f"[BC DEBUG] First 20 words:")
+                    for w in words[:20]:
+                        print(f"  x0={w['x0']:6.1f} top={w['top']:6.1f} "
+                              f"text={w['text']!r}")
+
+                if not words:
+                    continue
+
+                row_groups = _cluster_rows_bc(words)
+                if self._debug:
+                    print(f"[BC DEBUG] {len(row_groups)} row groups on page {page_num}")
+
+                page_hits = 0
+                for gi, group in enumerate(row_groups):
+                    texts = [w["text"] for w in group]
+                    rec = _parse_bc_fp_row(group, sample_id, self._vp)
+                    if rec is not None:
+                        records.append(rec)
+                        page_hits += 1
+                        if self._debug:
+                            print(f"  row {gi:3d} HIT  texts={texts}  "
+                                  f"→ compound={rec['compound']!r}  "
+                                  f"value={rec['value']}  unit={rec['unit']!r}")
+                    elif self._debug and any(t in _BC_FP_TOKENS for t in texts):
+                        print(f"  row {gi:3d} TOKEN-MATCH-NO-VALUE  texts={texts}")
+
+                if self._debug:
+                    print(f"[BC DEBUG] Page {page_num}: {page_hits} records")
+
+        if self._debug:
+            print(f"\n[BC DEBUG] PDF parse complete: {len(records)} total records")
+            from collections import Counter
+            for atype, cnt in Counter(r["analysis_type"] for r in records).most_common():
+                print(f"[BC DEBUG]   {atype}: {cnt}")
+
+        return records
+
+    def _extract_sample_id_bc(self, page) -> str:
+        """Extract a borehole/well ID from the first page of a Bactochem PDF."""
+        text = page.extract_text() or ""
+        if self._debug:
+            print("[BC DEBUG] First 25 lines of page 0 text:")
+            for i, ln in enumerate(text.splitlines()[:25]):
+                print(f"  {i:2d}: {ln!r}")
+        for line in text.splitlines()[:25]:
+            m = re.search(r'מספר הדוגמה[:\s]+(\d+)', line)
+            if m:
+                if self._debug:
+                    print(f"[BC DEBUG] sample_id matched 'מספר הדוגמה': {m.group(1)!r}")
+                return m.group(1)
+            m = re.search(
+                r"\b(?:GW|BH|PZ|MW|OBS|MON|BOR|קידוח|באר)[-_]?\d+\b",
+                line, re.I,
+            )
+            if m:
+                if self._debug:
+                    print(f"[BC DEBUG] sample_id matched well-ID pattern: {m.group(0)!r}")
+                return m.group(0).upper()
+            if re.search(r"מספר\s*(קידוח|דגימה|באר|פיזומטר)", line):
+                m2 = re.search(r"[:]\s*(\S+)\s*$", line) or re.search(r"(\S+)$", line)
+                if m2:
+                    if self._debug:
+                        print(f"[BC DEBUG] sample_id matched Hebrew label: {m2.group(1)!r}")
+                    return m2.group(1)
+        if self._debug:
+            print("[BC DEBUG] sample_id: no pattern matched, using 'Sample'")
+        return "Sample"
 
     # ------------------------------------------------------------------
     def _read(self, file_obj: io.BytesIO | str) -> pd.DataFrame | None:
