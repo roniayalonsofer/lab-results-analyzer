@@ -439,24 +439,27 @@ class BactochemGroundwaterParser(BaseParser):
             print(f"[BC DEBUG] DataFrame shape: {df.shape}")
             print(f"[BC DEBUG] Columns: {list(df.columns)}")
             for col in (self.COL_COMPOUND, self.COL_RESULT,
-                        self.COL_LOCATION, self.COL_DATE):
+                        self.COL_LOCATION, self.COL_DATE, self.COL_UNIT):
                 present = col in df.columns
                 print(f"[BC DEBUG]   col {col!r}: {'FOUND' if present else 'MISSING'}")
 
         records: list[dict] = []
         skipped_unknown = []
         for _, row in df.iterrows():
-            compound = str(row.get(self.COL_COMPOUND, "")).strip()
-            raw_val  = str(row.get(self.COL_RESULT,   "")).strip()
-            loc      = str(row.get(self.COL_LOCATION, "")).strip()
-            date_val = str(row.get(self.COL_DATE,     "")).strip()
+            compound  = str(row.get(self.COL_COMPOUND, "")).strip()
+            raw_val   = str(row.get(self.COL_RESULT,   "")).strip()
+            loc       = str(row.get(self.COL_LOCATION, "")).strip()
+            date_val  = str(row.get(self.COL_DATE,     "")).strip()
+            file_unit = str(row.get(self.COL_UNIT,     "")).strip()
 
             if not compound or compound.lower() in ("nan", ""):
                 continue
 
-            atype = _classify_compound(compound)
+            atype = _classify_compound(compound, file_unit)
             if atype is None:
                 skipped_unknown.append(compound)
+                if self._debug:
+                    print(f"[BC DEBUG] Skipped (unclassified): compound={compound!r}  unit={file_unit!r}")
                 continue
 
             if raw_val.lower() in ("not detected", "nd", "n.d.", "n/d",
@@ -465,18 +468,28 @@ class BactochemGroundwaterParser(BaseParser):
             else:
                 value, flag = self._vp.parse(raw_val)
 
-            if atype == "GW_VOC":
-                cas  = _resolve_cas(compound)
-                unit = "mg/L"
-            elif atype == "GW_PFAS":
-                cas  = _resolve_cas(compound)
-                unit = "ng/L"
-            elif atype == "GW_MICROBIOLOGY":
-                cas  = ""
-                unit = "CFU/100mL"
+            # Unit: prefer the actual file unit; fall back to type default
+            norm_unit = _normalize_unit(file_unit)
+            if not norm_unit:
+                if atype == "GW_VOC":
+                    norm_unit = "mg/L"
+                elif atype == "GW_PFAS":
+                    norm_unit = "ng/L"
+                elif atype == "SOIL_PFAS":
+                    norm_unit = "ng/kg"
+                elif atype == "GW_MICROBIOLOGY":
+                    norm_unit = "CFU/100mL"
+
+            # CAS lookup
+            if atype in ("GW_VOC", "GW_PFAS", "SOIL_PFAS"):
+                # Try PFAS CAS dict first, then general lookup
+                cas_low = compound.strip().lower()
+                cas = next(
+                    (c for c, n in PFAS_CAS.items() if n.lower() == cas_low),
+                    _resolve_cas(compound),
+                )
             else:
-                cas  = ""
-                unit = ""
+                cas = ""
 
             sample_id = (loc if loc and loc.lower() not in ("nan", "")
                          else "Sample")
@@ -491,8 +504,9 @@ class BactochemGroundwaterParser(BaseParser):
                 "cas":           cas,
                 "value":         value,
                 "flag":          flag,
-                "unit":          unit,
+                "unit":          norm_unit,
                 "lod":           None,
+                "loq":           None,
                 "analysis_type": atype,
             })
 
