@@ -154,6 +154,7 @@ def build_xrf_simple_excel(
     indices.sort(key=_sort_key)
 
     # lookup: index → symbol → (raw_value, flag, lod)
+    # First reading for each sample/element wins — preserves original file values.
     lookup: dict[str, dict[str, tuple]] = {}
     for r in records:
         idx  = str(r.get("sample_id", "")).strip()
@@ -161,7 +162,9 @@ def build_xrf_simple_excel(
         val  = r.get("value")
         flag = r.get("flag", "ND")
         lod  = r.get("lod")
-        lookup.setdefault(idx, {})[sym] = (val, flag, lod)
+        inner = lookup.setdefault(idx, {})
+        if sym not in inner:   # keep only the first reading per sample/element
+            inner[sym] = (val, flag, lod)
 
     # Pre-compute threshold values: thresh_key → symbol → numeric value or None
     thresh_vals: dict[str, dict[str, object]] = {}
