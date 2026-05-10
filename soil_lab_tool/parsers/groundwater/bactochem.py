@@ -62,18 +62,68 @@ _BTEX_NAME_RE = re.compile(
 # Logical: "מספר הדוגמה: 1984651"  →  visual: "1984651 :המגודה רפסמ …"
 _BC_SAMPLE_HDR_RE = re.compile(r"(\d{5,})\s+:המגודה רפסמ")
 
-# Full CAS-line pattern (mg/L only) — matches lines like:
+# Full CAS-line pattern (mg/L and ng/L) — matches lines like:
 #   CAS #: 71-43-2  0.001  mg/L  Not Detected  Benzene
 #   CAS #: 1634-04-4  0.001  mg/L  3.200  MTBE
+#   CAS #: 335-67-1  0.001  ng/L  Not Detected  PFOA
 _GW_CAS_LINE_RE = re.compile(
-    r"CAS\s*#:\s*(?P<cas>[\w.\-]+)"        # CAS number
-    r"(?:\s+(?P<loq>[\d.]+))?"             # optional LOQ
-    r"\s+mg/L"                             # unit (GW only)
-    r"(?:\s+X[≤≥<>≠]\s*[\d.]+)?"          # optional threshold (discarded)
+    r"CAS\s*#:\s*(?P<cas>[\w.\-]+)"                                      # CAS number
+    r"(?:\s+(?P<loq>[\d.]+))?"                                            # optional LOQ
+    r"\s+(?P<unit>ng/L|mg/L)"                                             # unit
+    r"(?:\s+X[≤≥<>≠]\s*[\d.]+)?"                                         # optional threshold
     r"\s+(?P<result>Not\s+Detected|<[\d.]+|[\d.]+(?:[Ee][+\-]?\d+)?)"
-    r"(?:\s+\d+/)?"                        # optional sample ref (discarded)
+    r"(?:\s+\d+/)?"                                                        # optional sample ref
     r"\s*(?P<compound>.*)?$",
     re.IGNORECASE,
+)
+
+# Microbiology result line — matches lines like:
+#   Total coliforms  <1  CFU/100mL
+#   E. coli  <1  CFU/100mL
+#   חיידקים כוללים  500  CFU/mL
+_MICRO_RE = re.compile(
+    r"(?P<compound>.+?)"
+    r"[:\s]+"
+    r"(?P<result><\s*[\d.]+|Not\s+Detected|ND|[\d]+(?:\s*[×x]\s*10\^?\d+)?)"
+    r"\s+"
+    r"(?P<unit>CFU/(?:100\s*)?m[Ll]|MPN/(?:100\s*)?m[Ll]|יח[\"׳']/מ[\"׳']?[לl])",
+    re.IGNORECASE | re.UNICODE,
+)
+
+# PFAS compound CAS map (CAS → display name)
+PFAS_CAS: dict[str, str] = {
+    "335-67-1":    "PFOA",   # Perfluorooctanoic acid
+    "1763-23-1":   "PFOS",   # Perfluorooctanesulfonic acid
+    "355-46-4":    "PFHxS",  # Perfluorohexanesulfonic acid
+    "375-85-9":    "PFHpA",  # Perfluoroheptanoic acid
+    "375-22-4":    "PFBA",   # Perfluorobutanoic acid
+    "307-24-4":    "PFHxA",  # Perfluorohexanoic acid
+    "375-95-1":    "PFNA",   # Perfluorononanoic acid
+    "335-76-2":    "PFDA",   # Perfluorodecanoic acid
+    "375-73-5":    "PFBS",   # Perfluorobutanesulfonic acid
+    "27619-97-2":  "PFPeA",  # Perfluoropentanoic acid
+    "2706-90-3":   "PFPeS",  # Perfluoropentanesulfonic acid
+    "3871-99-6":   "PFHpS",  # Perfluoroheptanesulfonic acid
+    "45187-15-3":  "PFODA",  # Perfluorooctadecanoic acid
+    "2058-94-8":   "PFUnDA", # Perfluoroundecanoic acid
+    "307-62-0":    "PFDoDA", # Perfluorododecanoic acid
+    "718-01-4":    "PFTrDA", # Perfluorotridecanoic acid
+    "4021-47-0":   "PFTA",   # Perfluorotetradecanoic acid
+    "60270-55-5":  "FHxSA",  # Perfluorohexane sulfonamide
+    "754-91-6":    "FOSA",   # Perfluorooctane sulfonamide
+}
+
+# Keyword fragments that identify a PFAS compound name
+_PFAS_NAME_FRAGS = (
+    "pfoa", "pfos", "pfhxs", "pfhpa", "pfba", "pfhxa", "pfna", "pfda",
+    "pfbs", "pfpes", "pfhps", "pfuda", "pfdoda", "pftrda", "pfta",
+    "pfas", "perfluoro", "fosa", "fhxsa", "polyfluoro",
+)
+
+# Microbiology compound name keywords
+_MICRO_NAME_FRAGS = (
+    "coliform", "coli", "enterococcus", "enterococci", "bacteria",
+    "streptococcus", "fecal", "חיידקים", "קוליפורם",
 )
 
 
