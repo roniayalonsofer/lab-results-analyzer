@@ -456,7 +456,12 @@ class BactochemGroundwaterParser(BaseParser):
 
     # ------------------------------------------------------------------
     def _parse_pdf(self, file_obj: io.BytesIO) -> list[dict]:
-        """Extract GW_FIELD_PARAMS records from a Bactochem PDF."""
+        """Extract records from a Bactochem PDF.
+
+        Detects report type from full-text content, then runs appropriate
+        extraction methods.  Multiple types (e.g. BTEX + field-params) may
+        coexist in a single PDF.
+        """
         try:
             import pdfplumber
         except ImportError as exc:
@@ -464,9 +469,27 @@ class BactochemGroundwaterParser(BaseParser):
                 "pdfplumber is required for PDF parsing: pip install pdfplumber"
             ) from exc
 
+        # ── Sniff content to decide which parsers to run ──────────────
+        file_obj.seek(0)
+        full_text = ""
+        with pdfplumber.open(file_obj) as pdf:
+            for page in pdf.pages:
+                full_text += (page.extract_text() or "") + "\n"
+
+        ft_lo = full_text.lower()
+        has_pfas  = any(kw in ft_lo for kw in ("pfas", "pfoa", "pfos", "pfhxs", "ng/l"))
+        has_micro = any(kw in ft_lo for kw in ("cfu", "חיידקים", "coliform", "mpl", "mpn"))
+        has_btex  = any(kw in ft_lo for kw in ("benzene", "toluene", "mtbe"))
+        has_fp    = any(kw in full_text for kw in _BC_FP_TOKENS)
+
+        if self._debug:
+            print(f"[BC DEBUG] PDF sniff: pfas={has_pfas}  micro={has_micro}  "
+                  f"btex={has_btex}  field_params={has_fp}")
+
         records: list[dict] = []
         sample_id = "Sample"
 
+        file_obj.seek(0)
         with pdfplumber.open(file_obj) as pdf:
             if self._debug:
                 print(f"[BC DEBUG] PDF: {len(pdf.pages)} page(s)  "
@@ -481,17 +504,9 @@ class BactochemGroundwaterParser(BaseParser):
                     keep_blank_chars=False, use_text_flow=False,
                 ) or []
 
-                if self._debug:
-                    print(f"[BC DEBUG] Page {page_num}: {len(words)} words")
-
-                # ── Field parameters (word-cluster path) ──────────────────
-                if words:
+                # ── Field parameters (word-cluster path) ──────────────
+                if has_fp and words:
                     row_groups = _cluster_rows_bc(words)
-
-                    # Build a y-sorted list of (y_top, sample_id) for every
-                    # sample-header row on this page.  Rows that appear above
-                    # the first header carry forward the previous page's sample;
-                    # rows below a header belong to that header's sample.
                     page_sample_boundaries: list[tuple[float, str]] = []
                     for grp in row_groups:
                         joined = " ".join(w["text"] for w in grp)
@@ -502,15 +517,11 @@ class BactochemGroundwaterParser(BaseParser):
                             )
                     page_sample_boundaries.sort()
 
-                    if self._debug:
-                        print(f"[BC DEBUG] Page {page_num}: {len(row_groups)} row groups  "
-                              f"boundaries={page_sample_boundaries}")
-
                     page_hits = 0
                     for gi, group in enumerate(row_groups):
                         texts = [w["text"] for w in group]
                         row_y = group[0]["top"]
-                        row_sample = sample_id          # carry-forward default
+                        row_sample = sample_id
                         for bound_y, sid in page_sample_boundaries:
                             if bound_y <= row_y:
                                 row_sample = sid
@@ -518,34 +529,37 @@ class BactochemGroundwaterParser(BaseParser):
                         if rec is not None:
                             records.append(rec)
                             page_hits += 1
-                            if self._debug:
-                                print(f"  row {gi:3d} HIT  sample={row_sample!r}  "
-                                      f"→ compound={rec['compound']!r}  "
-                                      f"value={rec['value']}  unit={rec['unit']!r}")
-                        elif self._debug and any(t in _BC_FP_TOKENS for t in texts):
-                            print(f"  row {gi:3d} TOKEN-MATCH-NO-VALUE  texts={texts}")
 
                     if self._debug:
                         print(f"[BC DEBUG] Page {page_num}: {page_hits} field-param records")
 
-                # ── BTEX (text-line path — always runs, even if no words) ─
-                if self._debug:
-                    print(f"[BC DEBUG] Page {page_num}: scanning BTEX…")
-                btex_recs = self._extract_btex(page, sample_id)
-                records.extend(btex_recs)
-                if self._debug:
-                    print(f"[BC DEBUG] Page {page_num}: {len(btex_recs)} BTEX (GW_VOC) records")
+                # ── BTEX / VOC (text-line path) ───────────────────────
+                if has_btex:
+                    btex_recs = self._extract_btex(page, sample_id)
+                    records.extend(btex_recs)
+                    if self._debug:
+                        print(f"[BC DEBUG] Page {page_num}: {len(btex_recs)} BTEX records")
 
-                # Advance carry-forward to the last sample seen on this page
-                if words and page_sample_boundaries:
-                    sample_id = page_sample_boundaries[-1][1]
-                else:
-                    # No word-based boundaries — fall back to text-line scan
-                    text = page.extract_text() or ""
-                    for line in text.splitlines():
-                        hdr = _BC_SAMPLE_HDR_RE.search(line)
-                        if hdr:
-                            sample_id = hdr.group(1)
+                # ── PFAS (text-line path) ─────────────────────────────
+                if has_pfas:
+                    pfas_recs = self._extract_pfas(page, sample_id)
+                    records.extend(pfas_recs)
+                    if self._debug:
+                        print(f"[BC DEBUG] Page {page_num}: {len(pfas_recs)} PFAS records")
+
+                # ── Microbiology (text-line path) ─────────────────────
+                if has_micro:
+                    micro_recs = self._extract_microbiology(page, sample_id)
+                    records.extend(micro_recs)
+                    if self._debug:
+                        print(f"[BC DEBUG] Page {page_num}: {len(micro_recs)} microbiology records")
+
+                # Advance sample carry-forward
+                text = page.extract_text() or ""
+                for line in text.splitlines():
+                    hdr = _BC_SAMPLE_HDR_RE.search(line)
+                    if hdr:
+                        sample_id = hdr.group(1)
 
         if self._debug:
             print(f"\n[BC DEBUG] PDF parse complete: {len(records)} total records")
