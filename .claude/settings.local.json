@@ -6,7 +6,10 @@
       "Bash(py -3 -c \"import streamlit; print\\(streamlit.__version__\\)\")",
       "Bash(python -c \"import streamlit; print\\(streamlit.__version__\\)\")",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(py -3 -c ' *)",
+      "Bash(Select-String -Pattern \"Page 3|1984655|sample=|HIT|TOKEN-MATCH\")",
+      "Bash(Select-Object -First 60)"
     ]
   },
   "hooks": {
@@ -16,10 +19,10 @@
         "hooks": [
           {
             "type": "command",
-            "shell": "powershell",
             "command": "$repo = 'C:\\Users\\r5901\\OneDrive\\lab-results-analyzer'; Set-Location $repo; git add -A; if (git status --porcelain) { git commit -m ('auto: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm')); git push }",
-            "async": true,
-            "statusMessage": "Pushing to GitHub..."
+            "shell": "powershell",
+            "statusMessage": "Pushing to GitHub...",
+            "async": true
           }
         ]
       }
