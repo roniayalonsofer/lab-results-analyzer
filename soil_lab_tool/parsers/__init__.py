@@ -213,7 +213,7 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
 
     # Unambiguous filename hints (checked first — these are specific enough)
     if "xrf" in n:
-        return "xrf"
+        return "אלכם"
     if "alchem" in n:
         return "alchem"
     if any(k in n for k in ("aminolab", "אמינולאב")):
