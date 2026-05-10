@@ -36,6 +36,41 @@ from core.lab_value_parser import LabValueParser
 from core.cas_lookup import name_to_cas
 
 
+# ── BTEX extraction helpers ───────────────────────────────────────────────────
+
+# CAS registry number → preferred English display name
+_CAS_TO_NAME: dict[str, str] = {
+    "71-43-2":   "Benzene",
+    "108-88-3":  "Toluene",
+    "100-41-4":  "Ethylbenzene",
+    "1330-20-7": "Xylene",
+    "1634-04-4": "MTBE",
+    "91-20-3":   "Naphthalene",
+    "75-65-0":   "TBA",
+}
+
+# Fallback: recognise compound name from the tail of a CAS line
+_BTEX_NAME_RE = re.compile(
+    r"\b(Benzene|Toluene|Ethyl\s*Benzene|Ethylbenzene|Xylenes?|MTBE|"
+    r"Methyl\s+Tert-Butyl\s+Ether|Naphthalene|TBA|Tert-Butyl\s+Alcohol)\b",
+    re.I,
+)
+
+# Full CAS-line pattern (mg/L only) — matches lines like:
+#   CAS #: 71-43-2  0.001  mg/L  Not Detected  Benzene
+#   CAS #: 1634-04-4  0.001  mg/L  3.200  MTBE
+_GW_CAS_LINE_RE = re.compile(
+    r"CAS\s*#:\s*(?P<cas>[\w.\-]+)"        # CAS number
+    r"(?:\s+(?P<loq>[\d.]+))?"             # optional LOQ
+    r"\s+mg/L"                             # unit (GW only)
+    r"(?:\s+X[≤≥<>≠]\s*[\d.]+)?"          # optional threshold (discarded)
+    r"\s+(?P<result>Not\s+Detected|<[\d.]+|[\d.]+(?:[Ee][+\-]?\d+)?)"
+    r"(?:\s+\d+/)?"                        # optional sample ref (discarded)
+    r"\s*(?P<compound>.*)?$",
+    re.IGNORECASE,
+)
+
+
 # ── PDF field-params helpers ──────────────────────────────────────────────────
 
 _ROW_TOL   = 6
@@ -406,13 +441,70 @@ class BactochemGroundwaterParser(BaseParser):
                         print(f"  row {gi:3d} TOKEN-MATCH-NO-VALUE  texts={texts}")
 
                 if self._debug:
-                    print(f"[BC DEBUG] Page {page_num}: {page_hits} records")
+                    print(f"[BC DEBUG] Page {page_num}: {page_hits} field-param records")
+
+                # ── BTEX table extraction ──────────────────────────────────
+                if self._debug:
+                    print(f"[BC DEBUG] Page {page_num}: scanning tables for BTEX…")
+                btex_recs = self._extract_btex(page, sample_id)
+                records.extend(btex_recs)
+                if self._debug:
+                    print(f"[BC DEBUG] Page {page_num}: {len(btex_recs)} BTEX (GW_VOC) records")
 
         if self._debug:
             print(f"\n[BC DEBUG] PDF parse complete: {len(records)} total records")
             from collections import Counter
             for atype, cnt in Counter(r["analysis_type"] for r in records).most_common():
                 print(f"[BC DEBUG]   {atype}: {cnt}")
+
+        return records
+
+    def _extract_btex(self, page, sample_id: str) -> list[dict]:
+        """Extract GW_VOC records from BTEX data lines in a PDF page.
+
+        The BTEX compounds appear as free-form text lines (not in proper PDF
+        table cells), so page.extract_text() is used.  Each line matching
+        the pattern "CAS #: {cas} {loq} mg/L {result} {compound}" becomes
+        one GW_VOC record.
+        """
+        records: list[dict] = []
+        text = page.extract_text() or ""
+
+        for line in text.splitlines():
+            m = _GW_CAS_LINE_RE.search(line)
+            if not m:
+                continue
+
+            cas        = m.group("cas").strip()
+            result_raw = m.group("result").strip()
+            name_tail  = (m.group("compound") or "").strip()
+
+            compound = _CAS_TO_NAME.get(cas)
+            if compound is None:
+                nm = _BTEX_NAME_RE.search(name_tail)
+                compound = nm.group(1) if nm else (name_tail or None)
+            if not compound:
+                if self._debug:
+                    print(f"  [BTEX] unrecognised CAS {cas!r}: {line!r}")
+                continue
+
+            value, flag = self._vp.parse(result_raw)
+
+            if self._debug:
+                print(f"  [BTEX] compound={compound!r}  cas={cas!r}  "
+                      f"result={result_raw!r}  →  value={value}  flag={flag!r}")
+
+            records.append({
+                "lab":           self.LAB_NAME,
+                "sample_id":     sample_id,
+                "compound":      compound,
+                "cas":           cas,
+                "value":         value,
+                "flag":          flag,
+                "unit":          "mg/L",
+                "lod":           None,
+                "analysis_type": "GW_VOC",
+            })
 
         return records
 
