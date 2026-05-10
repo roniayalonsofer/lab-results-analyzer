@@ -363,6 +363,8 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
             return "soil_gas"
 
     # ── Filename-based checks (run only after content checks) ────────────────────
+    if "xrf" in n:
+        return "soil"
     if "excel_generic" in n or n.startswith("pr"):
         return "pr"
     if "pfas" in n:
