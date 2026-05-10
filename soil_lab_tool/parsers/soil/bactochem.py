@@ -170,7 +170,7 @@ class BactochemSoilParser(BaseParser):
     LAB_NAME = "בקטוכם"
     ANALYSIS_TYPES = [
         "SOIL_METALS", "SOIL_SVOC", "SOIL_VOC", "SOIL_TPH", "SOIL_EXPLOSIVES",
-        "SOIL_PFAS", "GW_METALS", "GW_TPH", "GW_PFAS",
+        "SOIL_PFAS", "GW_METALS", "GW_TPH", "GW_PFAS", "GW_MICROBIOLOGY",
     ]
 
     def parse(self, file_obj: io.BytesIO) -> list[dict]:
