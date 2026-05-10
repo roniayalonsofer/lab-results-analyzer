@@ -322,18 +322,53 @@ def _resolve_cas(compound: str) -> str:
     return GW_CAS.get(key) or name_to_cas(compound) or ""
 
 
-def _classify_compound(name: str) -> str | None:
-    """Return analysis type string or None (skip row)."""
-    low = name.strip().lower()
+def _classify_compound(name: str, unit: str = "") -> str | None:
+    """Return analysis type string or None (skip row).
+
+    `unit` (from the file's units column) is used to disambiguate SOIL_PFAS
+    vs GW_PFAS and as a fallback when the compound name alone is not recognised.
+    """
+    low     = name.strip().lower()
+    unit_lo = unit.strip().lower()
+
     if any(k in low for k in _PFAS_NAME_FRAGS):
-        return "GW_PFAS"
+        return "SOIL_PFAS" if ("kg" in unit_lo) else "GW_PFAS"
     if any(k in low for k in _MICRO_NAME_FRAGS):
         return "GW_MICROBIOLOGY"
     if any(k in low for k in _VOC_KEYWORDS):
         return "GW_VOC"
     if any(k in low for k in _LOWFLOW_KEYWORDS):
         return "GW_FIELD_PARAMS"
+
+    # Unit-only fallback — compound name unrecognised but unit is distinctive
+    if "cfu" in unit_lo or "mpn" in unit_lo:
+        return "GW_MICROBIOLOGY"
+    if "ng" in unit_lo and "kg" in unit_lo:
+        return "SOIL_PFAS"
+    if "ng" in unit_lo and "/l" in unit_lo:
+        return "GW_PFAS"
+
     return None
+
+
+def _normalize_unit(raw: str) -> str:
+    """Normalise a raw unit string from the file into a canonical form."""
+    u = raw.strip().lower()
+    if not u or u == "nan":
+        return ""
+    if "cfu" in u or "יח" in u:
+        return "CFU/100mL" if "100" in u else "CFU/mL"
+    if "mpn" in u:
+        return "MPN/100mL" if "100" in u else "MPN/mL"
+    if u in ("ng/kg", "ng/kg dry", "ng/kg dw", "ng/kg d.w.", "ng/kg dw"):
+        return "ng/kg"
+    if "ng" in u and "kg" in u:
+        return "ng/kg"
+    if "ng/l" in u:
+        return "ng/L"
+    if "mg/l" in u:
+        return "mg/L"
+    return raw.strip()
 
 
 class BactochemGroundwaterParser(BaseParser):
