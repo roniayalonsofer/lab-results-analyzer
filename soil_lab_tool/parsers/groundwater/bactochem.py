@@ -56,6 +56,10 @@ _BTEX_NAME_RE = re.compile(
     re.I,
 )
 
+# Reversed-RTL sample-header pattern produced by pdfplumber on Hebrew PDFs.
+# Logical: "מספר הדוגמה: 1984651"  →  visual: "1984651 :המגודה רפסמ …"
+_BC_SAMPLE_HDR_RE = re.compile(r"(\d{5,})\s+:המגודה רפסמ")
+
 # Full CAS-line pattern (mg/L only) — matches lines like:
 #   CAS #: 71-43-2  0.001  mg/L  Not Detected  Benzene
 #   CAS #: 1634-04-4  0.001  mg/L  3.200  MTBE
