@@ -441,7 +441,6 @@ try:
                                    load_threshold_file, get_tier1_col, tier1_label)
     from core.xrf_output   import build_xrf_simple_excel
     from parsers import get_parser, auto_detect_category, auto_detect_lab
-    from parsers.soil.xrf import XRFSoilParser
     _tm_py    = os.path.join(TOOL_DIR, 'core', 'threshold_manager.py')
     _tm_mtime = os.path.getmtime(_tm_py)
     tm = load_threshold_manager(_tm_mtime)
