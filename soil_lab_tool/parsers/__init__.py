@@ -159,6 +159,48 @@ def _xlsx_sheet_names(file_bytes: bytes) -> list[str]:
     return []
 
 
+_XRF_ELEMENTS = frozenset({
+    "MO", "ZR", "SR", "U", "RB", "TH", "PB", "AU", "AS", "HG",
+    "ZN", "CU", "NI", "CO", "FE", "MN", "CR", "V", "TI", "CA",
+    "K", "S", "BA", "AG", "CD", "SB", "SE", "SN", "W", "Y", "NB",
+})
+_XRF_MIN_ELEMENTS = 6  # at least this many element columns to be considered XRF
+
+
+def _is_xrf_tabular(file_bytes: bytes, is_csv: bool = False) -> bool:
+    """Return True if the file looks like a wide-format XRF metals table."""
+    try:
+        import io as _io, pandas as _pd
+        if is_csv:
+            for enc in ("utf-8-sig", "utf-8", "latin-1"):
+                try:
+                    df = _pd.read_csv(_io.BytesIO(file_bytes), header=None,
+                                      dtype=str, nrows=8, encoding=enc).fillna("")
+                    break
+                except Exception:
+                    continue
+            else:
+                return False
+        else:
+            xl = _pd.ExcelFile(_io.BytesIO(file_bytes))
+            df = xl.parse(xl.sheet_names[0], header=None, dtype=str,
+                          nrows=8).fillna("")
+        # Scan first 8 rows for a row with many element-symbol columns
+        for ri in range(len(df)):
+            row = [_re.sub(r"\s*[\(\[].*", "", str(v)).strip().upper()
+                   for v in df.iloc[ri]]
+            hit = sum(1 for v in row if v in _XRF_ELEMENTS)
+            if hit >= _XRF_MIN_ELEMENTS:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _is_xrf_excel(file_bytes: bytes) -> bool:
+    return _is_xrf_tabular(file_bytes, is_csv=False)
+
+
 def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | None:
     """
     Attempt to identify the lab from filename and/or file content.
