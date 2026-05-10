@@ -84,7 +84,7 @@ _GW_CAS_LINE_RE = re.compile(
 _MICRO_RE = re.compile(
     r"(?P<compound>.+?)"
     r"[:\s]+"
-    r"(?P<result><\s*[\d.]+|Not\s+Detected|ND|[\d]+(?:\s*[×x]\s*10\^?\d+)?)"
+    r"(?P<result><\s*[\d.]+|Not\s+Detected|ND|[\d]+(?:[.,]\d+)?(?:\s*[×x]\s*10\^?\d+)?)"
     r"\s+"
     r"(?P<unit>CFU/(?:100\s*)?m[Ll]|MPN/(?:100\s*)?m[Ll]|m[Ll]/(?:100\s*)?CFU|יח[\"׳']/מ[\"׳']?[לl])",
     re.IGNORECASE | re.UNICODE,
