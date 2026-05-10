@@ -255,6 +255,11 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
         except Exception:
             pass
 
+    # CSV content check for XRF (run before KTE fallback)
+    if file_bytes is not None and n.endswith(".csv"):
+        if _is_xrf_tabular(file_bytes, is_csv=True):
+            return "xrf"
+
     # Filename fallback for KTE (after content checks)
     if any(k in n for k in ("kte", "excel_generic")):
         return "kte"
