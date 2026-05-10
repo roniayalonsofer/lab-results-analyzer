@@ -197,16 +197,21 @@ def _parse_header_col(raw: str) -> tuple[str, str]:
 def _find_header_row(df: pd.DataFrame) -> int:
     """
     Scan the first 10 rows to find the header row.
-    Returns the row index whose cells best match known element symbols or
-    the skip-column keywords.
+    A row scores +1 for each cell that is a known element symbol or a
+    recognised metadata keyword.  The row with the highest score is the header.
+    Ties are broken by preferring the earlier row.
     """
     best_row, best_score = 0, 0
     for ri in range(min(10, len(df))):
-        row_vals = [str(v).strip().upper() for v in df.iloc[ri]]
-        score = sum(
-            1 for v in row_vals
-            if v in _ELEMENT_CAS or v.lower() in _SKIP_COLS
-        )
+        row_vals = [str(v).strip() for v in df.iloc[ri]]
+        score = 0
+        for v in row_vals:
+            up = v.upper()
+            lo = v.lower()
+            if up in _ELEMENT_CAS:
+                score += 1
+            elif lo in _SKIP_COLS or lo in _SAMPLE_ID_HINTS or lo in _LOCATION_HINTS:
+                score += 1
         if score > best_score:
             best_score, best_row = score, ri
     return best_row
