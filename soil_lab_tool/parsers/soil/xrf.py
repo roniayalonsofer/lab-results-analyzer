@@ -324,8 +324,8 @@ class XRFSoilParser(BaseParser):
             if sym in _ELEMENT_CAS:
                 element_cols.append((ci, sym, unit))
 
-        # Resolve row-label column: prefer index_col, then id_col, then col 0
-        id_col = index_col if index_col is not None else (id_col if id_col is not None else 0)
+        # Resolve row-label column: prefer Sample (id_col), then Index (index_col), then col 0
+        id_col = id_col if id_col is not None else (index_col if index_col is not None else 0)
 
         if loc_col == id_col:
             loc_col = None
