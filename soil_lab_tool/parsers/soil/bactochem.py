@@ -39,13 +39,13 @@ _SAMPLE_RE = re.compile(
 # CAS data line — fields in order:
 #   [footnote] CAS #: {cas} [{loq}] {unit} [X≤threshold] {result} [{n}/] {compound}
 _CAS_RE = re.compile(
-    r"CAS\s*#:\s*(?P<cas>[\w.+\-]+)"                          # CAS / pseudo-id
-    r"(?:\s+(?P<loq>[\d.]+))?"                                 # optional LOQ
-    r"\s+(?P<unit>%|mg/(?:kg(?:\s+dry(?:\s+substance)?)?|L))" # unit
-    r"(?:\s+X[≤≥<>≠]\s*[\d.]+(?:\s*/\s*[\d.]+)?)?"           # optional threshold (discarded)
-    r"\s+(?P<result>Not\s+Detected|<[\d.]+|[\d.]+)"            # result
-    r"(?:\s+\d+/)?"                                            # optional sample ref (discarded)
-    r"\s*(?P<compound>.*)$",                                   # rest = compound name
+    r"CAS\s*#:\s*(?P<cas>[\w.+\-]+)"                                           # CAS / pseudo-id
+    r"(?:\s+(?P<loq>[\d.]+))?"                                                  # optional LOQ
+    r"\s+(?P<unit>%|ng/(?:kg|L)|mg/(?:kg(?:\s+dry(?:\s+substance)?)?|L))"      # unit (inc ng/kg, ng/L)
+    r"(?:\s+X[≤≥<>≠]\s*[\d.]+(?:\s*/\s*[\d.]+)?)?"                            # optional threshold
+    r"\s+(?P<result>Not\s+Detected|<[\d.]+|[\d.]+(?:[Ee][+\-]?\d+)?)"          # result
+    r"(?:\s+\d+/)?"                                                              # optional sample ref
+    r"\s*(?P<compound>.*)$",                                                     # rest = compound name
     re.IGNORECASE,
 )
 
@@ -57,6 +57,7 @@ _SECTION_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"SVOC",                           re.I), "SVOC"),
     (re.compile(r"\bVOC\b",                        re.I), "VOC"),
     (re.compile(r"\bICP\b",                        re.I), "ICP"),
+    (re.compile(r"\bPFAS\b",                       re.I), "PFAS"),   # must follow VOC/ICP checks
 ]
 
 # Page footer — skip these lines
