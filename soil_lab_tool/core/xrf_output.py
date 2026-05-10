@@ -145,6 +145,14 @@ def build_xrf_simple_excel(
             if cas:
                 cas_map[sym] = cas
 
+    # Sort indices numerically when possible (76, 100, 124, 163 …)
+    def _sort_key(s: str):
+        try:
+            return (0, float(s))
+        except ValueError:
+            return (1, s)
+    indices.sort(key=_sort_key)
+
     # lookup: index → symbol → (raw_value, flag, lod)
     lookup: dict[str, dict[str, tuple]] = {}
     for r in records:
