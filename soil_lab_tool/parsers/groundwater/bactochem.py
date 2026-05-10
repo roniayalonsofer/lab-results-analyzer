@@ -543,7 +543,7 @@ class BactochemGroundwaterParser(BaseParser):
                 full_text += (page.extract_text() or "") + "\n"
 
         ft_lo = full_text.lower()
-        has_pfas  = any(kw in ft_lo for kw in ("pfas", "pfoa", "pfos", "pfhxs", "ng/l"))
+        has_pfas  = any(kw in ft_lo for kw in ("pfas", "pfoa", "pfos", "pfhxs", "ng/l", "ng/kg"))
         has_micro = any(kw in ft_lo for kw in ("cfu", "חיידקים", "coliform", "mpl", "mpn"))
         has_btex  = any(kw in ft_lo for kw in ("benzene", "toluene", "mtbe"))
         has_fp    = any(kw in full_text for kw in _BC_FP_TOKENS)
