@@ -339,6 +339,12 @@ class XRFSoilParser(BaseParser):
             sid_raw = str(row.iloc[id_col]).strip()
             if not sid_raw or sid_raw.lower() in _SKIP_VALUES:
                 continue
+            # Normalize float-like strings: "76.0" → "76"
+            if sid_raw.endswith(".0"):
+                try:
+                    sid_raw = str(int(float(sid_raw)))
+                except ValueError:
+                    pass
 
             loc_val = ""
             if loc_col is not None:
