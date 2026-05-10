@@ -1091,9 +1091,16 @@ with tab_excel:
             st.error(f"שגיאת בניית Excel: {e}")
             st.exception(e)
     elif lab.lower() == "xrf":
-        # XRF: plain Index × Element table — no thresholds, no CAS
         try:
-            build_xrf_simple_excel(records, excel_buf)
+            build_xrf_simple_excel(
+                records,
+                excel_buf,
+                threshold_manager   = tm,
+                selected_thresholds = selected_thresholds,
+                project_name        = project_name,
+                client              = client_name,
+                report_date         = date.today().strftime('%d.%m.%Y'),
+            )
             excel_buf.seek(0)
             excel_ok = True
         except Exception as e:
