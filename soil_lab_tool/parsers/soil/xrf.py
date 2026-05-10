@@ -330,11 +330,11 @@ class XRFSoilParser(BaseParser):
             if not sid_raw or sid_raw.lower() in _SKIP_VALUES:
                 continue
 
-            sample_id = sid_raw
+            loc_val = ""
             if loc_col is not None:
-                loc_val = str(row.iloc[loc_col]).strip()
-                if loc_val and loc_val.lower() not in ("nan", ""):
-                    sample_id = f"{sid_raw} – {loc_val}"
+                _lv = str(row.iloc[loc_col]).strip()
+                if _lv and _lv.lower() not in ("nan", ""):
+                    loc_val = _lv
 
             for ci, sym, compound, unit in element_cols:
                 raw_val = str(row.iloc[ci]).strip()
@@ -344,7 +344,8 @@ class XRFSoilParser(BaseParser):
                 value, flag, lod = _parse_xrf_value(raw_val)
 
                 records.append({
-                    "sample_id":     sample_id,
+                    "sample_id":     sid_raw,   # raw sample number only
+                    "location":      loc_val,   # separate location field
                     "compound":      compound,
                     "cas":           _ELEMENT_CAS.get(sym, ""),
                     "value":         value,
