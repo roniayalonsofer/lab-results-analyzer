@@ -949,7 +949,8 @@ with tab_excel:
             return None
         pfx = "RES" if land_use == "res" else "IND"
         if sens_code == "vh":  return f"PFAS_TIER1_{pfx}_VERY_HIGH"
-        if sens_code == "hm":  return f"PFAS_TIER1_{pfx}_6PLUS"
+        if sens_code == "hm":
+            return f"PFAS_TIER1_{pfx}_0_6" if depth_label == "0-6מ'" else f"PFAS_TIER1_{pfx}_6PLUS"
         if sens_code == "low": return f"PFAS_TIER1_{pfx}_NO_GW"
         return None
 
@@ -1004,12 +1005,18 @@ with tab_excel:
             pfas_sens_res = st.selectbox("רגישות", ["—", "רגישות גבוהה מאוד", "רגישות גבוהה/בינונית", "רגישות נמוכה"],
                                          key="pfas_sens_res", label_visibility="collapsed")
             pfas_depth_res = None
+            if pfas_sens_res == "רגישות גבוהה/בינונית":
+                pfas_depth_res = st.radio("עומק", ["0-6מ'", ">6מ'"], horizontal=True,
+                                          key="pfas_depth_res", label_visibility="collapsed")
 
         with cp_ind:
             st.markdown('<div style="font-size:0.85rem;font-weight:700;color:#374151;margin-bottom:6px;">Tier 1 תעשייה (Industrial)</div>', unsafe_allow_html=True)
             pfas_sens_ind = st.selectbox("רגישות", ["—", "רגישות גבוהה מאוד", "רגישות גבוהה/בינונית", "רגישות נמוכה"],
                                          key="pfas_sens_ind", label_visibility="collapsed")
             pfas_depth_ind = None
+            if pfas_sens_ind == "רגישות גבוהה/בינונית":
+                pfas_depth_ind = st.radio("עומק", ["0-6מ'", ">6מ'"], horizontal=True,
+                                          key="pfas_depth_ind", label_visibility="collapsed")
 
         if use_pfas_vsl:
             selected_thresholds.append("PFAS_VSL")
