@@ -21,6 +21,7 @@ from parsers.groundwater.kte        import KTEGroundwaterParser
 from parsers.groundwater.bactochem  import BactochemGroundwaterParser
 from parsers.groundwater.aminolab   import AminolabGroundwaterParser
 from parsers.pfas.kte               import KTEPFASParser
+from parsers.pfas.rj_lee            import RJLeePFASParser
 
 
 _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
@@ -30,6 +31,8 @@ _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
     ("kte",           "soil"):        KTESoilParser,
     ("kte",           "groundwater"): KTEGroundwaterParser,
     ("kte",           "pfas"):        KTEPFASParser,
+    ("rj lee",        "pfas"):        RJLeePFASParser,
+    ("rj lee",        "soil_pfas"):   RJLeePFASParser,
     ("kte",           "pr"):          KTEPRParser,
     ("מכון הנפט",    "soil"):        MachonHaneftSoilParser,
     ("machon haneft", "soil"):        MachonHaneftSoilParser,
@@ -261,6 +264,10 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
     if file_bytes is not None and n.endswith(".csv"):
         if _is_xrf_tabular(file_bytes, is_csv=True):
             return "אלכם"
+
+    # RJ Lee EDD filename hints
+    if any(k in n for k in ("rjlg", "rj lee")) or "edd" in n or "rj" in n:
+        return "rj lee"
 
     # Filename fallback for KTE (after content checks)
     if any(k in n for k in ("kte", "excel_generic")):
