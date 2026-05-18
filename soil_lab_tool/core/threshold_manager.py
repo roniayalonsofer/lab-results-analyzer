@@ -568,8 +568,30 @@ class ThresholdManager:
         "tier1_ind_no_gw": ("tier1_ind", 2),
     }
 
+    @staticmethod
+    def _nth_numeric_after_cas(row, df_columns, cas_col, n: int) -> float | None:
+        """Return the n-th (0-based) numeric value in columns that come after cas_col.
+
+        This is the same column-discovery strategy used by _lookup_pfas (VSL):
+        scan left-to-right after the CAS column and count numeric hits.
+        Avoids any dependency on column names (e.g. '[mg/kg]').
+        """
+        cas_pos = list(df_columns).index(cas_col)
+        count = 0
+        for col in df_columns[cas_pos + 1:]:
+            val = ThresholdManager._to_float(row[col])
+            if val is not None:
+                if count == n:
+                    return val
+                count += 1
+        return None
+
     def _lookup_pfas_direct(self, sheet_key: str, cas: str) -> float | None:
-        """CAS lookup on a granular PFAS Tier1 column — identical approach to _lookup_pfas."""
+        """CAS lookup on a granular PFAS Tier1 column.
+
+        Uses the same numeric-column-scan strategy as _lookup_pfas (VSL) so it
+        works regardless of what the value column headers are named in the file.
+        """
         parent_key, col_idx = self._PFAS_DIRECT_KEY_MAP.get(sheet_key, (sheet_key, 0))
         df = self._pfas.get(parent_key)
         if df is None:
@@ -577,17 +599,14 @@ class ThresholdManager:
         cas_col = next((c for c in df.columns if "cas" in c.lower()), None)
         if cas_col is None:
             return None
-        row = df[df[cas_col].str.strip() == cas]
-        if row.empty:
+        row_df = df[df[cas_col].str.strip() == cas]
+        if row_df.empty:
             return None
-        mg_cols = [c for c in df.columns if c.startswith("[mg/kg]")]
-        if col_idx >= len(mg_cols):
-            return None
-        val = self._to_float(row.iloc[0][mg_cols[col_idx]])
+        val = self._nth_numeric_after_cas(row_df.iloc[0], df.columns, cas_col, col_idx)
         return val * 1000 if val is not None else None
 
     def _lookup_pfas_direct_by_name(self, sheet_key: str, name: str) -> float | None:
-        """Name fallback for a granular PFAS Tier1 column — identical approach to _lookup_pfas_by_name."""
+        """Name fallback for a granular PFAS Tier1 column — same strategy as _lookup_pfas_by_name."""
         parent_key, col_idx = self._PFAS_DIRECT_KEY_MAP.get(sheet_key, (sheet_key, 0))
         df = self._pfas.get(parent_key)
         if df is None:
@@ -598,18 +617,18 @@ class ThresholdManager:
         )
         if name_col is None:
             return None
+        cas_col = next((c for c in df.columns if "cas" in c.lower()), None)
+        if cas_col is None:
+            return None
         name_lo = name.lower()
         mask = df[name_col].str.strip().str.lower() == name_lo
-        row = df[mask]
-        if row.empty:
+        row_df = df[mask]
+        if row_df.empty:
             mask = df[name_col].str.strip().str.lower().str.contains(name_lo, na=False)
-            row = df[mask]
-        if row.empty:
+            row_df = df[mask]
+        if row_df.empty:
             return None
-        mg_cols = [c for c in df.columns if c.startswith("[mg/kg]")]
-        if col_idx >= len(mg_cols):
-            return None
-        val = self._to_float(row.iloc[0][mg_cols[col_idx]])
+        val = self._nth_numeric_after_cas(row_df.iloc[0], df.columns, cas_col, col_idx)
         return val * 1000 if val is not None else None
 
     def _lookup_pfas(self, sheet_key: str, cas: str) -> float | None:

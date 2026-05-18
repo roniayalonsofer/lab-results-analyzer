@@ -180,7 +180,11 @@ class ALSSoilParser(BaseParser):
             return "SOIL_VOC"
         if any(k in c for k in ("TPH", "PETROLEUM", "DRO", "ORO", "GRO")):
             return "SOIL_TPH"
-        if any(k in c for k in ("PFAS", "PFOA", "PFOS", "PFBA")):
+        if any(k in c for k in (
+            "PFAS", "PFOA", "PFOS", "PFBS", "PFBA", "PFNA", "PFDA", "PFUA",
+            "PFHX", "PFPE", "PFDO", "PFDE", "FOSA", "HFPO",
+            "PERFLUORO", "FLUOROTELOMER", "SULFONAMIDE",
+        )):
             return "SOIL_PFAS"
         return "SOIL_SVOC"
 
