@@ -266,9 +266,6 @@ class ThresholdManager:
                 soil_hm_6_col   = soil_hm_6_col   if soil_hm_6_col   is not None else 6
                 soil_low_col    = soil_low_col    if soil_low_col    is not None else 8
 
-                if sv_indoor_col is None:
-                    continue  # sheet doesn't have expected vapor columns
-
                 # ── Find first data row (col 1 matches CAS pattern) ──────────
                 data_start: int | None = None
                 for ri in range(len(raw)):
@@ -290,12 +287,14 @@ class ThresholdManager:
                     (soil_hm_6_col,   "soil_hm_6"),
                     (soil_low_col,    "soil_low"),
                 ]
+                name_series = data.iloc[:, 0].str.strip()
                 for col_idx, key_suffix in col_specs:
                     if col_idx is None or col_idx >= data.shape[1]:
                         continue
                     full_key = f"{prefix}_{key_suffix}"
                     df = pd.DataFrame({
                         "CAS No.": cas_series,
+                        "name":    name_series,
                         "value":   data.iloc[:, col_idx],
                     })
                     df = df[df["CAS No."].str.match(_CAS_BROAD_RE, na=False)].copy()
@@ -323,12 +322,10 @@ class ThresholdManager:
                 df = xl.parse(sheet, header=5, dtype=str).fillna("")
                 df.columns = [c.strip() for c in df.columns]
                 result["tier1_res"] = df
-                ThresholdManager._extract_pfas_tier1_cols(df, "res", result)
             elif "industrial" in key or "ind" in key:
                 df = xl.parse(sheet, header=5, dtype=str).fillna("")
                 df.columns = [c.strip() for c in df.columns]
                 result["tier1_ind"] = df
-                ThresholdManager._extract_pfas_tier1_cols(df, "ind", result)
 
         return result
 
@@ -372,8 +369,8 @@ class ThresholdManager:
         -------
         float | None
         """
-        cas = str(cas).strip()
-        if not cas:
+        cas = str(cas).strip() if cas is not None else ""
+        if not cas or cas == "None":
             return None
 
         if threshold_key in _MAIN_COL_MAP:
@@ -561,45 +558,59 @@ class ThresholdManager:
             return None
         return ThresholdManager._to_float(row.iloc[0][col_name])
 
+    # Maps granular Tier1 key → (parent sheet key, [mg/kg] column index 0/1/2)
+    _PFAS_DIRECT_KEY_MAP: dict[str, tuple[str, int]] = {
+        "tier1_res_0_6":   ("tier1_res", 0),
+        "tier1_res_6plus": ("tier1_res", 1),
+        "tier1_res_no_gw": ("tier1_res", 2),
+        "tier1_ind_0_6":   ("tier1_ind", 0),
+        "tier1_ind_6plus": ("tier1_ind", 1),
+        "tier1_ind_no_gw": ("tier1_ind", 2),
+    }
+
     def _lookup_pfas_direct(self, sheet_key: str, cas: str) -> float | None:
-        """Look up a pre-extracted (CAS No. | value) DataFrame; converts mg/kg → ng/g."""
-        df = self._pfas.get(sheet_key)
+        """CAS lookup on a granular PFAS Tier1 column — identical approach to _lookup_pfas."""
+        parent_key, col_idx = self._PFAS_DIRECT_KEY_MAP.get(sheet_key, (sheet_key, 0))
+        df = self._pfas.get(parent_key)
         if df is None:
             return None
-        row = df[df["CAS No."] == cas]
+        cas_col = next((c for c in df.columns if "cas" in c.lower()), None)
+        if cas_col is None:
+            return None
+        row = df[df[cas_col].str.strip() == cas]
         if row.empty:
             return None
-        val = self._to_float(row.iloc[0]["value"])
+        mg_cols = [c for c in df.columns if c.startswith("[mg/kg]")]
+        if col_idx >= len(mg_cols):
+            return None
+        val = self._to_float(row.iloc[0][mg_cols[col_idx]])
         return val * 1000 if val is not None else None
 
     def _lookup_pfas_direct_by_name(self, sheet_key: str, name: str) -> float | None:
-        """Name fallback on a pre-extracted (CAS No. | value) DataFrame.
-
-        Resolves the CAS from the raw tier1 sheet (which has the Chemical column),
-        then delegates to _lookup_pfas_direct.
-        """
-        # Determine the raw sheet key that contains Chemical names
-        raw_key = sheet_key.replace("_0_6", "").replace("_6plus", "").replace("_no_gw", "")
-        raw_df = self._pfas.get(raw_key)
-        if raw_df is None:
+        """Name fallback for a granular PFAS Tier1 column — identical approach to _lookup_pfas_by_name."""
+        parent_key, col_idx = self._PFAS_DIRECT_KEY_MAP.get(sheet_key, (sheet_key, 0))
+        df = self._pfas.get(parent_key)
+        if df is None:
             return None
         name_col = next(
-            (c for c in raw_df.columns if any(k in c.lower() for k in ("chemical", "name", "compound"))),
+            (c for c in df.columns if any(k in c.lower() for k in ("chemical", "name", "compound"))),
             None,
         )
-        cas_col = next((c for c in raw_df.columns if "cas" in c.lower()), None)
-        if name_col is None or cas_col is None:
+        if name_col is None:
             return None
         name_lo = name.lower()
-        mask = raw_df[name_col].str.strip().str.lower() == name_lo
-        rows = raw_df[mask]
-        if rows.empty:
-            mask = raw_df[name_col].str.strip().str.lower().str.contains(name_lo, na=False)
-            rows = raw_df[mask]
-        if rows.empty:
+        mask = df[name_col].str.strip().str.lower() == name_lo
+        row = df[mask]
+        if row.empty:
+            mask = df[name_col].str.strip().str.lower().str.contains(name_lo, na=False)
+            row = df[mask]
+        if row.empty:
             return None
-        cas = str(rows.iloc[0][cas_col]).strip()
-        return self._lookup_pfas_direct(sheet_key, cas)
+        mg_cols = [c for c in df.columns if c.startswith("[mg/kg]")]
+        if col_idx >= len(mg_cols):
+            return None
+        val = self._to_float(row.iloc[0][mg_cols[col_idx]])
+        return val * 1000 if val is not None else None
 
     def _lookup_pfas(self, sheet_key: str, cas: str) -> float | None:
         df = self._pfas.get(sheet_key)
