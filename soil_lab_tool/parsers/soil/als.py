@@ -194,14 +194,16 @@ class ALSSoilParser(BaseParser):
             return "SOIL_METALS"
         if any(k in c for k in self._VOC):
             return "SOIL_VOC"
-        if any(k in c for k in ("TPH", "PETROLEUM", "DRO", "ORO", "GRO")):
-            return "SOIL_TPH"
+        # PFAS must be checked before TPH: "ORO" (Oil Range Organics keyword)
+        # is a substring of "PERFLUORO", so TPH would wrongly claim all PFAS.
         if any(k in c for k in (
             "PFAS", "PFOA", "PFOS", "PFBS", "PFBA", "PFNA", "PFDA", "PFUA",
             "PFHX", "PFPE", "PFDO", "PFDE", "FOSA", "HFPO",
             "PERFLUORO", "FLUOROTELOMER", "SULFONAMIDE",
         )):
             return "SOIL_PFAS"
+        if any(k in c for k in ("TPH", "PETROLEUM", "DRO", "ORO", "GRO")):
+            return "SOIL_TPH"
         return "SOIL_SVOC"
 
 
