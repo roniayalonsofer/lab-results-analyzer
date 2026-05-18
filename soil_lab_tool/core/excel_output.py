@@ -25,7 +25,7 @@ Sheet config:
   SOIL_VOC     → "קרקע VOC BTEX" mg/kg
   SOIL_TPH     → "קרקע TPH"      mg/kg
   SOIL_METALS  → "קרקע מתכות"    mg/kg DW
-  SOIL_PFAS    → "קרקע PFAS"     ng/kg
+  SOIL_PFAS    → "קרקע PFAS"     ng/g
   GW_VOC       → "מי תהום BTEX"  mg/L
   GW_PFAS      → "מי תהום PFAS"  ng/L
   LOWFLOW      → "pH"             — field parameters, no thresholds
@@ -349,7 +349,7 @@ SHEET_CONFIG: dict[str, dict] = {
     "SOIL_TPH_MBTEX": {"name": "קרקע TPH+MBTEX",     "unit": "mg/kg"},
     "SOIL_METALS":    {"name": "קרקע מתכות",         "unit": "mg/kg DW", "nd_shows_loq": True},
     "SOIL_GRAIN_SIZE":{"name": "גרנולומטריה",        "unit": "%"},
-    "SOIL_PFAS":   {"name": "קרקע PFAS",       "unit": "ng/kg"},
+    "SOIL_PFAS":   {"name": "קרקע PFAS",       "unit": "ng/g"},
     "GW_VOC":          {"name": "מי תהום BTEX",    "unit": "mg/L"},
     "GW_PFAS":         {"name": "מי תהום PFAS",         "unit": "ng/L"},
     "GW_MICROBIOLOGY": {"name": "מיקרוביולוגיה מי תהום", "unit": "CFU/mL"},
@@ -884,9 +884,9 @@ class LabReportExcel:
                                else ("<LOQ" if loq_ref is None else loq_ref))
                 elif flag == "<":
                     # Explicit <numeric in input → keep < prefix
-                    display = f"<{round(v, 2)}" if isinstance(v, float) else f"<{v}"
+                    display = f"<{v}" if isinstance(v, float) else f"<{v}"
                 else:
-                    display = round(v, 2) if isinstance(v, float) else v
+                    display = v
                 sample_vals.append((display, v, flag, lod))
 
             if include_lod_loq or lod_loq_mode == "both":
@@ -1092,10 +1092,9 @@ class LabReportExcel:
                 elif flag == "<":
                     # Explicit <numeric in input → keep < prefix
                     loq_ref = loq_val or v
-                    display = (f"<{round(loq_ref, 2)}"
-                               if isinstance(loq_ref, float) else f"<{loq_ref}")
+                    display = f"<{loq_ref}" if isinstance(loq_ref, float) else f"<{loq_ref}"
                 else:
-                    display = round(v, 2) if isinstance(v, float) else v
+                    display = v
                 col_vals.append(display)
                 row_meta.append((v, flag, lod))
 

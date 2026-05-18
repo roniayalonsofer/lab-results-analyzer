@@ -368,9 +368,12 @@ def load_threshold_manager(_mtime):
     from core.threshold_manager import ThresholdManager
     MAIN_THRESH  = os.path.join(THRESH_DIR, 'soil_vsl_tier1_v7_2024.xlsx')
     VSL_FULL     = os.path.join(THRESH_DIR, 'soil_vsl_v7_full.xlsx')
-    PFAS_THRESH  = os.path.join(LAB_DIR, 'נספח לטבלת ערכי סף - PFAS.xlsx')
-    vsl_full_path = VSL_FULL    if os.path.exists(VSL_FULL)    else None
-    pfas_path     = PFAS_THRESH if os.path.exists(PFAS_THRESH) else None
+    PFAS_THRESH     = os.path.join(LAB_DIR,   'נספח לטבלת ערכי סף - PFAS.xlsx')
+    PFAS_THRESH_ALT = os.path.join(THRESH_DIR, 'pfas_thresholds.xlsx')
+    vsl_full_path = VSL_FULL if os.path.exists(VSL_FULL) else None
+    pfas_path = (PFAS_THRESH     if os.path.exists(PFAS_THRESH)
+                 else PFAS_THRESH_ALT if os.path.exists(PFAS_THRESH_ALT)
+                 else None)
     return ThresholdManager(MAIN_THRESH, pfas_path=pfas_path, vsl_full_path=vsl_full_path)
 
 # ══════════════════════════════════════════════════════════════════

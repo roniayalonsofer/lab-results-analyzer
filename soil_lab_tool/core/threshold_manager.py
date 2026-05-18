@@ -397,6 +397,13 @@ class ThresholdManager:
             return self._lookup_rbtl_by_name(_rbtl_map[threshold_key], name)
         if threshold_key in _MAIN_COL_MAP:
             return self._lookup_main_by_name(name, _MAIN_COL_MAP[threshold_key])
+        _pfas_sheet_map = {
+            "PFAS_VSL":       "vsl",
+            "PFAS_TIER1_RES": "tier1_res",
+            "PFAS_TIER1_IND": "tier1_ind",
+        }
+        if threshold_key in _pfas_sheet_map:
+            return self._lookup_pfas_by_name(_pfas_sheet_map[threshold_key], name)
         return None
 
     def get_thresholds_for_analysis(
@@ -511,7 +518,36 @@ class ThresholdManager:
         for col in df.columns[cas_idx + 1:]:
             val = self._to_float(row.iloc[0][col])
             if val is not None:
-                return val
+                # Threshold file is in mg/kg; lab data is in ng/g → multiply by 1000
+                return val * 1000
+        return None
+
+    def _lookup_pfas_by_name(self, sheet_key: str, name: str) -> float | None:
+        df = self._pfas.get(sheet_key)
+        if df is None:
+            return None
+        name_col = next(
+            (c for c in df.columns if any(k in c.lower() for k in ("chemical", "name", "compound"))),
+            None,
+        )
+        if name_col is None:
+            return None
+        name_lo = name.lower()
+        mask = df[name_col].str.strip().str.lower() == name_lo
+        row = df[mask]
+        if row.empty:
+            mask = df[name_col].str.strip().str.lower().str.contains(name_lo, na=False)
+            row = df[mask]
+        if row.empty:
+            return None
+        cas_col = next((c for c in df.columns if "cas" in c.lower()), None)
+        if cas_col is None:
+            return None
+        cas_idx = list(df.columns).index(cas_col)
+        for col in df.columns[cas_idx + 1:]:
+            val = self._to_float(row.iloc[0][col])
+            if val is not None:
+                return val * 1000
         return None
 
     @staticmethod

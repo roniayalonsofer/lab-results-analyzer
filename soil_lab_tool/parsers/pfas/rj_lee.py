@@ -19,6 +19,14 @@ from parsers.base import BaseParser
 _ND_VALUES = frozenset({"nd", "not detected", "n.d.", "n/d", "<dl", "", "nan"})
 _DEFAULT_LOQ = 0.2
 
+# CAS numbers for the PFAS compounds reported in RJ Lee EDD files
+_PFAS_CAS_MAP: dict[str, str] = {
+    "pfhxa":  "307-24-4",
+    "pfoa":   "335-67-1",
+    "pfhxs":  "355-46-4",
+    "pfos":   "1763-23-1",
+}
+
 
 class RJLeePFASParser(BaseParser):
     LAB_NAME = "RJ Lee"
@@ -58,14 +66,17 @@ class RJLeePFASParser(BaseParser):
                     flag = ""
                     loq = None
 
+                compound_str = str(compound).strip()
+                cas = _PFAS_CAS_MAP.get(compound_str.lower(), "")
+
                 records.append({
                     "lab":           self.LAB_NAME,
                     "sample_id":     sample_id,
-                    "compound":      str(compound).strip(),
-                    "cas":           "",
+                    "compound":      compound_str,
+                    "cas":           cas,
                     "value":         value,
                     "flag":          flag,
-                    "unit":          "ng/kg",
+                    "unit":          "ng/g",
                     "lod":           None,
                     "loq":           loq,
                     "analysis_type": "SOIL_PFAS",
