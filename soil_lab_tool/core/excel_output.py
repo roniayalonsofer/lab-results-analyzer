@@ -85,10 +85,10 @@ def _font(val, bold=False) -> Font:
 
 
 def _round_thresh(v) -> float | None:
-    """Round a threshold value to 2 decimal places for display."""
+    """Round a threshold value to 4 significant figures for display."""
     if v is None or not isinstance(v, (int, float)):
         return v
-    return round(v, 2)
+    return _round_sf(v, 4)
 
 
 def _round_sf(v, sf: int = 2):
@@ -121,7 +121,7 @@ def _num_fmt_data(val) -> str:
 
 def _num_fmt_thresh(val) -> str:
     """Excel number format for threshold cells.
-    Whole numbers use '#,##0'; fractions use '#,##0.##'.
+    Whole numbers use '#,##0'; small fractions (<1) use '0.######'; others use '#,##0.####'.
     """
     if val is None:
         return 'General'
@@ -129,7 +129,9 @@ def _num_fmt_thresh(val) -> str:
         return '#,##0'
     if isinstance(val, float) and val % 1 == 0:
         return '#,##0'
-    return '#,##0.##'
+    if isinstance(val, float) and abs(val) < 1:
+        return '0.######'
+    return '#,##0.####'
 
 
 def _fmt_lod(lod: float) -> str:
@@ -326,6 +328,12 @@ _THRESHOLD_SOURCES: dict[str, str] = {
     "PFAS_VSL":              "PFAS VSL, Rev.7, 12/24",
     "PFAS_TIER1_RES":        "PFAS Tier 1 Residential, Rev.7, 12/24",
     "PFAS_TIER1_IND":        "PFAS Tier 1 Industrial/Commercial, Rev.7, 12/24",
+    "PFAS_TIER1_RES_0_6":    "PFAS Tier 1 Residential (0-6m), Rev.7, 12/24",
+    "PFAS_TIER1_RES_6PLUS":  "PFAS Tier 1 Residential (>6m), Rev.7, 12/24",
+    "PFAS_TIER1_RES_NO_GW":  "PFAS Tier 1 Residential (no GW), Rev.7, 12/24",
+    "PFAS_TIER1_IND_0_6":    "PFAS Tier 1 Industrial/Commercial (0-6m), Rev.7, 12/24",
+    "PFAS_TIER1_IND_6PLUS":  "PFAS Tier 1 Industrial/Commercial (>6m), Rev.7, 12/24",
+    "PFAS_TIER1_IND_NO_GW":  "PFAS Tier 1 Industrial/Commercial (no GW), Rev.7, 12/24",
 }
 
 # ── Sheet configuration ───────────────────────────────────────────────
@@ -1044,7 +1052,7 @@ class LabReportExcel:
                 ws.cell(row=data_row, column=fc).border = THIN
             for ci, cmp in enumerate(compounds, cmp_col_start):
                 cas  = cas_map.get(cmp, "")
-                tval = _round_thresh(self.tm.get_threshold(cas, tk))
+                tval = _round_thresh(self.tm.get_threshold_with_name(cas, tk, compound_name=cmp))
                 c = ws.cell(row=data_row, column=ci)
                 c.border = THIN
                 if tval is None:
