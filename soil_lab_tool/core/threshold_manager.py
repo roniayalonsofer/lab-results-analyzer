@@ -595,10 +595,11 @@ class ThresholdManager:
         return None
 
     def _lookup_pfas_direct(self, sheet_key: str, cas: str) -> float | None:
-        """CAS lookup on a granular PFAS Tier1 column.
+        """CAS lookup on a granular PFAS Tier1 column (col_idx 0/1/2).
 
-        Uses the same numeric-column-scan strategy as _lookup_pfas (VSL) so it
-        works regardless of what the value column headers are named in the file.
+        Uses [mg/kg]-prefixed column names (pandas renames duplicates as
+        [mg/kg], [mg/kg].1, [mg/kg].2) to avoid counting citation-reference
+        integer columns as numeric thresholds.
         """
         parent_key, col_idx = self._PFAS_DIRECT_KEY_MAP.get(sheet_key, (sheet_key, 0))
         df = self._pfas.get(parent_key)
@@ -610,7 +611,10 @@ class ThresholdManager:
         row_df = df[df[cas_col].str.strip() == cas]
         if row_df.empty:
             return None
-        val = self._nth_numeric_after_cas(row_df.iloc[0], df.columns, cas_col, col_idx)
+        mg_cols = [c for c in df.columns if str(c).startswith("[mg/kg]")]
+        if col_idx >= len(mg_cols):
+            return None
+        val = self._to_float(row_df.iloc[0][mg_cols[col_idx]])
         return val * 1000 if val is not None else None
 
     def _lookup_pfas_direct_by_name(self, sheet_key: str, name: str) -> float | None:
@@ -636,7 +640,10 @@ class ThresholdManager:
             row_df = df[mask]
         if row_df.empty:
             return None
-        val = self._nth_numeric_after_cas(row_df.iloc[0], df.columns, cas_col, col_idx)
+        mg_cols = [c for c in df.columns if str(c).startswith("[mg/kg]")]
+        if col_idx >= len(mg_cols):
+            return None
+        val = self._to_float(row_df.iloc[0][mg_cols[col_idx]])
         return val * 1000 if val is not None else None
 
     def _lookup_pfas(self, sheet_key: str, cas: str) -> float | None:
