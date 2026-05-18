@@ -70,12 +70,12 @@ THRESHOLD_LABELS: dict[str, str] = {
     "PFAS_VSL":              "PFAS VSL",
     "PFAS_TIER1_RES":        "PFAS TIER1 מגורים",
     "PFAS_TIER1_IND":        "PFAS TIER1 תעשייה",
-    "PFAS_TIER1_RES_0_6":    "PFAS TIER1 מגורים - A/B, 0-6מ'",
-    "PFAS_TIER1_RES_6PLUS":  "PFAS TIER1 מגורים - A/B, >6מ'",
-    "PFAS_TIER1_RES_NO_GW":  "PFAS TIER1 מגורים - B-1/C",
-    "PFAS_TIER1_IND_0_6":    "PFAS TIER1 תעשייה - A/B, 0-6מ'",
-    "PFAS_TIER1_IND_6PLUS":  "PFAS TIER1 תעשייה - A/B, >6מ'",
-    "PFAS_TIER1_IND_NO_GW":  "PFAS TIER1 תעשייה - B-1/C",
+    "PFAS_TIER1_RES_VERY_HIGH": "PFAS TIER1 מגורים - רגישות גבוהה מאוד",
+    "PFAS_TIER1_RES_6PLUS":    "PFAS TIER1 מגורים - רגישות גבוהה/בינונית, >6מ'",
+    "PFAS_TIER1_RES_NO_GW":    "PFAS TIER1 מגורים - רגישות נמוכה",
+    "PFAS_TIER1_IND_VERY_HIGH": "PFAS TIER1 תעשייה - רגישות גבוהה מאוד",
+    "PFAS_TIER1_IND_6PLUS":    "PFAS TIER1 תעשייה - רגישות גבוהה/בינונית, >6מ'",
+    "PFAS_TIER1_IND_NO_GW":    "PFAS TIER1 תעשייה - רגישות נמוכה",
     # Soil-vapor RBTL keys (full V7 Tier1 RBTL sheets)
     "GAS_INDOOR_RES":  "ערך סף מגורים",
     "GAS_OUTDOOR_RES": "ערך סף מגורים",
@@ -116,8 +116,8 @@ ANALYSIS_THRESHOLDS: dict[str, list[str]] = {
     "SOIL_TPH_MBTEX": ["VSL_SOIL"] + _SOIL_TIER1_KEYS,
     "SOIL_PFAS":    ["PFAS_VSL",
                     "PFAS_TIER1_RES", "PFAS_TIER1_IND",
-                    "PFAS_TIER1_RES_0_6", "PFAS_TIER1_RES_6PLUS", "PFAS_TIER1_RES_NO_GW",
-                    "PFAS_TIER1_IND_0_6", "PFAS_TIER1_IND_6PLUS", "PFAS_TIER1_IND_NO_GW"],
+                    "PFAS_TIER1_RES_VERY_HIGH", "PFAS_TIER1_RES_6PLUS", "PFAS_TIER1_RES_NO_GW",
+                    "PFAS_TIER1_IND_VERY_HIGH", "PFAS_TIER1_IND_6PLUS", "PFAS_TIER1_IND_NO_GW"],
     "GW_VOC":           [],
     "GW_PFAS":          [],
     "LOWFLOW":          [],
@@ -382,12 +382,12 @@ class ThresholdManager:
         if threshold_key == "PFAS_TIER1_IND":
             return self._lookup_pfas("tier1_ind", cas)
         _pfas_direct_map = {
-            "PFAS_TIER1_RES_0_6":   "tier1_res_0_6",
-            "PFAS_TIER1_RES_6PLUS": "tier1_res_6plus",
-            "PFAS_TIER1_RES_NO_GW": "tier1_res_no_gw",
-            "PFAS_TIER1_IND_0_6":   "tier1_ind_0_6",
-            "PFAS_TIER1_IND_6PLUS": "tier1_ind_6plus",
-            "PFAS_TIER1_IND_NO_GW": "tier1_ind_no_gw",
+            "PFAS_TIER1_RES_VERY_HIGH": "tier1_res_very_high",
+            "PFAS_TIER1_RES_6PLUS":     "tier1_res_6plus",
+            "PFAS_TIER1_RES_NO_GW":     "tier1_res_no_gw",
+            "PFAS_TIER1_IND_VERY_HIGH": "tier1_ind_very_high",
+            "PFAS_TIER1_IND_6PLUS":     "tier1_ind_6plus",
+            "PFAS_TIER1_IND_NO_GW":     "tier1_ind_no_gw",
         }
         if threshold_key in _pfas_direct_map:
             return self._lookup_pfas_direct(_pfas_direct_map[threshold_key], cas)
@@ -444,12 +444,12 @@ class ThresholdManager:
         if threshold_key in _pfas_sheet_map:
             return self._lookup_pfas_by_name(_pfas_sheet_map[threshold_key], name)
         _pfas_direct_map = {
-            "PFAS_TIER1_RES_0_6":   "tier1_res_0_6",
-            "PFAS_TIER1_RES_6PLUS": "tier1_res_6plus",
-            "PFAS_TIER1_RES_NO_GW": "tier1_res_no_gw",
-            "PFAS_TIER1_IND_0_6":   "tier1_ind_0_6",
-            "PFAS_TIER1_IND_6PLUS": "tier1_ind_6plus",
-            "PFAS_TIER1_IND_NO_GW": "tier1_ind_no_gw",
+            "PFAS_TIER1_RES_VERY_HIGH": "tier1_res_very_high",
+            "PFAS_TIER1_RES_6PLUS":     "tier1_res_6plus",
+            "PFAS_TIER1_RES_NO_GW":     "tier1_res_no_gw",
+            "PFAS_TIER1_IND_VERY_HIGH": "tier1_ind_very_high",
+            "PFAS_TIER1_IND_6PLUS":     "tier1_ind_6plus",
+            "PFAS_TIER1_IND_NO_GW":     "tier1_ind_no_gw",
         }
         if threshold_key in _pfas_direct_map:
             return self._lookup_pfas_direct_by_name(
@@ -474,8 +474,8 @@ class ThresholdManager:
             keys += [
                 "PFAS_VSL",
                 "PFAS_TIER1_RES", "PFAS_TIER1_IND",
-                "PFAS_TIER1_RES_0_6", "PFAS_TIER1_RES_6PLUS", "PFAS_TIER1_RES_NO_GW",
-                "PFAS_TIER1_IND_0_6", "PFAS_TIER1_IND_6PLUS", "PFAS_TIER1_IND_NO_GW",
+                "PFAS_TIER1_RES_VERY_HIGH", "PFAS_TIER1_RES_6PLUS", "PFAS_TIER1_RES_NO_GW",
+                "PFAS_TIER1_IND_VERY_HIGH", "PFAS_TIER1_IND_6PLUS", "PFAS_TIER1_IND_NO_GW",
             ]
         return keys
 
@@ -560,12 +560,12 @@ class ThresholdManager:
 
     # Maps granular Tier1 key → (parent sheet key, [mg/kg] column index 0/1/2)
     _PFAS_DIRECT_KEY_MAP: dict[str, tuple[str, int]] = {
-        "tier1_res_0_6":   ("tier1_res", 0),
-        "tier1_res_6plus": ("tier1_res", 1),
-        "tier1_res_no_gw": ("tier1_res", 2),
-        "tier1_ind_0_6":   ("tier1_ind", 0),
-        "tier1_ind_6plus": ("tier1_ind", 1),
-        "tier1_ind_no_gw": ("tier1_ind", 2),
+        "tier1_res_very_high": ("tier1_res", 0),
+        "tier1_res_6plus":     ("tier1_res", 1),
+        "tier1_res_no_gw":     ("tier1_res", 2),
+        "tier1_ind_very_high": ("tier1_ind", 0),
+        "tier1_ind_6plus":     ("tier1_ind", 1),
+        "tier1_ind_no_gw":     ("tier1_ind", 2),
     }
 
     @staticmethod

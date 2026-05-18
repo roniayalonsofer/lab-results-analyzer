@@ -21,15 +21,15 @@ PFAS_TIER1_RES_HIGH_SENSITIVITY: dict[str, float] = {
     "335-67-1":  610.424,
 }
 
-# Tier 1 Residential — depth 0–6 m bgs (same as VSL)
-PFAS_TIER1_RES_0_6: dict[str, float] = {
+# Tier 1 Residential — Very High Sensitivity aquifer, All Depths
+PFAS_TIER1_RES_VERY_HIGH: dict[str, float] = {
     "355-46-4":  5.893,
     "307-24-4":  2.166,
     "1763-23-1": 115.031,
     "335-67-1":  610.424,
 }
 
-# Tier 1 Residential — depth 6+ m bgs
+# Tier 1 Residential — High/Medium Sensitivity, >6m depth
 PFAS_TIER1_RES_6PLUS: dict[str, float] = {
     "355-46-4":  15.715,
     "307-24-4":  5.776,
@@ -53,15 +53,15 @@ PFAS_TIER1_IND_HIGH_SENSITIVITY: dict[str, float] = {
     "335-67-1":  610.424,
 }
 
-# Tier 1 Industrial — depth 0–6 m bgs (same as VSL)
-PFAS_TIER1_IND_0_6: dict[str, float] = {
+# Tier 1 Industrial — Very High Sensitivity aquifer, All Depths
+PFAS_TIER1_IND_VERY_HIGH: dict[str, float] = {
     "355-46-4":  5.893,
     "307-24-4":  2.166,
     "1763-23-1": 115.031,
     "335-67-1":  610.424,
 }
 
-# Tier 1 Industrial — depth 6+ m bgs
+# Tier 1 Industrial — High/Medium Sensitivity, >6m depth
 PFAS_TIER1_IND_6PLUS: dict[str, float] = {
     "355-46-4":  15.715,
     "307-24-4":  5.776,

@@ -329,12 +329,12 @@ _THRESHOLD_SOURCES: dict[str, str] = {
     "PFAS_VSL":              "PFAS VSL, Rev.7, 12/24",
     "PFAS_TIER1_RES":        "PFAS Tier 1 Residential, Rev.7, 12/24",
     "PFAS_TIER1_IND":        "PFAS Tier 1 Industrial/Commercial, Rev.7, 12/24",
-    "PFAS_TIER1_RES_0_6":    "PFAS Tier 1 Residential (0-6m), Rev.7, 12/24",
-    "PFAS_TIER1_RES_6PLUS":  "PFAS Tier 1 Residential (>6m), Rev.7, 12/24",
-    "PFAS_TIER1_RES_NO_GW":  "PFAS Tier 1 Residential (no GW), Rev.7, 12/24",
-    "PFAS_TIER1_IND_0_6":    "PFAS Tier 1 Industrial/Commercial (0-6m), Rev.7, 12/24",
-    "PFAS_TIER1_IND_6PLUS":  "PFAS Tier 1 Industrial/Commercial (>6m), Rev.7, 12/24",
-    "PFAS_TIER1_IND_NO_GW":  "PFAS Tier 1 Industrial/Commercial (no GW), Rev.7, 12/24",
+    "PFAS_TIER1_RES_VERY_HIGH": "PFAS Tier 1 Residential (Very High Sensitivity), Rev.7, 12/24",
+    "PFAS_TIER1_RES_6PLUS":    "PFAS Tier 1 Residential (High/Med, >6m), Rev.7, 12/24",
+    "PFAS_TIER1_RES_NO_GW":    "PFAS Tier 1 Residential (no GW), Rev.7, 12/24",
+    "PFAS_TIER1_IND_VERY_HIGH": "PFAS Tier 1 Industrial/Commercial (Very High Sensitivity), Rev.7, 12/24",
+    "PFAS_TIER1_IND_6PLUS":    "PFAS Tier 1 Industrial/Commercial (High/Med, >6m), Rev.7, 12/24",
+    "PFAS_TIER1_IND_NO_GW":    "PFAS Tier 1 Industrial/Commercial (no GW), Rev.7, 12/24",
 }
 
 # ── Sheet configuration ───────────────────────────────────────────────
