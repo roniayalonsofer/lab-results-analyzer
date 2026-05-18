@@ -67,9 +67,15 @@ THRESHOLD_LABELS: dict[str, str] = {
     "TIER1_INDOOR_IND":  "TIER1 גז פנים-תעשייה",
     "TIER1_OUTDOOR_IND": "TIER1 גז חוץ-תעשייה",
     "GW":                'ערך סף מי"ת',
-    "PFAS_VSL":          "PFAS VSL",
-    "PFAS_TIER1_RES":    "PFAS TIER1 מגורים",
-    "PFAS_TIER1_IND":    "PFAS TIER1 תעשייה",
+    "PFAS_VSL":              "PFAS VSL",
+    "PFAS_TIER1_RES":        "PFAS TIER1 מגורים",
+    "PFAS_TIER1_IND":        "PFAS TIER1 תעשייה",
+    "PFAS_TIER1_RES_0_6":    "PFAS TIER1 מגורים - A/B, 0-6מ'",
+    "PFAS_TIER1_RES_6PLUS":  "PFAS TIER1 מגורים - A/B, >6מ'",
+    "PFAS_TIER1_RES_NO_GW":  "PFAS TIER1 מגורים - B-1/C",
+    "PFAS_TIER1_IND_0_6":    "PFAS TIER1 תעשייה - A/B, 0-6מ'",
+    "PFAS_TIER1_IND_6PLUS":  "PFAS TIER1 תעשייה - A/B, >6מ'",
+    "PFAS_TIER1_IND_NO_GW":  "PFAS TIER1 תעשייה - B-1/C",
     # Soil-vapor RBTL keys (full V7 Tier1 RBTL sheets)
     "GAS_INDOOR_RES":  "ערך סף מגורים",
     "GAS_OUTDOOR_RES": "ערך סף מגורים",
@@ -108,7 +114,10 @@ ANALYSIS_THRESHOLDS: dict[str, list[str]] = {
     # Combined sheets (same threshold keys as SOIL_VOC/SOIL_TPH)
     "SOIL_TPH_VOC":   ["VSL_SOIL"] + _SOIL_TIER1_KEYS,
     "SOIL_TPH_MBTEX": ["VSL_SOIL"] + _SOIL_TIER1_KEYS,
-    "SOIL_PFAS":    ["PFAS_VSL", "PFAS_TIER1_RES", "PFAS_TIER1_IND"],
+    "SOIL_PFAS":    ["PFAS_VSL",
+                    "PFAS_TIER1_RES", "PFAS_TIER1_IND",
+                    "PFAS_TIER1_RES_0_6", "PFAS_TIER1_RES_6PLUS", "PFAS_TIER1_RES_NO_GW",
+                    "PFAS_TIER1_IND_0_6", "PFAS_TIER1_IND_6PLUS", "PFAS_TIER1_IND_NO_GW"],
     "GW_VOC":           [],
     "GW_PFAS":          [],
     "LOWFLOW":          [],
@@ -311,16 +320,39 @@ class ThresholdManager:
                 df.columns = [c.strip() for c in df.columns]
                 result["vsl"] = df
             elif "residential" in key or "res" in key:
-                # Multi-row header — row 5 (0-indexed)
                 df = xl.parse(sheet, header=5, dtype=str).fillna("")
                 df.columns = [c.strip() for c in df.columns]
                 result["tier1_res"] = df
+                ThresholdManager._extract_pfas_tier1_cols(df, "res", result)
             elif "industrial" in key or "ind" in key:
                 df = xl.parse(sheet, header=5, dtype=str).fillna("")
                 df.columns = [c.strip() for c in df.columns]
                 result["tier1_ind"] = df
+                ThresholdManager._extract_pfas_tier1_cols(df, "ind", result)
 
         return result
+
+    @staticmethod
+    def _extract_pfas_tier1_cols(
+        df: pd.DataFrame, prefix: str, result: dict
+    ) -> None:
+        """Extract the 3 depth/aquifer value columns from a Tier1 PFAS sheet.
+
+        Pandas renames duplicate '[mg/kg]' headers as '[mg/kg]', '[mg/kg].1',
+        '[mg/kg].2' for the 0-6m, >6m, and B-1/C columns respectively.
+        Stores pre-extracted DataFrames (CAS No. | value) into *result*.
+        """
+        cas_col = next((c for c in df.columns if "cas" in c.lower()), None)
+        if cas_col is None:
+            return
+        mg_cols = [c for c in df.columns if c.startswith("[mg/kg]")]
+        suffixes = ["0_6", "6plus", "no_gw"]
+        for col_name, suffix in zip(mg_cols, suffixes):
+            key = f"tier1_{prefix}_{suffix}"
+            result[key] = pd.DataFrame({
+                "CAS No.": df[cas_col].str.strip(),
+                "value":   df[col_name],
+            })
 
     # ------------------------------------------------------------------
     # Public API
@@ -352,6 +384,16 @@ class ThresholdManager:
             return self._lookup_pfas("tier1_res", cas)
         if threshold_key == "PFAS_TIER1_IND":
             return self._lookup_pfas("tier1_ind", cas)
+        _pfas_direct_map = {
+            "PFAS_TIER1_RES_0_6":   "tier1_res_0_6",
+            "PFAS_TIER1_RES_6PLUS": "tier1_res_6plus",
+            "PFAS_TIER1_RES_NO_GW": "tier1_res_no_gw",
+            "PFAS_TIER1_IND_0_6":   "tier1_ind_0_6",
+            "PFAS_TIER1_IND_6PLUS": "tier1_ind_6plus",
+            "PFAS_TIER1_IND_NO_GW": "tier1_ind_no_gw",
+        }
+        if threshold_key in _pfas_direct_map:
+            return self._lookup_pfas_direct(_pfas_direct_map[threshold_key], cas)
         # RBTL keys — soil vapor + soil direct-contact (from full V7 Tier1 sheets)
         _rbtl_map = {
             # Soil vapor inhalation
@@ -404,6 +446,18 @@ class ThresholdManager:
         }
         if threshold_key in _pfas_sheet_map:
             return self._lookup_pfas_by_name(_pfas_sheet_map[threshold_key], name)
+        _pfas_direct_map = {
+            "PFAS_TIER1_RES_0_6":   "tier1_res_0_6",
+            "PFAS_TIER1_RES_6PLUS": "tier1_res_6plus",
+            "PFAS_TIER1_RES_NO_GW": "tier1_res_no_gw",
+            "PFAS_TIER1_IND_0_6":   "tier1_ind_0_6",
+            "PFAS_TIER1_IND_6PLUS": "tier1_ind_6plus",
+            "PFAS_TIER1_IND_NO_GW": "tier1_ind_no_gw",
+        }
+        if threshold_key in _pfas_direct_map:
+            return self._lookup_pfas_direct_by_name(
+                _pfas_direct_map[threshold_key], name
+            )
         return None
 
     def get_thresholds_for_analysis(
@@ -420,7 +474,12 @@ class ThresholdManager:
     def available_keys(self) -> list[str]:
         keys = list(_MAIN_COL_MAP.keys())
         if self._pfas:
-            keys += ["PFAS_VSL", "PFAS_TIER1_RES", "PFAS_TIER1_IND"]
+            keys += [
+                "PFAS_VSL",
+                "PFAS_TIER1_RES", "PFAS_TIER1_IND",
+                "PFAS_TIER1_RES_0_6", "PFAS_TIER1_RES_6PLUS", "PFAS_TIER1_RES_NO_GW",
+                "PFAS_TIER1_IND_0_6", "PFAS_TIER1_IND_6PLUS", "PFAS_TIER1_IND_NO_GW",
+            ]
         return keys
 
     @property
@@ -501,6 +560,46 @@ class ThresholdManager:
         if row.empty:
             return None
         return ThresholdManager._to_float(row.iloc[0][col_name])
+
+    def _lookup_pfas_direct(self, sheet_key: str, cas: str) -> float | None:
+        """Look up a pre-extracted (CAS No. | value) DataFrame; converts mg/kg → ng/g."""
+        df = self._pfas.get(sheet_key)
+        if df is None:
+            return None
+        row = df[df["CAS No."] == cas]
+        if row.empty:
+            return None
+        val = self._to_float(row.iloc[0]["value"])
+        return val * 1000 if val is not None else None
+
+    def _lookup_pfas_direct_by_name(self, sheet_key: str, name: str) -> float | None:
+        """Name fallback on a pre-extracted (CAS No. | value) DataFrame.
+
+        Resolves the CAS from the raw tier1 sheet (which has the Chemical column),
+        then delegates to _lookup_pfas_direct.
+        """
+        # Determine the raw sheet key that contains Chemical names
+        raw_key = sheet_key.replace("_0_6", "").replace("_6plus", "").replace("_no_gw", "")
+        raw_df = self._pfas.get(raw_key)
+        if raw_df is None:
+            return None
+        name_col = next(
+            (c for c in raw_df.columns if any(k in c.lower() for k in ("chemical", "name", "compound"))),
+            None,
+        )
+        cas_col = next((c for c in raw_df.columns if "cas" in c.lower()), None)
+        if name_col is None or cas_col is None:
+            return None
+        name_lo = name.lower()
+        mask = raw_df[name_col].str.strip().str.lower() == name_lo
+        rows = raw_df[mask]
+        if rows.empty:
+            mask = raw_df[name_col].str.strip().str.lower().str.contains(name_lo, na=False)
+            rows = raw_df[mask]
+        if rows.empty:
+            return None
+        cas = str(rows.iloc[0][cas_col]).strip()
+        return self._lookup_pfas_direct(sheet_key, cas)
 
     def _lookup_pfas(self, sheet_key: str, cas: str) -> float | None:
         df = self._pfas.get(sheet_key)

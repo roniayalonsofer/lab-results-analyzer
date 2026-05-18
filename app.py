@@ -942,6 +942,16 @@ with tab_excel:
         if sens_code == "low": return f"TIER1_{pfx}_SOIL_LOW"
         return None
 
+    def _pfas_tier1_key(land_use: str, sens_code, depth_label) -> str | None:
+        if not sens_code:
+            return None
+        pfx = "RES" if land_use == "res" else "IND"
+        if sens_code == "vh":  return f"PFAS_TIER1_{pfx}_0_6"   # most protective
+        if sens_code == "hm":
+            return f"PFAS_TIER1_{pfx}_0_6" if depth_label == "0-6מ'" else f"PFAS_TIER1_{pfx}_6PLUS"
+        if sens_code == "low": return f"PFAS_TIER1_{pfx}_NO_GW"
+        return None
+
     any_shown = False
 
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
@@ -982,13 +992,36 @@ with tab_excel:
     if has_soil_pfas:
         any_shown = True
         st.markdown("##### 🧬 קרקע PFAS")
-        cp1, cp2, cp3 = st.columns(3)
-        with cp1: use_pfas_vsl    = st.checkbox("PFAS VSL",           value=True,  key="pfas_vsl")
-        with cp2: use_pfas_t1_res = st.checkbox("PFAS Tier 1 מגורים", value=False, key="pfas_t1r")
-        with cp3: use_pfas_t1_ind = st.checkbox("PFAS Tier 1 תעשייה", value=False, key="pfas_t1i")
-        if use_pfas_vsl:    selected_thresholds.append("PFAS_VSL")
-        if use_pfas_t1_res: selected_thresholds.append("PFAS_TIER1_RES")
-        if use_pfas_t1_ind: selected_thresholds.append("PFAS_TIER1_IND")
+        cp_vsl, cp_res, cp_ind = st.columns(3)
+
+        with cp_vsl:
+            st.markdown('<div style="font-size:0.85rem;font-weight:700;color:#374151;margin-bottom:6px;">VSL — ישיר</div>', unsafe_allow_html=True)
+            use_pfas_vsl = st.checkbox("PFAS VSL", value=True, key="pfas_vsl")
+
+        with cp_res:
+            st.markdown('<div style="font-size:0.85rem;font-weight:700;color:#374151;margin-bottom:6px;">Tier 1 מגורים (Residential)</div>', unsafe_allow_html=True)
+            pfas_sens_res = st.selectbox("רגישות", ["—", "רגיש מאוד", "רגיש/בינוני", "לא רגיש"],
+                                         key="pfas_sens_res", label_visibility="collapsed")
+            pfas_depth_res = None
+            if pfas_sens_res == "רגיש/בינוני":
+                pfas_depth_res = st.radio("עומק", ["0-6מ'", ">6מ'"], horizontal=True,
+                                          key="pfas_depth_res", label_visibility="collapsed")
+
+        with cp_ind:
+            st.markdown('<div style="font-size:0.85rem;font-weight:700;color:#374151;margin-bottom:6px;">Tier 1 תעשייה (Industrial)</div>', unsafe_allow_html=True)
+            pfas_sens_ind = st.selectbox("רגישות", ["—", "רגיש מאוד", "רגיש/בינוני", "לא רגיש"],
+                                         key="pfas_sens_ind", label_visibility="collapsed")
+            pfas_depth_ind = None
+            if pfas_sens_ind == "רגיש/בינוני":
+                pfas_depth_ind = st.radio("עומק", ["0-6מ'", ">6מ'"], horizontal=True,
+                                          key="pfas_depth_ind", label_visibility="collapsed")
+
+        if use_pfas_vsl:
+            selected_thresholds.append("PFAS_VSL")
+        k = _pfas_tier1_key("res", _SENS_MAP.get(pfas_sens_res), pfas_depth_res)
+        if k: selected_thresholds.append(k)
+        k = _pfas_tier1_key("ind", _SENS_MAP.get(pfas_sens_ind), pfas_depth_ind)
+        if k: selected_thresholds.append(k)
 
     # ── Soil gas ──────────────────────────────────────────────────
     if has_soil_gas:
