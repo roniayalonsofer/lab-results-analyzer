@@ -265,8 +265,8 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
         if _is_xrf_tabular(file_bytes, is_csv=True):
             return "אלכם"
 
-    # RJ Lee EDD filename hints
-    if any(k in n for k in ("rjlg", "rj lee")) or "edd" in n or "rj" in n:
+    # RJ Lee EDD filename hints ("1633" = EPA Method 1633 for PFAS)
+    if any(k in n for k in ("rjlg", "rj lee", "edd", "1633")):
         return "rj lee"
 
     # Filename fallback for KTE (after content checks)
@@ -376,7 +376,7 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
         return "soil"
     if "excel_generic" in n or n.startswith("pr"):
         return "pr"
-    if "pfas" in n:
+    if any(k in n for k in ("pfas", "edd", "1633")):
         return "pfas"
     if any(k in n for k in ("soil_gas", "canister", "to-15", "to15", "ppbv")):
         return "soil_gas"
