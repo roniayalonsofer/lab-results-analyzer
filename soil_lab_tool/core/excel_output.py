@@ -13,7 +13,8 @@ Landscape layout (samples as rows — soil gas, many-samples):
   Threshold rows appended at bottom.
 
 Colour coding:
-  Yellow  — measured value exceeds threshold
+  Orange  — measured value exceeds Tier 1 threshold
+  Yellow  — measured value exceeds VSL (but not Tier 1)
   Gray    — below detection limit, but LOD > threshold (uncertain)
 
 Orientation (per sheet):
@@ -928,19 +929,26 @@ class LabReportExcel:
                 elif ci > N_FIXED:
                     si = ci - N_FIXED - 1
                     display, num_v, flag, lod = sample_vals[si]
-                    thresh_limit = self._strictest(t_vals)
-                    if thresh_limit is not None:
-                        # YELLOW: actual detected value exceeds threshold
+                    vsl_lim   = self._vsl_limit(t_vals)
+                    tier1_lim = self._tier1_limit(t_vals)
+                    any_lim   = self._strictest(t_vals)
+                    if any_lim is not None:
                         if (flag not in ("ND", "<LOQ", "<")
-                                and isinstance(num_v, (int, float))
-                                and num_v > thresh_limit):
-                            c.fill = ORANGE
-                            c.font = Font(**FHE, bold=True)
+                                and isinstance(num_v, (int, float))):
+                            if tier1_lim is not None and num_v > tier1_lim:
+                                c.fill = ORANGE    # exceeds Tier1
+                                c.font = Font(**FHE, bold=True)
+                            elif vsl_lim is not None and num_v > vsl_lim:
+                                c.fill = YELLOW    # exceeds VSL only
+                                c.font = Font(**FHE, bold=True)
+                            elif vsl_lim is None and tier1_lim is None and num_v > any_lim:
+                                c.fill = ORANGE    # no VSL/Tier1 distinction
+                                c.font = Font(**FHE, bold=True)
                         # GREY + BOLD: threshold < LOD → false positive risk
                         elif flag in ("ND", "<LOD", "<LOQ", "<"):
                             lod_num = (lod if lod is not None
                                        else (num_v if isinstance(num_v, (int, float)) else None))
-                            if lod_num is not None and lod_num > thresh_limit:
+                            if lod_num is not None and lod_num > any_lim:
                                 c.fill = GRAY
                                 c.font = _font(display, bold=True)
                                 has_gray = True
@@ -1118,22 +1126,30 @@ class LabReportExcel:
                 c.border    = THIN
 
                 if ci >= cmp_col_start:
-                    comp_idx              = ci - cmp_col_start
-                    cmp_name              = compounds[comp_idx]
+                    comp_idx               = ci - cmp_col_start
+                    cmp_name               = compounds[comp_idx]
                     num_v, flag_cell, lod_cell = row_meta[comp_idx]
-                    t_vals                = thresh_vals.get(cmp_name, {})
-                    thresh_limit          = self._strictest(t_vals)
-                    if thresh_limit is not None:
+                    t_vals                 = thresh_vals.get(cmp_name, {})
+                    vsl_lim   = self._vsl_limit(t_vals)
+                    tier1_lim = self._tier1_limit(t_vals)
+                    any_lim   = self._strictest(t_vals)
+                    if any_lim is not None:
                         if (flag_cell not in ("ND", "<LOQ", "<")
-                                and isinstance(num_v, (int, float))
-                                and num_v > thresh_limit):
-                            c.fill = ORANGE
-                            c.font = Font(**FHE, bold=True)
+                                and isinstance(num_v, (int, float))):
+                            if tier1_lim is not None and num_v > tier1_lim:
+                                c.fill = ORANGE    # exceeds Tier1
+                                c.font = Font(**FHE, bold=True)
+                            elif vsl_lim is not None and num_v > vsl_lim:
+                                c.fill = YELLOW    # exceeds VSL only
+                                c.font = Font(**FHE, bold=True)
+                            elif vsl_lim is None and tier1_lim is None and num_v > any_lim:
+                                c.fill = ORANGE    # no VSL/Tier1 distinction
+                                c.font = Font(**FHE, bold=True)
                         # GREY + BOLD: threshold < LOD → false positive risk
                         elif flag_cell in ("ND", "<LOD", "<LOQ", "<"):
                             lod_num = (lod_cell if lod_cell is not None
                                        else (num_v if isinstance(num_v, (int, float)) else None))
-                            if lod_num is not None and lod_num > thresh_limit:
+                            if lod_num is not None and lod_num > any_lim:
                                 c.fill = GRAY
                                 c.font = _font(val, bold=True)
                                 has_gray = True
@@ -1195,6 +1211,20 @@ class LabReportExcel:
         vals = [v for v in t_vals.values() if v is not None]
         return min(vals) if vals else None
 
+    @staticmethod
+    def _vsl_limit(t_vals: dict) -> float | None:
+        """Strictest of the VSL-type thresholds (VSL_SOIL, PFAS_VSL)."""
+        vals = [v for k, v in t_vals.items()
+                if v is not None and "VSL" in k and "TIER1" not in k]
+        return min(vals) if vals else None
+
+    @staticmethod
+    def _tier1_limit(t_vals: dict) -> float | None:
+        """Strictest of the Tier1-type thresholds (any key containing 'TIER1')."""
+        vals = [v for k, v in t_vals.items()
+                if v is not None and "TIER1" in k]
+        return min(vals) if vals else None
+
     def _write_header_row(self, ws, row_num: int, total_cols: int, hinfo: dict | None = None):
         if hinfo:
             parts = [
@@ -1237,7 +1267,8 @@ class LabReportExcel:
     @staticmethod
     def _write_legend(ws, start_row: int, include_gray: bool = True):
         items = [
-            ("חריגה מערך VSL",           ORANGE),
+            ("חריגה מ-Tier 1",            ORANGE),
+            ("חריגה מערך VSL",            YELLOW),
         ]
         if include_gray:
             items.append(("ערך הסף גדול מסף הגילוי", GRAY))

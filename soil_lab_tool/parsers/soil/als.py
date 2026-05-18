@@ -144,31 +144,47 @@ class ALSSoilParser(BaseParser):
 
     def parse(self, file_obj: io.BytesIO) -> list[dict]:
         xl = pd.ExcelFile(file_obj)
-        sheet = next((s for s in xl.sheet_names if "Client SOIL" in s), None)
-        if sheet is None:
-            raise ValueError(f"No 'Client SOIL' sheet found. Sheets: {xl.sheet_names}")
 
-        _, sample_cols, data_rows = _parse_als_sheet(xl, sheet)
+        # Collect all "Client *" sheets (SOIL, PFAS, VOC …) so PFAS-only
+        # sheets named "Client PFAS 1" are not silently dropped.
+        target_sheets = [s for s in xl.sheet_names
+                         if any(tag in s for tag in ("Client SOIL", "Client PFAS",
+                                                     "Client VOC", "Client SVOC",
+                                                     "Client Metal"))]
+        if not target_sheets:
+            # Fallback: accept any single "SOIL" or "PFAS" sheet
+            target_sheets = [s for s in xl.sheet_names
+                             if "SOIL" in s.upper() or "PFAS" in s.upper()]
+        if not target_sheets:
+            raise ValueError(f"No recognisable ALS sheet found. Sheets: {xl.sheet_names}")
+
         records = []
+        for sheet in target_sheets:
+            try:
+                _, sample_cols, data_rows = _parse_als_sheet(xl, sheet)
+            except Exception:
+                continue
 
-        for compound, unit, loq, sample_vals in data_rows:
-            cas = name_to_cas(compound)
-            atype = self._analysis_type(compound)
-            for ci, raw_val in sample_vals.items():
-                value, flag = _parse_value(raw_val, loq)
-                if value is None and flag is None:
-                    continue
-                records.append({
-                    "compound":      compound,
-                    "cas":           cas,
-                    "value":         value,
-                    "flag":          flag or "",
-                    "unit":          unit,
-                    "sample_id":     sample_cols[ci],
-                    "lod":           None,
-                    "loq":           loq,
-                    "analysis_type": atype,
-                })
+            for compound, unit, loq, sample_vals in data_rows:
+                cas   = name_to_cas(compound)
+                atype = self._analysis_type(compound)
+                # µg/kg DW == ng/g numerically — normalise unit label for PFAS
+                norm_unit = "ng/g" if atype == "SOIL_PFAS" else unit
+                for ci, raw_val in sample_vals.items():
+                    value, flag = _parse_value(raw_val, loq)
+                    if value is None and flag is None:
+                        continue
+                    records.append({
+                        "compound":      compound,
+                        "cas":           cas,
+                        "value":         value,
+                        "flag":          flag or "",
+                        "unit":          norm_unit,
+                        "sample_id":     sample_cols[ci],
+                        "lod":           None,
+                        "loq":           loq,
+                        "analysis_type": atype,
+                    })
 
         return records
 
