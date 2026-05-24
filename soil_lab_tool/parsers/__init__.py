@@ -226,6 +226,8 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
         return "בקטוכם"
     if any(k in n for k in ("מכון הנפט", "machon", "haneft", "neft")):
         return "מכון הנפט"
+    if any(k in n for k in ("rjlg", "rj lee", "1633")):
+        return "rj lee"
 
     # PDF content-based detection
     if file_bytes is not None and n.endswith(".pdf"):
@@ -265,10 +267,6 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
         if _is_xrf_tabular(file_bytes, is_csv=True):
             return "אלכם"
 
-    # RJ Lee EDD filename hints ("1633" = EPA Method 1633 for PFAS)
-    if any(k in n for k in ("rjlg", "rj lee", "edd", "1633")):
-        return "rj lee"
-
     # Filename fallback for KTE (after content checks)
     if any(k in n for k in ("kte", "excel_generic")):
         return "kte"
@@ -300,6 +298,10 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
     ALS/Alchem/KTE files are not mis-detected by filename patterns (e.g. "pr*").
     """
     n = filename.lower()
+
+    # RJ Lee Method 1633 PFAS files — unambiguous, check before content sniffing
+    if "1633" in n:
+        return "pfas"
 
     # ── PDF content-based detection ──────────────────────────────────────────────
     if file_bytes is not None and n.endswith(".pdf"):
