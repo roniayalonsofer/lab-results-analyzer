@@ -55,6 +55,21 @@ from openpyxl.cell.text import InlineFont
 from core.threshold_manager import ThresholdManager, ANALYSIS_THRESHOLDS, THRESHOLD_LABELS
 
 
+def _is_ind_key(k: str) -> bool:
+    """True for Tier1 Industrial threshold keys (e.g. TIER1_IND_*, TIER1_INDOOR_IND, PFAS_TIER1_IND*).
+    Uses word-boundary matching so TIER1_INDOOR_RES is NOT classified as industrial."""
+    return "TIER1" in k and ("_IND_" in k or k.endswith("_IND"))
+
+
+def _is_res_key(k: str) -> bool:
+    """True for Tier1 Residential threshold keys (e.g. TIER1_RES_*, TIER1_INDOOR_RES, PFAS_TIER1_RES*)."""
+    return "TIER1" in k and ("_RES_" in k or k.endswith("_RES"))
+
+
+def _is_vsl_key(k: str) -> bool:
+    return "VSL" in k and "TIER1" not in k
+
+
 # ── Style constants ───────────────────────────────────────────────────
 YELLOW  = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")  # VSL
 PINK    = PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")  # Tier 1 Industrial
@@ -1226,9 +1241,7 @@ class LabReportExcel:
 
     @staticmethod
     def _vsl_limit(t_vals: dict) -> float | None:
-        """Strictest of the VSL-type thresholds (VSL_SOIL, PFAS_VSL)."""
-        vals = [v for k, v in t_vals.items()
-                if v is not None and "VSL" in k and "TIER1" not in k]
+        vals = [v for k, v in t_vals.items() if v is not None and _is_vsl_key(k)]
         return min(vals) if vals else None
 
     @staticmethod
@@ -1240,16 +1253,12 @@ class LabReportExcel:
 
     @staticmethod
     def _tier1_ind_limit(t_vals: dict) -> float | None:
-        """Strictest of Tier1 Industrial thresholds (IND keys)."""
-        vals = [v for k, v in t_vals.items()
-                if v is not None and "TIER1" in k and "IND" in k]
+        vals = [v for k, v in t_vals.items() if v is not None and _is_ind_key(k)]
         return min(vals) if vals else None
 
     @staticmethod
     def _tier1_res_limit(t_vals: dict) -> float | None:
-        """Strictest of Tier1 Residential thresholds (RES keys)."""
-        vals = [v for k, v in t_vals.items()
-                if v is not None and "TIER1" in k and "RES" in k]
+        vals = [v for k, v in t_vals.items() if v is not None and _is_res_key(k)]
         return min(vals) if vals else None
 
     def _write_header_row(self, ws, row_num: int, total_cols: int, hinfo: dict | None = None):
@@ -1295,9 +1304,9 @@ class LabReportExcel:
     def _write_legend(ws, start_row: int, include_gray: bool = True,
                       thresh_keys: list[str] | None = None) -> int:
         keys = thresh_keys or []
-        has_ind = any("TIER1" in k and "IND" in k for k in keys)
-        has_res = any("TIER1" in k and "RES" in k for k in keys)
-        has_vsl = any("VSL" in k and "TIER1" not in k for k in keys)
+        has_ind = any(_is_ind_key(k) for k in keys)
+        has_res = any(_is_res_key(k) for k in keys)
+        has_vsl = any(_is_vsl_key(k) for k in keys)
         items = []
         if has_ind:
             items.append(("חריגה מ-Tier 1 תעשייתי", PINK))
