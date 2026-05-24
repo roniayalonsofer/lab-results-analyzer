@@ -966,10 +966,14 @@ class LabReportExcel:
                             elif vsl_lim is not None and num_v > vsl_lim:
                                 c.fill = YELLOW    # exceeds VSL only
                                 c.font = Font(**FHE, bold=True)
-                        # GREY + BOLD: threshold < LOD → false positive risk
+                        # GREY + BOLD: threshold < LOD/LOQ → uncertain exclusion
                         elif flag in ("ND", "<LOD", "<LOQ", "<"):
-                            lod_num = (lod if lod is not None
-                                       else (num_v if isinstance(num_v, (int, float)) else None))
+                            lod_num = (
+                                lod     if lod     is not None else
+                                lod_val if lod_val is not None else
+                                loq_val if loq_val is not None else
+                                (num_v  if isinstance(num_v, (int, float)) else None)
+                            )
                             if lod_num is not None and lod_num > any_lim:
                                 c.fill = GRAY
                                 c.font = _font(display, bold=True)
@@ -1171,10 +1175,14 @@ class LabReportExcel:
                             elif vsl_lim is not None and num_v > vsl_lim:
                                 c.fill = YELLOW    # exceeds VSL only
                                 c.font = Font(**FHE, bold=True)
-                        # GREY + BOLD: threshold < LOD → false positive risk
+                        # GREY + BOLD: threshold < LOD/LOQ → uncertain exclusion
                         elif flag_cell in ("ND", "<LOD", "<LOQ", "<"):
-                            lod_num = (lod_cell if lod_cell is not None
-                                       else (num_v if isinstance(num_v, (int, float)) else None))
+                            lod_num = (
+                                lod_cell              if lod_cell              is not None else
+                                lod_map.get(cmp_name) if lod_map.get(cmp_name) is not None else
+                                loq_map.get(cmp_name) if loq_map.get(cmp_name) is not None else
+                                (num_v if isinstance(num_v, (int, float)) else None)
+                            )
                             if lod_num is not None and lod_num > any_lim:
                                 c.fill = GRAY
                                 c.font = _font(val, bold=True)
