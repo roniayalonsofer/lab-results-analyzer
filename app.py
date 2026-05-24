@@ -833,26 +833,28 @@ with tab_excel:
     fname     = " | ".join(f for f, _ in all_raw)
     raw_bytes = all_raw[0][1]
 
-    # Resolve auto-detected lab
-    # Check ALL filenames first — if any file signals RJ Lee (contains
-    # "1633" or "edd"), use that result regardless of file order.
-    _all_names = [n.lower() for n, _ in all_raw]
-    _rjlee_keys = ("1633", "edd", "rjlg", "rj lee")
-
+    # Resolve auto-detected lab — iterate ALL uploaded files so that
+    # a matching file is found regardless of upload order.
     if lab == "🔍 זיהוי אוטומטי":
-        if any(k in n for n in _all_names for k in _rjlee_keys):
-            detected_lab = "rj lee"
-        else:
-            detected_lab = auto_detect_lab(all_raw[0][0], raw_bytes)
+        detected_lab = None
+        for _fn, _fb in all_raw:
+            _det = auto_detect_lab(_fn, _fb)
+            if _det:
+                detected_lab = _det
+                if detected_lab == "rj lee":
+                    break
         lab = detected_lab or "KTE"
 
     if category_raw == 'auto':
-        if any(k in n for n in _all_names for k in _rjlee_keys):
-            category = "pfas"
-            cat_info  = f"זוהה אוטומטית: **{category}**"
-        else:
-            category = auto_detect_category(all_raw[0][0], raw_bytes)
-            cat_info  = f"זוהה אוטומטית: **{category}**"
+        category = None
+        for _fn, _fb in all_raw:
+            _cat = auto_detect_category(_fn, _fb)
+            if _cat and _cat != "soil":
+                category = _cat
+                break
+        if not category:
+            category = auto_detect_category(all_raw[0][0], all_raw[0][1])
+        cat_info = f"זוהה אוטומטית: **{category}**"
     else:
         category = category_raw
         cat_info  = f"קטגוריה: **{category}**"
@@ -882,15 +884,12 @@ with tab_excel:
     _data_files  = [(n, b) for n, b in all_raw if not n.lower().endswith(".pdf")]
     _parse_files = _data_files if _data_files else all_raw
 
-    import inspect as _inspect
-    _parser_accepts_pdf = "pdf_bytes" in _inspect.signature(parser.parse).parameters
-
     with st.spinner(f"מנתח {'קבצים' if n_files > 1 else 'קובץ'}..."):
         for fname_i, raw_i in _parse_files:
             try:
-                if _parser_accepts_pdf and _pdf_raws:
+                try:
                     file_records = parser.parse(io.BytesIO(raw_i), pdf_bytes=_pdf_raws)
-                else:
+                except TypeError:
                     file_records = parser.parse(io.BytesIO(raw_i))
                 all_records.extend(file_records)
                 file_summaries.append({"name": fname_i, "records": len(file_records), "ok": True})
