@@ -834,13 +834,25 @@ with tab_excel:
     raw_bytes = all_raw[0][1]
 
     # Resolve auto-detected lab
+    # Check ALL filenames first — if any file signals RJ Lee (contains
+    # "1633" or "edd"), use that result regardless of file order.
+    _all_names = [n.lower() for n, _ in all_raw]
+    _rjlee_keys = ("1633", "edd", "rjlg", "rj lee")
+
     if lab == "🔍 זיהוי אוטומטי":
-        detected_lab = auto_detect_lab(all_raw[0][0], raw_bytes)
+        if any(k in n for n in _all_names for k in _rjlee_keys):
+            detected_lab = "rj lee"
+        else:
+            detected_lab = auto_detect_lab(all_raw[0][0], raw_bytes)
         lab = detected_lab or "KTE"
 
     if category_raw == 'auto':
-        category = auto_detect_category(all_raw[0][0], raw_bytes)
-        cat_info  = f"זוהה אוטומטית: **{category}**"
+        if any(k in n for n in _all_names for k in _rjlee_keys):
+            category = "pfas"
+            cat_info  = f"זוהה אוטומטית: **{category}**"
+        else:
+            category = auto_detect_category(all_raw[0][0], raw_bytes)
+            cat_info  = f"זוהה אוטומטית: **{category}**"
     else:
         category = category_raw
         cat_info  = f"קטגוריה: **{category}**"
