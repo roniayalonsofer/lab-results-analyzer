@@ -35,12 +35,11 @@ _LAB_ID_RE   = re.compile(r'^\d{7}$')
 _BOREHOLE_RE = re.compile(r'\b([A-Za-z]+\d*\s*-\s*[\d.]+)\b')
 
 
-def extract_lab_id_map(pdf_bytes: bytes) -> dict[str, str]:
-    """Return a mapping of Lab ID (7-digit str) → Client ID (borehole name).
+def extract_lab_id_map(pdf_bytes_list: list[bytes]) -> dict[str, str]:
+    """Return a merged mapping of Lab ID (7-digit str) → Client ID (borehole name).
 
-    Scans every page of the PDF via table extraction then raw text lines,
-    looking for rows where a 7-digit number and a borehole name pattern
-    ("K10 - 4.0" style) appear together.
+    Accepts a list of PDF byte strings and merges results from all of them,
+    scanning every page via table extraction then raw text lines.
     """
     mapping: dict[str, str] = {}
     try:
@@ -48,16 +47,17 @@ def extract_lab_id_map(pdf_bytes: bytes) -> dict[str, str]:
     except ImportError:
         return mapping
 
-    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        for page in pdf.pages:
-            for table in (page.extract_tables() or []):
-                for row in (table or []):
-                    if row:
-                        _scan_row(row, mapping)
+    for pdf_bytes in pdf_bytes_list:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            for page in pdf.pages:
+                for table in (page.extract_tables() or []):
+                    for row in (table or []):
+                        if row:
+                            _scan_row(row, mapping)
 
-            text = page.extract_text() or ""
-            for line in text.splitlines():
-                _scan_tokens(line.split(), mapping)
+                text = page.extract_text() or ""
+                for line in text.splitlines():
+                    _scan_tokens(line.split(), mapping)
 
     return mapping
 
@@ -96,7 +96,7 @@ class RJLeePFASParser(BaseParser):
     ANALYSIS_TYPES = ["SOIL_PFAS"]
 
     def parse(self, file_obj: io.BytesIO | str,
-              pdf_bytes: bytes | None = None) -> list[dict]:
+              pdf_bytes: list[bytes] | None = None) -> list[dict]:
         lab_id_map: dict[str, str] = {}
         if pdf_bytes:
             lab_id_map = extract_lab_id_map(pdf_bytes)

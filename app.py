@@ -863,11 +863,11 @@ with tab_excel:
     file_summaries: list[dict] = []
     n_files = len(all_raw)
 
-    # Separate any companion PDF from the Excel/CSV data files so we can
-    # pass PDF bytes to parsers that support Lab-ID → borehole mapping.
-    _pdf_files  = [(n, b) for n, b in all_raw if n.lower().endswith(".pdf")]
-    _data_files = [(n, b) for n, b in all_raw if not n.lower().endswith(".pdf")]
-    _pdf_bytes  = _pdf_files[0][1] if _pdf_files else None
+    # Separate companion PDFs from Excel/CSV data files.
+    # Collect bytes from ALL uploaded PDFs so every Lab ID → borehole
+    # mapping is available regardless of how many PDFs were uploaded.
+    _pdf_raws    = [b for n, b in all_raw if n.lower().endswith(".pdf")]
+    _data_files  = [(n, b) for n, b in all_raw if not n.lower().endswith(".pdf")]
     _parse_files = _data_files if _data_files else all_raw
 
     import inspect as _inspect
@@ -876,8 +876,8 @@ with tab_excel:
     with st.spinner(f"מנתח {'קבצים' if n_files > 1 else 'קובץ'}..."):
         for fname_i, raw_i in _parse_files:
             try:
-                if _parser_accepts_pdf and _pdf_bytes:
-                    file_records = parser.parse(io.BytesIO(raw_i), pdf_bytes=_pdf_bytes)
+                if _parser_accepts_pdf and _pdf_raws:
+                    file_records = parser.parse(io.BytesIO(raw_i), pdf_bytes=_pdf_raws)
                 else:
                     file_records = parser.parse(io.BytesIO(raw_i))
                 all_records.extend(file_records)
