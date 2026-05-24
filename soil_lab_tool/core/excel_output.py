@@ -59,7 +59,6 @@ from core.threshold_manager import ThresholdManager, ANALYSIS_THRESHOLDS, THRESH
 YELLOW  = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")  # VSL
 PINK    = PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")  # Tier 1 Industrial
 L_BLUE  = PatternFill(start_color="ADD8E6", end_color="ADD8E6", fill_type="solid")  # Tier 1 Residential
-ORANGE  = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")  # Tier 1 GW/other
 GRAY    = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
 WHITE   = PatternFill(fill_type=None)
 BLUE_H  = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
@@ -939,7 +938,6 @@ class LabReportExcel:
                     vsl_lim      = self._vsl_limit(t_vals)
                     tier1_ind    = self._tier1_ind_limit(t_vals)
                     tier1_res    = self._tier1_res_limit(t_vals)
-                    tier1_lim    = self._tier1_limit(t_vals)
                     any_lim      = self._strictest(t_vals)
                     if any_lim is not None:
                         if (flag not in ("ND", "<LOQ", "<")
@@ -950,15 +948,8 @@ class LabReportExcel:
                             elif tier1_res is not None and num_v > tier1_res:
                                 c.fill = L_BLUE    # exceeds Tier 1 Residential
                                 c.font = Font(**FHE, bold=True)
-                            elif (tier1_ind is None and tier1_res is None
-                                  and tier1_lim is not None and num_v > tier1_lim):
-                                c.fill = ORANGE    # exceeds Tier1 (GW/other, no IND/RES)
-                                c.font = Font(**FHE, bold=True)
                             elif vsl_lim is not None and num_v > vsl_lim:
                                 c.fill = YELLOW    # exceeds VSL only
-                                c.font = Font(**FHE, bold=True)
-                            elif vsl_lim is None and tier1_lim is None and num_v > any_lim:
-                                c.fill = ORANGE    # no VSL/Tier1 distinction
                                 c.font = Font(**FHE, bold=True)
                         # GREY + BOLD: threshold < LOD → false positive risk
                         elif flag in ("ND", "<LOD", "<LOQ", "<"):
@@ -972,7 +963,8 @@ class LabReportExcel:
             data_row += 1
 
         # ── Legend ────────────────────────────────────────────────────
-        n_legend = self._write_legend(ws, data_row + 1, include_gray=has_gray)
+        n_legend = self._write_legend(ws, data_row + 1, include_gray=has_gray,
+                                      thresh_keys=thresh_keys)
         # ── Threshold source footnotes (only for keys with ≥1 defined value) ──
         active_keys = [k for k in thresh_keys
                        if any(thresh_vals.get(c, {}).get(k) is not None for c in compounds)]
@@ -1151,7 +1143,6 @@ class LabReportExcel:
                     vsl_lim   = self._vsl_limit(t_vals)
                     tier1_ind = self._tier1_ind_limit(t_vals)
                     tier1_res = self._tier1_res_limit(t_vals)
-                    tier1_lim = self._tier1_limit(t_vals)
                     any_lim   = self._strictest(t_vals)
                     if any_lim is not None:
                         if (flag_cell not in ("ND", "<LOQ", "<")
@@ -1162,15 +1153,8 @@ class LabReportExcel:
                             elif tier1_res is not None and num_v > tier1_res:
                                 c.fill = L_BLUE    # exceeds Tier 1 Residential
                                 c.font = Font(**FHE, bold=True)
-                            elif (tier1_ind is None and tier1_res is None
-                                  and tier1_lim is not None and num_v > tier1_lim):
-                                c.fill = ORANGE    # exceeds Tier1 (GW/other, no IND/RES)
-                                c.font = Font(**FHE, bold=True)
                             elif vsl_lim is not None and num_v > vsl_lim:
                                 c.fill = YELLOW    # exceeds VSL only
-                                c.font = Font(**FHE, bold=True)
-                            elif vsl_lim is None and tier1_lim is None and num_v > any_lim:
-                                c.fill = ORANGE    # no VSL/Tier1 distinction
                                 c.font = Font(**FHE, bold=True)
                         # GREY + BOLD: threshold < LOD → false positive risk
                         elif flag_cell in ("ND", "<LOD", "<LOQ", "<"):
@@ -1212,7 +1196,8 @@ class LabReportExcel:
                     horizontal="center", vertical="center", wrap_text=True
                 )
 
-        n_legend = self._write_legend(ws, data_row + 1, include_gray=has_gray)
+        n_legend = self._write_legend(ws, data_row + 1, include_gray=has_gray,
+                                      thresh_keys=thresh_keys)
         # ── Threshold source footnotes (only for keys with ≥1 defined value) ──
         active_keys = [k for k in thresh_keys
                        if any(thresh_vals.get(c, {}).get(k) is not None for c in compounds)]
@@ -1307,13 +1292,19 @@ class LabReportExcel:
         return out
 
     @staticmethod
-    def _write_legend(ws, start_row: int, include_gray: bool = True) -> int:
-        items = [
-            ("חריגה מ-Tier 1 תעשייתי",   PINK),
-            ("חריגה מ-Tier 1 מגורים",     L_BLUE),
-            ("חריגה מ-Tier 1 (אחר)",      ORANGE),
-            ("חריגה מערך VSL",            YELLOW),
-        ]
+    def _write_legend(ws, start_row: int, include_gray: bool = True,
+                      thresh_keys: list[str] | None = None) -> int:
+        keys = thresh_keys or []
+        has_ind = any("TIER1" in k and "IND" in k for k in keys)
+        has_res = any("TIER1" in k and "RES" in k for k in keys)
+        has_vsl = any("VSL" in k and "TIER1" not in k for k in keys)
+        items = []
+        if has_ind:
+            items.append(("חריגה מ-Tier 1 תעשייתי", PINK))
+        if has_res:
+            items.append(("חריגה מ-Tier 1 מגורים",  L_BLUE))
+        if has_vsl:
+            items.append(("חריגה מערך VSL",          YELLOW))
         if include_gray:
             items.append(("ערך הסף גדול מסף הגילוי", GRAY))
         for i, (label, fill) in enumerate(items):
