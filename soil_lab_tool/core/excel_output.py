@@ -13,7 +13,9 @@ Landscape layout (samples as rows — soil gas, many-samples):
   Threshold rows appended at bottom.
 
 Colour coding:
-  Orange  — measured value exceeds Tier 1 threshold
+  Pink    — measured value exceeds Tier 1 Industrial threshold
+  Blue    — measured value exceeds Tier 1 Residential threshold
+  Orange  — measured value exceeds other threshold (GW / no IND/RES key)
   Yellow  — measured value exceeds VSL (but not Tier 1)
   Gray    — below detection limit, but LOD > threshold (uncertain)
 
@@ -54,9 +56,12 @@ from core.threshold_manager import ThresholdManager, ANALYSIS_THRESHOLDS, THRESH
 
 
 # ── Style constants ───────────────────────────────────────────────────
-YELLOW  = PatternFill(start_color="F7C7AC", end_color="F7C7AC", fill_type="solid")
+YELLOW  = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")  # VSL
+PINK    = PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")  # Tier 1 Industrial
+L_BLUE  = PatternFill(start_color="ADD8E6", end_color="ADD8E6", fill_type="solid")  # Tier 1 Residential
+ORANGE  = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")  # Tier 1 GW/other
 GRAY    = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
-ORANGE  = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
+WHITE   = PatternFill(fill_type=None)
 BLUE_H  = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
 DARK_H  = PatternFill(start_color="2F4F4F", end_color="2F4F4F", fill_type="solid")
 THIN    = Border(
@@ -931,14 +936,23 @@ class LabReportExcel:
                 elif ci > N_FIXED:
                     si = ci - N_FIXED - 1
                     display, num_v, flag, lod = sample_vals[si]
-                    vsl_lim   = self._vsl_limit(t_vals)
-                    tier1_lim = self._tier1_limit(t_vals)
-                    any_lim   = self._strictest(t_vals)
+                    vsl_lim      = self._vsl_limit(t_vals)
+                    tier1_ind    = self._tier1_ind_limit(t_vals)
+                    tier1_res    = self._tier1_res_limit(t_vals)
+                    tier1_lim    = self._tier1_limit(t_vals)
+                    any_lim      = self._strictest(t_vals)
                     if any_lim is not None:
                         if (flag not in ("ND", "<LOQ", "<")
                                 and isinstance(num_v, (int, float))):
-                            if tier1_lim is not None and num_v > tier1_lim:
-                                c.fill = ORANGE    # exceeds Tier1
+                            if tier1_ind is not None and num_v > tier1_ind:
+                                c.fill = PINK      # exceeds Tier 1 Industrial
+                                c.font = Font(**FHE, bold=True)
+                            elif tier1_res is not None and num_v > tier1_res:
+                                c.fill = L_BLUE    # exceeds Tier 1 Residential
+                                c.font = Font(**FHE, bold=True)
+                            elif (tier1_ind is None and tier1_res is None
+                                  and tier1_lim is not None and num_v > tier1_lim):
+                                c.fill = ORANGE    # exceeds Tier1 (GW/other, no IND/RES)
                                 c.font = Font(**FHE, bold=True)
                             elif vsl_lim is not None and num_v > vsl_lim:
                                 c.fill = YELLOW    # exceeds VSL only
@@ -958,19 +972,21 @@ class LabReportExcel:
             data_row += 1
 
         # ── Legend ────────────────────────────────────────────────────
-        self._write_legend(ws, data_row + 1, include_gray=has_gray)
+        n_legend = self._write_legend(ws, data_row + 1, include_gray=has_gray)
         # ── Threshold source footnotes (only for keys with ≥1 defined value) ──
         active_keys = [k for k in thresh_keys
                        if any(thresh_vals.get(c, {}).get(k) is not None for c in compounds)]
-        note_row = data_row + 2
+        note_row = data_row + 1 + n_legend + 1
         for note in self._threshold_source_notes(active_keys):
-            ws.cell(row=note_row, column=1, value=f"* {note}").font = Font(
-                **FEN, italic=True, color="808080")
+            c = ws.cell(row=note_row, column=1, value=f"* {note}")
+            c.font = Font(**FEN, italic=True, color="808080")
+            c.fill = WHITE
             note_row += 1
         if include_lod_loq:
-            ws.cell(row=note_row, column=1,
-                    value="* ספי חש מוגדרים לפי תקנות איכות אויר").font = Font(
-                        **FHE, italic=True, color="808080")
+            c = ws.cell(row=note_row, column=1,
+                        value="* ספי חש מוגדרים לפי תקנות איכות אויר")
+            c.font = Font(**FHE, italic=True, color="808080")
+            c.fill = WHITE
         self._auto_width(ws, N_FIXED + len(samples), hdr_row=hdr_row)
 
     # ------------------------------------------------------------------
@@ -1133,13 +1149,22 @@ class LabReportExcel:
                     num_v, flag_cell, lod_cell = row_meta[comp_idx]
                     t_vals                 = thresh_vals.get(cmp_name, {})
                     vsl_lim   = self._vsl_limit(t_vals)
+                    tier1_ind = self._tier1_ind_limit(t_vals)
+                    tier1_res = self._tier1_res_limit(t_vals)
                     tier1_lim = self._tier1_limit(t_vals)
                     any_lim   = self._strictest(t_vals)
                     if any_lim is not None:
                         if (flag_cell not in ("ND", "<LOQ", "<")
                                 and isinstance(num_v, (int, float))):
-                            if tier1_lim is not None and num_v > tier1_lim:
-                                c.fill = ORANGE    # exceeds Tier1
+                            if tier1_ind is not None and num_v > tier1_ind:
+                                c.fill = PINK      # exceeds Tier 1 Industrial
+                                c.font = Font(**FHE, bold=True)
+                            elif tier1_res is not None and num_v > tier1_res:
+                                c.fill = L_BLUE    # exceeds Tier 1 Residential
+                                c.font = Font(**FHE, bold=True)
+                            elif (tier1_ind is None and tier1_res is None
+                                  and tier1_lim is not None and num_v > tier1_lim):
+                                c.fill = ORANGE    # exceeds Tier1 (GW/other, no IND/RES)
                                 c.font = Font(**FHE, bold=True)
                             elif vsl_lim is not None and num_v > vsl_lim:
                                 c.fill = YELLOW    # exceeds VSL only
@@ -1187,14 +1212,15 @@ class LabReportExcel:
                     horizontal="center", vertical="center", wrap_text=True
                 )
 
-        self._write_legend(ws, data_row + 1, include_gray=has_gray)
+        n_legend = self._write_legend(ws, data_row + 1, include_gray=has_gray)
         # ── Threshold source footnotes (only for keys with ≥1 defined value) ──
         active_keys = [k for k in thresh_keys
                        if any(thresh_vals.get(c, {}).get(k) is not None for c in compounds)]
-        note_row = data_row + 2
+        note_row = data_row + 1 + n_legend + 1
         for note in self._threshold_source_notes(active_keys):
-            ws.cell(row=note_row, column=1, value=f"* {note}").font = Font(
-                **FEN, italic=True, color="808080")
+            c = ws.cell(row=note_row, column=1, value=f"* {note}")
+            c.font = Font(**FEN, italic=True, color="808080")
+            c.fill = WHITE
             note_row += 1
         self._auto_width(ws, total_cols)
 
@@ -1222,9 +1248,23 @@ class LabReportExcel:
 
     @staticmethod
     def _tier1_limit(t_vals: dict) -> float | None:
-        """Strictest of the Tier1-type thresholds (any key containing 'TIER1')."""
+        """Strictest of all Tier1-type thresholds."""
         vals = [v for k, v in t_vals.items()
                 if v is not None and "TIER1" in k]
+        return min(vals) if vals else None
+
+    @staticmethod
+    def _tier1_ind_limit(t_vals: dict) -> float | None:
+        """Strictest of Tier1 Industrial thresholds (IND keys)."""
+        vals = [v for k, v in t_vals.items()
+                if v is not None and "TIER1" in k and "IND" in k]
+        return min(vals) if vals else None
+
+    @staticmethod
+    def _tier1_res_limit(t_vals: dict) -> float | None:
+        """Strictest of Tier1 Residential thresholds (RES keys)."""
+        vals = [v for k, v in t_vals.items()
+                if v is not None and "TIER1" in k and "RES" in k]
         return min(vals) if vals else None
 
     def _write_header_row(self, ws, row_num: int, total_cols: int, hinfo: dict | None = None):
@@ -1267,9 +1307,11 @@ class LabReportExcel:
         return out
 
     @staticmethod
-    def _write_legend(ws, start_row: int, include_gray: bool = True):
+    def _write_legend(ws, start_row: int, include_gray: bool = True) -> int:
         items = [
-            ("חריגה מ-Tier 1",            ORANGE),
+            ("חריגה מ-Tier 1 תעשייתי",   PINK),
+            ("חריגה מ-Tier 1 מגורים",     L_BLUE),
+            ("חריגה מ-Tier 1 (אחר)",      ORANGE),
             ("חריגה מערך VSL",            YELLOW),
         ]
         if include_gray:
@@ -1280,6 +1322,7 @@ class LabReportExcel:
             c.fill   = fill
             c.border = THIN
             c.alignment = Alignment(horizontal="right", vertical="center")
+        return len(items)
 
     @staticmethod
     def _auto_width(ws, n_cols: int, hdr_row: int = 2):
