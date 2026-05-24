@@ -398,7 +398,7 @@ with st.sidebar:
                                   placeholder="שם האתר (לדוג׳: צומת שמשון)")
 
     st.markdown('<div class="sidebar-label">🏭 מעבדה וקטגוריה</div>', unsafe_allow_html=True)
-    lab = st.selectbox("מעבדה", ["🔍 זיהוי אוטומטי", "KTE", "מכון הנפט", "בקטוכם", "Alchem", "ALS", "Aminolab", "אלכם (XRF)"],
+    lab = st.selectbox("מעבדה", ["🔍 זיהוי אוטומטי", "KTE", "מכון הנפט", "בקטוכם", "Alchem", "ALS", "Aminolab", "RJ Lee", "אלכם (XRF)"],
                        label_visibility="collapsed")
     category_display = {
         "🔍 זיהוי אוטומטי":           "auto",
@@ -863,10 +863,23 @@ with tab_excel:
     file_summaries: list[dict] = []
     n_files = len(all_raw)
 
+    # Separate any companion PDF from the Excel/CSV data files so we can
+    # pass PDF bytes to parsers that support Lab-ID → borehole mapping.
+    _pdf_files  = [(n, b) for n, b in all_raw if n.lower().endswith(".pdf")]
+    _data_files = [(n, b) for n, b in all_raw if not n.lower().endswith(".pdf")]
+    _pdf_bytes  = _pdf_files[0][1] if _pdf_files else None
+    _parse_files = _data_files if _data_files else all_raw
+
+    import inspect as _inspect
+    _parser_accepts_pdf = "pdf_bytes" in _inspect.signature(parser.parse).parameters
+
     with st.spinner(f"מנתח {'קבצים' if n_files > 1 else 'קובץ'}..."):
-        for fname_i, raw_i in all_raw:
+        for fname_i, raw_i in _parse_files:
             try:
-                file_records = parser.parse(io.BytesIO(raw_i))
+                if _parser_accepts_pdf and _pdf_bytes:
+                    file_records = parser.parse(io.BytesIO(raw_i), pdf_bytes=_pdf_bytes)
+                else:
+                    file_records = parser.parse(io.BytesIO(raw_i))
                 all_records.extend(file_records)
                 file_summaries.append({"name": fname_i, "records": len(file_records), "ok": True})
             except Exception as e:
