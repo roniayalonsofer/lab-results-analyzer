@@ -115,6 +115,24 @@ def _is_kte_soil_gas_excel(sheet_names: list[str]) -> bool:
     return any(_KTE_SOIL_GAS_RE.search(s) for s in sheet_names)
 
 
+_MACHON_HANEFT_MARKERS = ("EPA 8270", "EPA 3550", "תעודת בדיקה", "גבול גילוי")
+
+
+def _is_machon_haneft_excel(file_bytes: bytes) -> bool:
+    """Return True if any of the first 15 rows in the first sheet contain a
+    Machon HaNeft marker string."""
+    try:
+        import io
+        import pandas as pd
+        xl = pd.ExcelFile(io.BytesIO(file_bytes))
+        first_sheet = xl.sheet_names[0]
+        df = xl.parse(first_sheet, header=None, dtype=str, nrows=15).fillna("")
+        flat = " ".join(df.values.flatten().tolist())
+        return any(m in flat for m in _MACHON_HANEFT_MARKERS)
+    except Exception:
+        return False
+
+
 # "אמינולאב" reversed char-by-char — pdfplumber extracts Hebrew RTL text visually,
 # so logical order "אמינולאב" arrives as visual order "בלאונימא".
 _AMINOLAB_HE_REVERSED = "אמינולאב"[::-1]
@@ -255,6 +273,8 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
                 return "alchem"
             if any("Client SOIL" in s for s in xl.sheet_names):
                 return "als"
+            if _is_machon_haneft_excel(file_bytes):
+                return "מכון הנפט"
             if _is_kte_soil_gas_excel(xl.sheet_names):
                 return "kte"
             if _is_xrf_excel(file_bytes):

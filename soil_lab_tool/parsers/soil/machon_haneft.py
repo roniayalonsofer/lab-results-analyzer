@@ -111,9 +111,12 @@ SYMBOL_CAS: dict[str, str] = {
 }
 
 
+_SAMPLE_ID_RE = re.compile(r'^S\d+[-–]\d+')
+
+
 class MachonHaneftSoilParser(BaseParser):
     LAB_NAME = "מכון הנפט"
-    ANALYSIS_TYPES = ["SOIL_TPH", "SOIL_METALS", "SOIL_MBTEX"]
+    ANALYSIS_TYPES = ["SOIL_TPH", "SOIL_METALS", "SOIL_MBTEX", "SOIL_VOC", "SOIL_SVOC"]
 
     def __init__(self):
         self._vp = LabValueParser()
@@ -125,6 +128,18 @@ class MachonHaneftSoilParser(BaseParser):
 
         records: list[dict] = []
 
+        # --- VOC sheet ---
+        for key in ("voc",):
+            if key in sheet_map:
+                records.extend(self._parse_voc_svoc(xl, sheet_map[key], "SOIL_VOC"))
+                break
+
+        # --- SVOC sheet ---
+        for key in ("svoc",):
+            if key in sheet_map:
+                records.extend(self._parse_voc_svoc(xl, sheet_map[key], "SOIL_SVOC"))
+                break
+
         # --- TPH sheet (also parses BTEX/MTBE second block if present) ---
         for key in ("tph", "tph+btex", "tph & btex"):
             if key in sheet_map:
@@ -132,19 +147,155 @@ class MachonHaneftSoilParser(BaseParser):
                 records.extend(self._parse_btex_block(xl, sheet_map[key]))
                 break
         else:
-            # Try first sheet if it looks like TPH
-            first = xl.sheet_names[0]
-            raw = xl.parse(first, header=None, dtype=str).fillna("")
-            flat = " ".join(raw.values.flatten().tolist()).lower()
-            if "tph" in flat or "dro" in flat:
-                records.extend(self._parse_tph(xl, first))
-                records.extend(self._parse_btex_block(xl, first))
+            # Try first sheet if it looks like TPH (only when no VOC/SVOC was found)
+            if not records:
+                first = xl.sheet_names[0]
+                raw = xl.parse(first, header=None, dtype=str).fillna("")
+                flat = " ".join(raw.values.flatten().tolist()).lower()
+                if "tph" in flat or "dro" in flat:
+                    records.extend(self._parse_tph(xl, first))
+                    records.extend(self._parse_btex_block(xl, first))
 
         # --- Metals sheet ---
         for key in ("מתכות", "metals", "metal"):
             if key in sheet_map:
                 records.extend(self._parse_metals(xl, sheet_map[key]))
                 break
+
+        return records
+
+    # ------------------------------------------------------------------
+    # VOC / SVOC sheet
+    # ------------------------------------------------------------------
+    def _parse_voc_svoc(self, xl: pd.ExcelFile, sheet_name: str,
+                        analysis_type: str) -> list[dict]:
+        """Parse a VOC or SVOC sheet where compounds are rows and samples are columns.
+
+        Layout:
+          - Sample-names row: first row where column index ≥ 6 (0-based) has a value
+            matching S\\d+-\\d+ (e.g. S1-11.0, S4-4.0).
+          - Header row: the row immediately after the sample-names row.
+            Columns: #, Cas.No., compound name, units, LOD, LOQ, sample...
+          - Data rows: integer in col 0, CAS number in col 1.
+        """
+        raw = xl.parse(sheet_name, header=None, dtype=str).fillna("")
+
+        # Find sample-names row
+        sample_row_idx = None
+        for i, row in raw.iterrows():
+            vals = [str(v).strip() for v in row.values]
+            if any(_SAMPLE_ID_RE.match(v) for v in vals[5:]):
+                sample_row_idx = i
+                break
+
+        if sample_row_idx is None:
+            return []
+
+        header_row_idx = sample_row_idx + 1
+        if header_row_idx >= len(raw):
+            return []
+
+        headers = [str(v).strip() for v in raw.iloc[header_row_idx].values]
+
+        # Locate fixed columns by keyword
+        def find_col(keywords):
+            for k in keywords:
+                for ci, h in enumerate(headers):
+                    if k.lower() in h.lower():
+                        return ci
+            return None
+
+        col_num  = 0
+        col_cas  = find_col(["cas"])
+        col_name = find_col(["compound", "תרכובת", "שם"])
+        col_unit = find_col(["יחידות", "unit"])
+        col_lod  = find_col(["lod", "גבול גילוי"])
+        col_loq  = find_col(["loq", "גבול כימות"])
+
+        # Sample columns: extract IDs from the sample-names row
+        sample_row_vals = [str(v).strip() for v in raw.iloc[sample_row_idx].values]
+        header_row_vals = headers
+
+        # Determine which columns are sample columns (have sample ID in sample row)
+        sample_col_indices: list[int] = []
+        sample_ids: list[str] = []
+        for ci, v in enumerate(sample_row_vals):
+            if _SAMPLE_ID_RE.match(v):
+                sample_col_indices.append(ci)
+                sample_ids.append(v)
+
+        if not sample_col_indices:
+            return []
+
+        _CAS_DATA_RE = re.compile(r'^\d{2,7}-\d{2}-\d$')
+
+        records: list[dict] = []
+        for i in range(header_row_idx + 1, len(raw)):
+            row = raw.iloc[i]
+            vals = [str(v).strip() for v in row.values]
+
+            # Data row: col 0 must be an integer, col_cas must be a CAS number
+            col0 = vals[0] if vals else ""
+            cas_val = vals[col_cas].strip() if col_cas is not None and col_cas < len(vals) else ""
+
+            if not col0.isdigit():
+                continue
+            if not _CAS_DATA_RE.match(cas_val):
+                continue
+
+            compound = vals[col_name].strip() if col_name is not None and col_name < len(vals) else ""
+            unit = vals[col_unit].strip() if col_unit is not None and col_unit < len(vals) else "mg/kg"
+            if not unit or unit.lower() in ("nan", ""):
+                unit = "mg/kg"
+
+            lod = None
+            if col_lod is not None and col_lod < len(vals):
+                try:
+                    lod = float(vals[col_lod].replace(",", ""))
+                except (ValueError, TypeError):
+                    pass
+
+            loq = None
+            if col_loq is not None and col_loq < len(vals):
+                try:
+                    loq = float(vals[col_loq].replace(",", ""))
+                except (ValueError, TypeError):
+                    pass
+
+            detection_limit = loq if loq is not None else lod
+
+            for ci, sid in zip(sample_col_indices, sample_ids):
+                if ci >= len(vals):
+                    continue
+                raw_val = vals[ci]
+                if not raw_val or raw_val.lower() in ("nan", ""):
+                    continue
+
+                if raw_val.lower() in ("nd", "n.d.", "not detected", "<dl"):
+                    value, flag = None, "ND"
+                elif raw_val.startswith("<"):
+                    value, flag = self._vp.parse(raw_val)
+                else:
+                    try:
+                        value = float(raw_val.replace(",", ""))
+                        flag = ""
+                    except ValueError:
+                        value, flag = self._vp.parse(raw_val)
+                    if (value is not None and detection_limit is not None
+                            and value <= detection_limit + 1e-9):
+                        value, flag = None, "ND"
+
+                records.append({
+                    "lab":           self.LAB_NAME,
+                    "sample_id":     sid,
+                    "compound":      compound,
+                    "cas":           cas_val,
+                    "value":         value,
+                    "flag":          flag,
+                    "unit":          unit,
+                    "lod":           lod,
+                    "analysis_type": analysis_type,
+                })
 
         return records
 
