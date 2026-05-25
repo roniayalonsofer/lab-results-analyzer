@@ -833,17 +833,16 @@ with tab_excel:
     fname     = " | ".join(f for f, _ in all_raw)
     raw_bytes = all_raw[0][1]
 
-    # Resolve auto-detected lab — iterate ALL uploaded files so that
-    # a matching file is found regardless of upload order.
     if lab == "🔍 זיהוי אוטומטי":
         detected_lab = None
         for _fn, _fb in all_raw:
             _det = auto_detect_lab(_fn, _fb)
-            if _det:
+            if _det and _det != "KTE":
                 detected_lab = _det
-                if detected_lab == "rj lee":
-                    break
-        lab = detected_lab or "KTE"
+                break
+        if not detected_lab:
+            detected_lab = auto_detect_lab(all_raw[0][0], all_raw[0][1]) or "KTE"
+        lab = detected_lab
 
     if category_raw == 'auto':
         category = None
@@ -853,7 +852,7 @@ with tab_excel:
                 category = _cat
                 break
         if not category:
-            category = auto_detect_category(all_raw[0][0], all_raw[0][1])
+            category = auto_detect_category(all_raw[0][0], all_raw[0][1]) or "soil"
         cat_info = f"זוהה אוטומטית: **{category}**"
     else:
         category = category_raw
