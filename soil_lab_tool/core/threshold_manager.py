@@ -636,7 +636,7 @@ class ThresholdManager:
         mask = df[name_col].str.strip().str.lower() == name_lo
         row_df = df[mask]
         if row_df.empty:
-            mask = df[name_col].str.strip().str.lower().str.contains(name_lo, na=False, regex=False)
+            mask = df[name_col].str.strip().str.lower().apply(lambda x: name_lo in str(x) if x else False)
             row_df = df[mask]
         if row_df.empty:
             return None
@@ -680,7 +680,7 @@ class ThresholdManager:
         mask = df[name_col].str.strip().str.lower() == name_lo
         row = df[mask]
         if row.empty:
-            mask = df[name_col].str.strip().str.lower().str.contains(name_lo, na=False, regex=False)
+            mask = df[name_col].str.strip().str.lower().apply(lambda x: name_lo in str(x) if x else False)
             row = df[mask]
         if row.empty:
             return None
