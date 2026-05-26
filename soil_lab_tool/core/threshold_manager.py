@@ -515,7 +515,7 @@ class ThresholdManager:
         row  = df[mask]
         if row.empty:
             # Try partial / contains match
-            mask = df[name_col].str.strip().str.lower().str.contains(name_lo, na=False, regex=False)
+            mask = df[name_col].str.strip().str.lower().apply(lambda x: name_lo in str(x) if x else False)
             row  = df[mask]
         if row.empty:
             return None
