@@ -49,9 +49,7 @@ class MachonEnergyParser(BaseParser):
         magic = file_obj.read(4)
         file_obj.seek(0)
         if magic == _PDF_MAGIC:
-            raise ValueError(
-                "PDF format not supported for this lab — please upload an Excel file (.xlsx)"
-            )
+            return self._parse_pdf(file_obj, filename)
 
         xl   = pd.ExcelFile(file_obj)
         smap = {s.strip().upper(): s for s in xl.sheet_names}
@@ -67,6 +65,120 @@ class MachonEnergyParser(BaseParser):
         records: list[dict] = []
         for sheet_key, sheet_name in target_sheets:
             records.extend(self._parse_sheet(xl, sheet_name, sheet_key, filename))
+        return records
+
+    # ------------------------------------------------------------------
+    def _parse_pdf(self, file_obj: io.BytesIO, filename: str = "") -> list[dict]:
+        import pdfplumber
+
+        file_obj.seek(0)
+        records: list[dict] = []
+        sample_id = ""
+        sampling_date = ""
+
+        with pdfplumber.open(file_obj) as pdf:
+            all_text_lines: list[str] = []
+            all_tables: list[list[list[str]]] = []
+
+            for page in pdf.pages:
+                text = page.extract_text() or ""
+                all_text_lines.extend(text.splitlines())
+                tables = page.extract_tables() or []
+                all_tables.extend(tables)
+
+            # Extract metadata from raw text lines
+            for line in all_text_lines:
+                if not sample_id and "פרויקט" in line:
+                    if ":" in line:
+                        sample_id = line.split(":", 1)[1].strip()
+                    if not sample_id or sample_id.lower() == "nan":
+                        sample_id = ""
+                if not sampling_date and "תאריך לקיחת המדגם" in line:
+                    if ":" in line:
+                        sampling_date = line.split(":", 1)[1].strip()
+
+            fn_base = os.path.splitext(os.path.basename(filename))[0] if filename else ""
+            if sample_id and fn_base:
+                sample_id = f"{sample_id} — {fn_base}"
+            elif not sample_id:
+                sample_id = fn_base or "Sample"
+
+            # Parse tables — find header row then extract data rows
+            for table in all_tables:
+                if not table:
+                    continue
+
+                # Locate header row within this table
+                header_idx = None
+                col_cas, col_compound, col_unit, col_lod, col_loq, col_result = 1, 2, 3, 4, 5, 6
+                for ri, row in enumerate(table):
+                    row_str = " ".join(str(c or "").lower() for c in row)
+                    if ("compound" in row_str or "גבול" in row_str) and "cas" in row_str:
+                        header_idx = ri
+                        for ci, cell in enumerate(row):
+                            h = str(cell or "").lower()
+                            if "cas" in h:
+                                col_cas = ci
+                            elif "compound" in h or "שם" in h:
+                                col_compound = ci
+                            elif "יחידות" in h or "unit" in h:
+                                col_unit = ci
+                            elif "גבול גילוי" in h or "detection" in h:
+                                col_lod = ci
+                            elif "גבול כימות" in h or "loq" in h:
+                                col_loq = ci
+                            elif "תוצאה" in h or "result" in h:
+                                col_result = ci
+                        break
+
+                data_start = (header_idx + 1) if header_idx is not None else 0
+
+                for row in table[data_start:]:
+                    if not row:
+                        continue
+                    row = [str(c or "").strip() for c in row]
+
+                    # First cell must be a row serial number
+                    if not _is_integer_str(row[0]):
+                        continue
+
+                    compound = row[col_compound] if col_compound < len(row) else ""
+                    if not compound or compound.lower() in ("", "nan"):
+                        continue
+
+                    cas = row[col_cas] if col_cas < len(row) else ""
+                    if cas.lower() in ("", "nan"):
+                        cas = ""
+
+                    unit = row[col_unit] if col_unit < len(row) else ""
+                    if unit.lower() in ("", "nan"):
+                        unit = ""
+
+                    analysis_type = _infer_analysis_type(unit, "SOIL_GAS_VOC")
+
+                    lod = _parse_float(row, col_lod)
+                    loq = _parse_float(row, col_loq)
+
+                    raw_val = row[col_result] if col_result < len(row) else ""
+                    if raw_val.upper() in ("ND", "N.D.", "N/D", "NOT DETECTED", "", "NAN"):
+                        value, flag = lod, "ND"
+                    else:
+                        value, flag = self._vp.parse(raw_val)
+
+                    records.append({
+                        "lab":           self.LAB_NAME,
+                        "sample_id":     sample_id,
+                        "compound":      compound,
+                        "cas":           cas,
+                        "value":         value,
+                        "flag":          flag,
+                        "unit":          unit,
+                        "lod":           lod,
+                        "loq":           loq,
+                        "analysis_type": analysis_type,
+                        "sampling_date": sampling_date,
+                    })
+
         return records
 
     # ------------------------------------------------------------------
@@ -286,7 +398,7 @@ def is_machon_energy_pdf(file_bytes: bytes) -> bool:
         with pdfplumber.open(_io.BytesIO(file_bytes)) as pdf:
             for page in pdf.pages[:3]:
                 text = page.extract_text() or ""
-                if "המכון הישראלי לאנרגיה" in text or "אנרגיה ולסביבה" in text:
+                if "המכון הישראלי לאנרגיה" in text or "המכון הישראלי" in text or "אנרגיה ולסביבה" in text:
                     return True
     except Exception:
         pass
