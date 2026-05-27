@@ -132,9 +132,16 @@ class MachonEnergyParser(BaseParser):
                                     continue
                             except (ValueError, TypeError):
                                 continue
-                            # RTL reversal: '0.5 - 13ק' → split → reverse → '13ק - 0.5'
-                            parts = row[4].split(" - ")
-                            row_sample_id = " - ".join(reversed(parts))
+                            # RTL reversal: '0.5 - 13ק' → split → reverse → fix Hebrew suffix → 'ק13 - 0.5'
+                            _parts = row[4].split(" - ")
+                            _parts.reverse()
+                            _hebrew = 'קאבגדהוזחטיכלמנסעפצרשת'
+                            _fixed = []
+                            for _p in _parts:
+                                if _p and _p[-1] in _hebrew:
+                                    _p = _p[-1] + _p[:-1]
+                                _fixed.append(_p)
+                            row_sample_id = " - ".join(_fixed)
                             if fn_base:
                                 row_sample_id = f"{row_sample_id} — {fn_base}"
                             for compound, col_idx in (("TPH", 3), ("DRO", 2), ("ORO", 1)):
