@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import io
 import os
-import re
 
 import pandas as pd
 
@@ -35,8 +34,6 @@ _META_SCAN   = 35  # scan at most this many rows for metadata
 
 _PDF_MAGIC = b"%PDF"
 
-# Matches RTL-reversed borehole IDs: 'ק' next to digits (e.g. '13ק' or 'ק13')
-_TPH_SAMPLE_RE = re.compile(r'ק\d|\dק')
 
 
 class MachonEnergyParser(BaseParser):
@@ -114,25 +111,34 @@ class MachonEnergyParser(BaseParser):
                     if not table:
                         continue
 
-                    # TPH table: ORO / DRO / TPH columns, sample_id per row
-                    tph_header_idx = _find_tph_header(table)
+                    # Detect TPH table: any row whose cells include all three of TPH/DRO/ORO
+                    tph_header_idx = None
+                    for ri, row in enumerate(table):
+                        cells = [str(c or "").strip() for c in row]
+                        if "TPH" in cells and "DRO" in cells and "ORO" in cells:
+                            tph_header_idx = ri
+                            break
+
                     if tph_header_idx is not None:
+                        # TPH layout: col0=dry_matter%, col1=ORO, col2=DRO, col3=TPH, col4=sample_id
                         for row in table[tph_header_idx + 1:]:
                             if not row or len(row) < 5:
                                 continue
                             row = [str(c or "").strip() for c in row]
-                            # BUG 5: skip non-data rows (units, LOQ header, etc.)
-                            if not _TPH_SAMPLE_RE.search(row[4]):
+                            # Data rows: col0 is dry matter % — float in range 50–100
+                            try:
+                                dm = float(row[0].replace(",", ""))
+                                if not (50.0 <= dm <= 100.0):
+                                    continue
+                            except (ValueError, TypeError):
                                 continue
-                            # BUG 4: RTL reversal — split on ' - ', reverse parts, rejoin
+                            # RTL reversal: '0.5 - 13ק' → split → reverse → '13ק - 0.5'
                             parts = row[4].split(" - ")
                             row_sample_id = " - ".join(reversed(parts))
                             if fn_base:
                                 row_sample_id = f"{row_sample_id} — {fn_base}"
-                            # BUG 2: col 1=ORO, col 2=DRO, col 3=TPH, col 4=sample_id
                             for compound, col_idx in (("TPH", 3), ("DRO", 2), ("ORO", 1)):
                                 raw_val = row[col_idx] if col_idx < len(row) else ""
-                                # BUG 3: parse directly so '<50' → (50.0, '<'), not (25.0, 'ND')
                                 value, flag = _parse_tph_value(raw_val)
                                 records.append({
                                     "lab":           self.LAB_NAME,
@@ -147,65 +153,50 @@ class MachonEnergyParser(BaseParser):
                                     "analysis_type": "SOIL_TPH",
                                     "sampling_date": sampling_date,
                                 })
-                        continue
 
-                    # Locate header row — column indices are fixed for this lab's PDF layout
-                    # BUG 1: do not update indices from RTL-reversed header text
-                    header_idx = None
-                    col_cas, col_compound, col_unit, col_lod, col_loq, col_result = 1, 2, 3, 4, 5, 6
-                    for ri, row in enumerate(table):
-                        row_str = " ".join(str(c or "").lower() for c in row)
-                        if ("compound" in row_str or "גבול" in row_str) and "cas" in row_str:
-                            header_idx = ri
-                            break
-
-                    data_start = (header_idx + 1) if header_idx is not None else 0
-
-                    for row in table[data_start:]:
-                        if not row:
-                            continue
-                        row = [str(c or "").strip() for c in row]
-
-                        # First cell must be a row serial number
-                        if not _is_integer_str(row[0]):
-                            continue
-
-                        compound = row[col_compound] if col_compound < len(row) else ""
-                        if not compound or compound.lower() in ("", "nan"):
-                            continue
-
-                        cas = row[col_cas] if col_cas < len(row) else ""
-                        if cas.lower() in ("", "nan"):
-                            cas = ""
-
-                        unit = row[col_unit] if col_unit < len(row) else ""
-                        if unit.lower() in ("", "nan"):
-                            unit = ""
-
-                        analysis_type = _infer_analysis_type(unit, page_default_atype)
-
-                        lod = _parse_float(row, col_lod)
-                        loq = _parse_float(row, col_loq)
-
-                        raw_val = row[col_result] if col_result < len(row) else ""
-                        if raw_val.upper() in ("ND", "N.D.", "N/D", "NOT DETECTED", "", "NAN"):
-                            value, flag = lod, "ND"
-                        else:
-                            value, flag = self._vp.parse(raw_val)
-
-                        records.append({
-                            "lab":           self.LAB_NAME,
-                            "sample_id":     sample_id,
-                            "compound":      compound,
-                            "cas":           cas,
-                            "value":         value,
-                            "flag":          flag,
-                            "unit":          unit,
-                            "lod":           lod,
-                            "loq":           loq,
-                            "analysis_type": analysis_type,
-                            "sampling_date": sampling_date,
-                        })
+                    else:
+                        # VOC/SVOC layout (hardcoded): 0=row_num,1=CAS,2=compound,3=unit,4=LOD,5=LOQ,6=result
+                        for row in table:
+                            if not row or len(row) < 7:
+                                continue
+                            row = [str(c or "").strip() for c in row]
+                            # Data rows: col0 is serial number 1–99
+                            try:
+                                row_num = int(float(row[0]))
+                                if not (1 <= row_num <= 99):
+                                    continue
+                            except (ValueError, TypeError):
+                                continue
+                            cas = row[1]
+                            if cas.lower() in ("", "nan"):
+                                cas = ""
+                            compound = row[2]
+                            if not compound or compound.lower() in ("", "nan"):
+                                continue
+                            unit = row[3]
+                            if unit.lower() in ("", "nan"):
+                                unit = ""
+                            lod      = _parse_float(row, 4)
+                            loq      = _parse_float(row, 5)
+                            raw_val  = row[6]
+                            if raw_val.upper() in ("ND", "N.D.", "N/D", "NOT DETECTED", "", "NAN"):
+                                value, flag = lod, "ND"
+                            else:
+                                value, flag = self._vp.parse(raw_val)
+                            analysis_type = _infer_analysis_type(unit, page_default_atype)
+                            records.append({
+                                "lab":           self.LAB_NAME,
+                                "sample_id":     sample_id,
+                                "compound":      compound,
+                                "cas":           cas,
+                                "value":         value,
+                                "flag":          flag,
+                                "unit":          unit,
+                                "lod":           lod,
+                                "loq":           loq,
+                                "analysis_type": analysis_type,
+                                "sampling_date": sampling_date,
+                            })
 
         return records
 
@@ -399,14 +390,6 @@ def _parse_tph_value(raw: str) -> tuple[float | None, str]:
     except (ValueError, TypeError):
         return None, ""
 
-
-def _find_tph_header(table: list) -> int | None:
-    """Return index of the TPH/DRO/ORO header row, or None if not a TPH table."""
-    for ri, row in enumerate(table[:5]):
-        row_str = " ".join(str(c or "") for c in row)
-        if "TPH" in row_str and "DRO" in row_str and "ORO" in row_str:
-            return ri
-    return None
 
 
 def _infer_analysis_type(unit: str, default: str) -> str:
