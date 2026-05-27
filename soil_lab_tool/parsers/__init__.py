@@ -8,8 +8,9 @@ import re as _re
 
 from parsers.base import BaseParser
 
-from parsers.soil_gas.alchem    import AlchemSoilGasParser
-from parsers.soil_gas.kte       import KTESoilGasParser
+from parsers.soil_gas.alchem        import AlchemSoilGasParser
+from parsers.soil_gas.kte           import KTESoilGasParser
+from parsers.soil_gas.machon_energy import MachonEnergyParser, is_machon_energy_excel
 from parsers.soil.alchem        import AlchemSoilParser
 from parsers.soil.kte           import KTESoilParser
 from parsers.soil.kte_pr        import KTEPRParser
@@ -27,6 +28,10 @@ from parsers.pfas.rj_lee            import RJLeePFASParser
 _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
     ("alchem",        "soil_gas"):    AlchemSoilGasParser,
     ("kte",           "soil_gas"):    KTESoilGasParser,
+    ("מכון האנרגיה",  "soil_gas"):   MachonEnergyParser,
+    ("מכון האנרגיה",  "soil"):       MachonEnergyParser,
+    ("machon energy", "soil_gas"):   MachonEnergyParser,
+    ("machon energy", "soil"):       MachonEnergyParser,
     ("alchem",        "soil"):        AlchemSoilParser,
     ("kte",           "soil"):        KTESoilParser,
     ("kte",           "groundwater"): KTEGroundwaterParser,
@@ -273,6 +278,8 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
                 return "alchem"
             if any("Client SOIL" in s for s in xl.sheet_names):
                 return "als"
+            if is_machon_energy_excel(file_bytes):
+                return "מכון האנרגיה"
             if _is_machon_haneft_excel(file_bytes):
                 return "מכון הנפט"
             if _is_kte_soil_gas_excel(xl.sheet_names):
@@ -389,6 +396,9 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
 
         if _is_alchem_excel(sheet_names):
             return "soil"
+
+        if is_machon_energy_excel(file_bytes):
+            return "soil_gas"
 
         if _is_kte_soil_gas_excel(sheet_names):
             return "soil_gas"

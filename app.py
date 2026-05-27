@@ -398,7 +398,7 @@ with st.sidebar:
                                   placeholder="שם האתר (לדוג׳: צומת שמשון)")
 
     st.markdown('<div class="sidebar-label">🏭 מעבדה וקטגוריה</div>', unsafe_allow_html=True)
-    lab = st.selectbox("מעבדה", ["🔍 זיהוי אוטומטי", "KTE", "מכון הנפט", "בקטוכם", "Alchem", "ALS", "Aminolab", "RJ Lee", "אלכם (XRF)"],
+    lab = st.selectbox("מעבדה", ["🔍 זיהוי אוטומטי", "KTE", "מכון הנפט", "מכון האנרגיה", "בקטוכם", "Alchem", "ALS", "Aminolab", "RJ Lee", "אלכם (XRF)"],
                        label_visibility="collapsed")
     category_display = {
         "🔍 זיהוי אוטומטי":           "auto",
