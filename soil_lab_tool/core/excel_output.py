@@ -457,6 +457,10 @@ class LabReportExcel:
         wb.remove(wb.active)   # remove default sheet
 
         for atype, recs in groups.items():
+            # Skip sheets that have no meaningful results (only qualifiers or empty values)
+            if not any(r.get("value") is not None or r.get("flag") == "ND" for r in recs):
+                continue
+
             cfg   = SHEET_CONFIG.get(atype, {"name": atype, "unit": ""})
             sheet = wb.create_sheet(title=cfg["name"][:31])
             sheet.sheet_view.rightToLeft = True
