@@ -275,7 +275,7 @@ class MachonEnergyParser(BaseParser):
             raw_val = str(vals[col_result]).strip() if col_result < len(vals) else ""
 
             if raw_val.upper() in ("ND", "N.D.", "N/D", "NOT DETECTED", "", "NAN"):
-                value, flag = lod, "ND"
+                value, flag = None, "ND"
             else:
                 value, flag = self._vp.parse(raw_val)
 
