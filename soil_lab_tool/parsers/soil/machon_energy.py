@@ -391,14 +391,15 @@ def is_machon_energy_excel(file_bytes: bytes) -> bool:
 
 
 def is_machon_energy_pdf(file_bytes: bytes) -> bool:
-    """Return True if the PDF text identifies it as a מכון האנרגיה report."""
     try:
         import io as _io
         import pdfplumber
         with pdfplumber.open(_io.BytesIO(file_bytes)) as pdf:
-            for page in pdf.pages[:3]:
+            for page in pdf.pages[:2]:
                 text = page.extract_text() or ""
-                if "המכון הישראלי לאנרגיה" in text or "המכון הישראלי" in text or "אנרגיה ולסביבה" in text:
+                if (("VOC Based on EPA" in text or "SVOC Based on EPA" in text)
+                        and "Cas.No." in text
+                        and "Compound" in text):
                     return True
     except Exception:
         pass
