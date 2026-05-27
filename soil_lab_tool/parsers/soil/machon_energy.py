@@ -37,7 +37,7 @@ _PDF_MAGIC = b"%PDF"
 
 class MachonEnergyParser(BaseParser):
     LAB_NAME       = "המכון הישראלי לאנרגיה ולסביבה"
-    ANALYSIS_TYPES = ["SOIL_GAS_VOC", "SOIL_VOC", "SOIL_SVOC"]
+    ANALYSIS_TYPES = ["SOIL_VOC", "SOIL_SVOC"]
 
     def __init__(self):
         self._vp = LabValueParser()
@@ -104,7 +104,7 @@ class MachonEnergyParser(BaseParser):
 
             # Parse tables per page — detect VOC vs SVOC from page text
             for page_text, tables in page_data:
-                page_default_atype = "SOIL_SVOC" if "SVOC Based on EPA" in page_text else "SOIL_GAS_VOC"
+                page_default_atype = "SOIL_SVOC" if "SVOC Based on EPA" in page_text else "SOIL_VOC"
 
                 for table in tables:
                     if not table:
@@ -217,7 +217,7 @@ class MachonEnergyParser(BaseParser):
                 elif ("תוצאה" in hl or "result" in hl) and col_result == 6:
                     col_result = ci
 
-        default_atype = "SOIL_SVOC" if sheet_key == "SVOC" else "SOIL_GAS_VOC"
+        default_atype = "SOIL_SVOC" if sheet_key == "SVOC" else "SOIL_VOC"
 
         records: list[dict] = []
         data_start = max(_DATA_START, header_row_idx + 1)
