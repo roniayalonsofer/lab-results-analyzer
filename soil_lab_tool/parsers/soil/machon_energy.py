@@ -37,7 +37,7 @@ _PDF_MAGIC = b"%PDF"
 
 class MachonEnergyParser(BaseParser):
     LAB_NAME       = "המכון הישראלי לאנרגיה ולסביבה"
-    ANALYSIS_TYPES = ["SOIL_GAS_VOC", "SOIL_VOC"]
+    ANALYSIS_TYPES = ["SOIL_GAS_VOC", "SOIL_VOC", "SOIL_SVOC"]
 
     def __init__(self):
         self._vp = LabValueParser()
@@ -78,13 +78,12 @@ class MachonEnergyParser(BaseParser):
 
         with pdfplumber.open(file_obj) as pdf:
             all_text_lines: list[str] = []
-            all_tables: list[list[list[str]]] = []
+            page_data: list[tuple[str, list]] = []
 
             for page in pdf.pages:
                 text = page.extract_text() or ""
                 all_text_lines.extend(text.splitlines())
-                tables = page.extract_tables() or []
-                all_tables.extend(tables)
+                page_data.append((text, page.extract_tables() or []))
 
             # Extract metadata from raw text lines
             for line in all_text_lines:
@@ -103,81 +102,84 @@ class MachonEnergyParser(BaseParser):
             elif not sample_id:
                 sample_id = fn_base or "Sample"
 
-            # Parse tables — find header row then extract data rows
-            for table in all_tables:
-                if not table:
-                    continue
+            # Parse tables per page — detect VOC vs SVOC from page text
+            for page_text, tables in page_data:
+                page_default_atype = "SOIL_SVOC" if "SVOC Based on EPA" in page_text else "SOIL_GAS_VOC"
 
-                # Locate header row within this table
-                header_idx = None
-                col_cas, col_compound, col_unit, col_lod, col_loq, col_result = 1, 2, 3, 4, 5, 6
-                for ri, row in enumerate(table):
-                    row_str = " ".join(str(c or "").lower() for c in row)
-                    if ("compound" in row_str or "גבול" in row_str) and "cas" in row_str:
-                        header_idx = ri
-                        for ci, cell in enumerate(row):
-                            h = str(cell or "").lower()
-                            if "cas" in h:
-                                col_cas = ci
-                            elif "compound" in h or "שם" in h:
-                                col_compound = ci
-                            elif "יחידות" in h or "unit" in h:
-                                col_unit = ci
-                            elif "גבול גילוי" in h or "detection" in h:
-                                col_lod = ci
-                            elif "גבול כימות" in h or "loq" in h:
-                                col_loq = ci
-                            elif "תוצאה" in h or "result" in h:
-                                col_result = ci
-                        break
-
-                data_start = (header_idx + 1) if header_idx is not None else 0
-
-                for row in table[data_start:]:
-                    if not row:
-                        continue
-                    row = [str(c or "").strip() for c in row]
-
-                    # First cell must be a row serial number
-                    if not _is_integer_str(row[0]):
+                for table in tables:
+                    if not table:
                         continue
 
-                    compound = row[col_compound] if col_compound < len(row) else ""
-                    if not compound or compound.lower() in ("", "nan"):
-                        continue
+                    # Locate header row within this table
+                    header_idx = None
+                    col_cas, col_compound, col_unit, col_lod, col_loq, col_result = 1, 2, 3, 4, 5, 6
+                    for ri, row in enumerate(table):
+                        row_str = " ".join(str(c or "").lower() for c in row)
+                        if ("compound" in row_str or "גבול" in row_str) and "cas" in row_str:
+                            header_idx = ri
+                            for ci, cell in enumerate(row):
+                                h = str(cell or "").lower()
+                                if "cas" in h:
+                                    col_cas = ci
+                                elif "compound" in h or "שם" in h:
+                                    col_compound = ci
+                                elif "יחידות" in h or "unit" in h:
+                                    col_unit = ci
+                                elif "גבול גילוי" in h or "detection" in h:
+                                    col_lod = ci
+                                elif "גבול כימות" in h or "loq" in h:
+                                    col_loq = ci
+                                elif "תוצאה" in h or "result" in h:
+                                    col_result = ci
+                            break
 
-                    cas = row[col_cas] if col_cas < len(row) else ""
-                    if cas.lower() in ("", "nan"):
-                        cas = ""
+                    data_start = (header_idx + 1) if header_idx is not None else 0
 
-                    unit = row[col_unit] if col_unit < len(row) else ""
-                    if unit.lower() in ("", "nan"):
-                        unit = ""
+                    for row in table[data_start:]:
+                        if not row:
+                            continue
+                        row = [str(c or "").strip() for c in row]
 
-                    analysis_type = _infer_analysis_type(unit, "SOIL_GAS_VOC")
+                        # First cell must be a row serial number
+                        if not _is_integer_str(row[0]):
+                            continue
 
-                    lod = _parse_float(row, col_lod)
-                    loq = _parse_float(row, col_loq)
+                        compound = row[col_compound] if col_compound < len(row) else ""
+                        if not compound or compound.lower() in ("", "nan"):
+                            continue
 
-                    raw_val = row[col_result] if col_result < len(row) else ""
-                    if raw_val.upper() in ("ND", "N.D.", "N/D", "NOT DETECTED", "", "NAN"):
-                        value, flag = lod, "ND"
-                    else:
-                        value, flag = self._vp.parse(raw_val)
+                        cas = row[col_cas] if col_cas < len(row) else ""
+                        if cas.lower() in ("", "nan"):
+                            cas = ""
 
-                    records.append({
-                        "lab":           self.LAB_NAME,
-                        "sample_id":     sample_id,
-                        "compound":      compound,
-                        "cas":           cas,
-                        "value":         value,
-                        "flag":          flag,
-                        "unit":          unit,
-                        "lod":           lod,
-                        "loq":           loq,
-                        "analysis_type": analysis_type,
-                        "sampling_date": sampling_date,
-                    })
+                        unit = row[col_unit] if col_unit < len(row) else ""
+                        if unit.lower() in ("", "nan"):
+                            unit = ""
+
+                        analysis_type = _infer_analysis_type(unit, page_default_atype)
+
+                        lod = _parse_float(row, col_lod)
+                        loq = _parse_float(row, col_loq)
+
+                        raw_val = row[col_result] if col_result < len(row) else ""
+                        if raw_val.upper() in ("ND", "N.D.", "N/D", "NOT DETECTED", "", "NAN"):
+                            value, flag = lod, "ND"
+                        else:
+                            value, flag = self._vp.parse(raw_val)
+
+                        records.append({
+                            "lab":           self.LAB_NAME,
+                            "sample_id":     sample_id,
+                            "compound":      compound,
+                            "cas":           cas,
+                            "value":         value,
+                            "flag":          flag,
+                            "unit":          unit,
+                            "lod":           lod,
+                            "loq":           loq,
+                            "analysis_type": analysis_type,
+                            "sampling_date": sampling_date,
+                        })
 
         return records
 
@@ -215,7 +217,7 @@ class MachonEnergyParser(BaseParser):
                 elif ("תוצאה" in hl or "result" in hl) and col_result == 6:
                     col_result = ci
 
-        default_atype = "SOIL_VOC" if sheet_key == "SVOC" else "SOIL_GAS_VOC"
+        default_atype = "SOIL_SVOC" if sheet_key == "SVOC" else "SOIL_GAS_VOC"
 
         records: list[dict] = []
         data_start = max(_DATA_START, header_row_idx + 1)
@@ -353,10 +355,11 @@ def _parse_float(vals: list, col: int) -> float | None:
 
 def _infer_analysis_type(unit: str, default: str) -> str:
     u = unit.lower()
-    if "kg" in u:
-        return "SOIL_VOC"
     if "/l" in u or "mg/l" in u:
         return "GW_VOC"
+    if "kg" in u:
+        # soil matrix — preserve VOC vs SVOC distinction from the calling context
+        return default if default in ("SOIL_VOC", "SOIL_SVOC") else "SOIL_VOC"
     return default
 
 
