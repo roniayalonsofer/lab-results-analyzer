@@ -161,12 +161,17 @@ class MachonEnergyParser(BaseParser):
     def _extract_sample_id(self, df: pd.DataFrame, filename: str) -> str:
         project = ""
         for i in range(min(_META_SCAN, len(df))):
-            col0 = str(df.iloc[i, 0]).strip()
-            if "פרויקט" in col0:
-                if ":" in col0:
-                    project = col0.split(":", 1)[1].strip()
-                if not project or project.lower() == "nan":
-                    project = _first_nonempty(df.iloc[i], start=1)
+            row_flat = " ".join(str(v).strip() for v in df.iloc[i].values)
+            if "פרויקט" in row_flat:
+                # Find the cell that contains the keyword and extract the value
+                for ci in range(len(df.iloc[i])):
+                    cell = str(df.iloc[i, ci]).strip()
+                    if "פרויקט" in cell:
+                        if ":" in cell:
+                            project = cell.split(":", 1)[1].strip()
+                        if not project or project.lower() == "nan":
+                            project = _first_nonempty(df.iloc[i], start=ci + 1)
+                        break
                 break
 
         fn_base = os.path.splitext(os.path.basename(filename))[0] if filename else ""
@@ -176,13 +181,16 @@ class MachonEnergyParser(BaseParser):
 
     def _extract_date(self, df: pd.DataFrame) -> str:
         for i in range(min(_META_SCAN, len(df))):
-            col0 = str(df.iloc[i, 0]).strip()
-            if "תאריך לקיחת המדגם" in col0:
-                if ":" in col0:
-                    part = col0.split(":", 1)[1].strip()
-                    if part and part.lower() not in ("", "nan"):
-                        return part
-                return _first_nonempty(df.iloc[i], start=1)
+            row_flat = " ".join(str(v).strip() for v in df.iloc[i].values)
+            if "תאריך לקיחת המדגם" in row_flat:
+                for ci in range(len(df.iloc[i])):
+                    cell = str(df.iloc[i, ci]).strip()
+                    if "תאריך לקיחת המדגם" in cell:
+                        if ":" in cell:
+                            part = cell.split(":", 1)[1].strip()
+                            if part and part.lower() not in ("", "nan"):
+                                return part
+                        return _first_nonempty(df.iloc[i], start=ci + 1)
         return ""
 
     def _find_header_row(self, df: pd.DataFrame) -> int:
@@ -248,8 +256,8 @@ def is_machon_energy_excel(file_bytes: bytes) -> bool:
     """Return True if the Excel file is a מכון האנרגיה report.
 
     Checks for a sheet named exactly 'VOC' or 'SVOC' (case-insensitive)
-    AND one of the first 35 rows having 'פרויקט' or 'תאריך לקיחת המדגם'
-    in column 0.
+    AND any cell in the first 35 rows containing 'פרויקט' or
+    'תאריך לקיחת המדגם' (scans all columns, not just column 0).
     """
     try:
         import io as _io
@@ -262,8 +270,8 @@ def is_machon_energy_excel(file_bytes: bytes) -> bool:
 
         df = xl.parse(target, header=None, dtype=str, nrows=_META_SCAN).fillna("")
         for i in range(len(df)):
-            col0 = str(df.iloc[i, 0]).strip()
-            if "פרויקט" in col0 or "תאריך לקיחת המדגם" in col0:
+            row_flat = " ".join(str(v).strip() for v in df.iloc[i].values)
+            if "פרויקט" in row_flat or "תאריך לקיחת המדגם" in row_flat:
                 return True
     except Exception:
         pass
