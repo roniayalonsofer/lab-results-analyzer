@@ -904,7 +904,9 @@ class LabReportExcel:
             for sid in samples:
                 v, flag, lod = pivot.get(cmp, {}).get(sid, (None, "ND", None))
                 if flag == "ND" or (v is None and flag not in ("<LOD", "<LOQ")):
-                    if cfg.get("nd_shows_loq") and loq_val is not None:
+                    if v is None:
+                        display = "ND"
+                    elif cfg.get("nd_shows_loq") and loq_val is not None:
                         display = _round_sf(loq_val)
                     else:
                         display = _round_sf(lod) if lod is not None else "ND"

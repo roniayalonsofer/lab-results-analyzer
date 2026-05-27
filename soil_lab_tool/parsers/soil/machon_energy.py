@@ -187,7 +187,7 @@ class MachonEnergyParser(BaseParser):
                             loq      = _parse_float(row, 5)
                             raw_val  = row[6]
                             if raw_val.upper() in ("ND", "N.D.", "N/D", "NOT DETECTED", "", "NAN"):
-                                value, flag = lod, "ND"
+                                value, flag = None, "ND"
                             else:
                                 value, flag = self._vp.parse(raw_val)
                             analysis_type = _infer_analysis_type(unit, page_default_atype)
