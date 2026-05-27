@@ -110,6 +110,39 @@ class MachonEnergyParser(BaseParser):
                     if not table:
                         continue
 
+                    # TPH table: ORO / DRO / TPH columns, sample_id per row
+                    tph_header_idx = _find_tph_header(table)
+                    if tph_header_idx is not None:
+                        for row in table[tph_header_idx + 1:]:
+                            if not row or len(row) < 5:
+                                continue
+                            row = [str(c or "").strip() for c in row]
+                            row_sample_id = row[4]
+                            if not row_sample_id or row_sample_id.lower() == "nan":
+                                continue
+                            if fn_base:
+                                row_sample_id = f"{row_sample_id} — {fn_base}"
+                            for compound, col_idx in (("TPH", 3), ("DRO", 2), ("ORO", 1)):
+                                raw_val = row[col_idx] if col_idx < len(row) else ""
+                                if raw_val.upper() in ("ND", "N.D.", "N/D", "NOT DETECTED", "", "NAN"):
+                                    value, flag = None, "ND"
+                                else:
+                                    value, flag = self._vp.parse(raw_val)
+                                records.append({
+                                    "lab":           self.LAB_NAME,
+                                    "sample_id":     row_sample_id,
+                                    "compound":      compound,
+                                    "cas":           compound,
+                                    "value":         value,
+                                    "flag":          flag,
+                                    "unit":          "mg/kg",
+                                    "lod":           None,
+                                    "loq":           None,
+                                    "analysis_type": "SOIL_TPH",
+                                    "sampling_date": sampling_date,
+                                })
+                        continue
+
                     # Locate header row within this table
                     header_idx = None
                     col_cas, col_compound, col_unit, col_lod, col_loq, col_result = 1, 2, 3, 4, 5, 6
@@ -353,6 +386,15 @@ def _parse_float(vals: list, col: int) -> float | None:
         return None
 
 
+def _find_tph_header(table: list) -> int | None:
+    """Return index of the TPH/DRO/ORO header row, or None if not a TPH table."""
+    for ri, row in enumerate(table[:5]):
+        row_str = " ".join(str(c or "") for c in row)
+        if "TPH" in row_str and "DRO" in row_str and "ORO" in row_str:
+            return ri
+    return None
+
+
 def _infer_analysis_type(unit: str, default: str) -> str:
     u = unit.lower()
     if "/l" in u or "mg/l" in u:
@@ -398,11 +440,13 @@ def is_machon_energy_pdf(file_bytes: bytes) -> bool:
         import io as _io
         import pdfplumber
         with pdfplumber.open(_io.BytesIO(file_bytes)) as pdf:
-            for page in pdf.pages[:2]:
+            for page in pdf.pages[:5]:
                 text = page.extract_text() or ""
                 if (("VOC Based on EPA" in text or "SVOC Based on EPA" in text)
                         and "Cas.No." in text
                         and "Compound" in text):
+                    return True
+                if "TPH" in text and "DRO" in text and "ORO" in text:
                     return True
     except Exception:
         pass
