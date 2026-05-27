@@ -8,13 +8,13 @@ import re as _re
 
 from parsers.base import BaseParser
 
-from parsers.soil_gas.alchem        import AlchemSoilGasParser
-from parsers.soil_gas.kte           import KTESoilGasParser
-from parsers.soil_gas.machon_energy import MachonEnergyParser, is_machon_energy_excel
+from parsers.soil_gas.alchem    import AlchemSoilGasParser
+from parsers.soil_gas.kte       import KTESoilGasParser
 from parsers.soil.alchem        import AlchemSoilParser
 from parsers.soil.kte           import KTESoilParser
 from parsers.soil.kte_pr        import KTEPRParser
 from parsers.soil.machon_haneft import MachonHaneftSoilParser
+from parsers.soil.machon_energy import MachonEnergyParser, is_machon_energy_excel
 from parsers.soil.als           import ALSSoilParser, ALSGrainSizeParser
 from parsers.soil.bactochem     import BactochemSoilParser
 from parsers.soil.xrf           import XRFSoilParser
