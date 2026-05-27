@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 
 import pandas as pd
 
@@ -33,6 +34,9 @@ _DATA_START  = 20  # 0-indexed
 _META_SCAN   = 35  # scan at most this many rows for metadata
 
 _PDF_MAGIC = b"%PDF"
+
+# Matches RTL-reversed borehole IDs: 'ק' next to digits (e.g. '13ק' or 'ק13')
+_TPH_SAMPLE_RE = re.compile(r'ק\d|\dק')
 
 
 class MachonEnergyParser(BaseParser):
@@ -117,17 +121,19 @@ class MachonEnergyParser(BaseParser):
                             if not row or len(row) < 5:
                                 continue
                             row = [str(c or "").strip() for c in row]
-                            row_sample_id = row[4]
-                            if not row_sample_id or row_sample_id.lower() == "nan":
+                            # BUG 5: skip non-data rows (units, LOQ header, etc.)
+                            if not _TPH_SAMPLE_RE.search(row[4]):
                                 continue
+                            # BUG 4: RTL reversal — split on ' - ', reverse parts, rejoin
+                            parts = row[4].split(" - ")
+                            row_sample_id = " - ".join(reversed(parts))
                             if fn_base:
                                 row_sample_id = f"{row_sample_id} — {fn_base}"
+                            # BUG 2: col 1=ORO, col 2=DRO, col 3=TPH, col 4=sample_id
                             for compound, col_idx in (("TPH", 3), ("DRO", 2), ("ORO", 1)):
                                 raw_val = row[col_idx] if col_idx < len(row) else ""
-                                if raw_val.upper() in ("ND", "N.D.", "N/D", "NOT DETECTED", "", "NAN"):
-                                    value, flag = None, "ND"
-                                else:
-                                    value, flag = self._vp.parse(raw_val)
+                                # BUG 3: parse directly so '<50' → (50.0, '<'), not (25.0, 'ND')
+                                value, flag = _parse_tph_value(raw_val)
                                 records.append({
                                     "lab":           self.LAB_NAME,
                                     "sample_id":     row_sample_id,
@@ -143,27 +149,14 @@ class MachonEnergyParser(BaseParser):
                                 })
                         continue
 
-                    # Locate header row within this table
+                    # Locate header row — column indices are fixed for this lab's PDF layout
+                    # BUG 1: do not update indices from RTL-reversed header text
                     header_idx = None
                     col_cas, col_compound, col_unit, col_lod, col_loq, col_result = 1, 2, 3, 4, 5, 6
                     for ri, row in enumerate(table):
                         row_str = " ".join(str(c or "").lower() for c in row)
                         if ("compound" in row_str or "גבול" in row_str) and "cas" in row_str:
                             header_idx = ri
-                            for ci, cell in enumerate(row):
-                                h = str(cell or "").lower()
-                                if "cas" in h:
-                                    col_cas = ci
-                                elif "compound" in h or "שם" in h:
-                                    col_compound = ci
-                                elif "יחידות" in h or "unit" in h:
-                                    col_unit = ci
-                                elif "גבול גילוי" in h or "detection" in h:
-                                    col_lod = ci
-                                elif "גבול כימות" in h or "loq" in h:
-                                    col_loq = ci
-                                elif "תוצאה" in h or "result" in h:
-                                    col_result = ci
                             break
 
                     data_start = (header_idx + 1) if header_idx is not None else 0
@@ -384,6 +377,27 @@ def _parse_float(vals: list, col: int) -> float | None:
         return float(str(vals[col]).strip().replace(",", ""))
     except (ValueError, TypeError):
         return None
+
+
+def _parse_tph_value(raw: str) -> tuple[float | None, str]:
+    """Parse a TPH/DRO/ORO cell value without half-limit substitution.
+
+    '<50' → (50.0, '<')   — keep the threshold, not LOD/2
+    'ND'  → (None, 'ND')
+    '123' → (123.0, '')
+    """
+    raw = raw.strip()
+    if not raw or raw.upper() in ("ND", "N.D.", "N/D", "NOT DETECTED", "NAN"):
+        return None, "ND"
+    if raw.startswith("<"):
+        try:
+            return float(raw[1:].strip().replace(",", "")), "<"
+        except (ValueError, TypeError):
+            return None, "ND"
+    try:
+        return float(raw.replace(",", "")), ""
+    except (ValueError, TypeError):
+        return None, ""
 
 
 def _find_tph_header(table: list) -> int | None:
