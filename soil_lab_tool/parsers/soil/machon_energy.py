@@ -1,20 +1,21 @@
 """
-parsers/soil_gas/machon_energy.py
-----------------------------------
+parsers/soil/machon_energy.py
+------------------------------
 Parser for המכון הישראלי לאנרגיה ולסביבה Excel reports.
 
 Expected format:
   Sheets named 'SVOC' or 'VOC'.
-  Rows 1–18 (1-indexed): metadata — project name, date, etc.
-  Row 19 (1-indexed, 0-indexed=18): header:
+  Rows 0–18 (0-indexed): metadata — project name, date, etc.
+  Row 19 (0-indexed): header row:
     Cas.No. | <blank> | Compound | יחידות | גבול גילוי | גבול כימות | תוצאה
-  Row 20+ (1-indexed, 0-indexed=19): data rows:
-    מספר | CAS | שם | יחידות | detection_limit | LOQ | result
+  Row 20+ (0-indexed): data rows:
+    מספר | CAS | compound_name | יחידות | detection_limit | LOQ | result
 
-  Sample ID: row where col 0 contains 'פרויקט:' — value after the colon,
-             combined with the filename (passed via optional kwarg).
+  Sample ID: row where col 0 contains 'פרויקט:' — value after the colon.
   Date:      row where col 0 contains 'תאריך לקיחת המדגם'.
   Result:    'ND' (not detected) or a numeric value.
+
+PDF input raises a clean ValueError — upload Excel (.xlsx) instead.
 """
 
 from __future__ import annotations
@@ -27,9 +28,11 @@ import pandas as pd
 from parsers.base import BaseParser
 from core.lab_value_parser import LabValueParser
 
-_HEADER_ROW = 18   # 0-indexed (Excel row 19)
-_DATA_START  = 19  # 0-indexed (Excel row 20)
+_HEADER_ROW = 19   # 0-indexed
+_DATA_START  = 20  # 0-indexed
 _META_SCAN   = 35  # scan at most this many rows for metadata
+
+_PDF_MAGIC = b"%PDF"
 
 
 class MachonEnergyParser(BaseParser):
@@ -41,7 +44,16 @@ class MachonEnergyParser(BaseParser):
 
     # ------------------------------------------------------------------
     def parse(self, file_obj: io.BytesIO, filename: str = "", **_kw) -> list[dict]:
-        xl  = pd.ExcelFile(file_obj)
+        # Reject PDFs early with a clean message
+        file_obj.seek(0)
+        magic = file_obj.read(4)
+        file_obj.seek(0)
+        if magic == _PDF_MAGIC:
+            raise ValueError(
+                "PDF format not supported for this lab — please upload an Excel file (.xlsx)"
+            )
+
+        xl   = pd.ExcelFile(file_obj)
         smap = {s.strip().upper(): s for s in xl.sheet_names}
 
         target_sheets: list[tuple[str, str]] = []
@@ -64,11 +76,9 @@ class MachonEnergyParser(BaseParser):
 
         sample_id     = self._extract_sample_id(raw, filename)
         sampling_date = self._extract_date(raw)
-
-        # Locate header row (fixed at row 18, but scan as fallback)
         header_row_idx = self._find_header_row(raw)
 
-        # Column positions — resolve from header text first, then fall back to defaults
+        # Column positions — fixed layout; refined from header text if possible
         col_cas      = 1
         col_compound = 2
         col_unit     = 3
@@ -93,7 +103,6 @@ class MachonEnergyParser(BaseParser):
                 elif ("תוצאה" in hl or "result" in hl) and col_result == 6:
                     col_result = ci
 
-        # Default analysis type — refined per row from the unit value
         default_atype = "SOIL_VOC" if sheet_key == "SVOC" else "SOIL_GAS_VOC"
 
         records: list[dict] = []
@@ -104,9 +113,8 @@ class MachonEnergyParser(BaseParser):
             if not vals:
                 continue
 
-            # Only process rows where col 0 is a digit (serial number)
-            col0 = str(vals[0]).strip()
-            if not col0.isdigit():
+            # Col 0 must be a row serial number (integer stored as int or float)
+            if not _is_integer_str(str(vals[0]).strip()):
                 continue
 
             compound = str(vals[col_compound]).strip() if col_compound < len(vals) else ""
@@ -155,7 +163,6 @@ class MachonEnergyParser(BaseParser):
         for i in range(min(_META_SCAN, len(df))):
             col0 = str(df.iloc[i, 0]).strip()
             if "פרויקט" in col0:
-                # Value may follow a colon in the same cell, or be in the next cell
                 if ":" in col0:
                     project = col0.split(":", 1)[1].strip()
                 if not project or project.lower() == "nan":
@@ -179,24 +186,33 @@ class MachonEnergyParser(BaseParser):
         return ""
 
     def _find_header_row(self, df: pd.DataFrame) -> int:
-        # Prefer fixed position; scan only when fixed row doesn't match
+        # Try fixed position first
         if _HEADER_ROW < len(df):
             row_str = " ".join(str(v).lower() for v in df.iloc[_HEADER_ROW].values)
             if "compound" in row_str or "cas" in row_str or "גבול" in row_str:
                 return _HEADER_ROW
 
-        # Scan up to row 30 for the header
+        # Scan up to row 30 as fallback
         for i in range(min(30, len(df))):
             row_str = " ".join(str(v).lower() for v in df.iloc[i].values)
             if ("compound" in row_str or "גבול" in row_str) and "cas" in row_str:
                 return i
 
-        return _HEADER_ROW  # fall back to fixed position
+        return _HEADER_ROW
 
 
 # ------------------------------------------------------------------
 # Module-level helpers
 # ------------------------------------------------------------------
+
+def _is_integer_str(s: str) -> bool:
+    """Return True for strings that represent a whole number (int or float like '1.0')."""
+    try:
+        f = float(s)
+        return f == int(f) and f >= 0
+    except (ValueError, TypeError):
+        return False
+
 
 def _first_nonempty(row, start: int = 1) -> str:
     for ci in range(start, len(row)):
@@ -221,25 +237,23 @@ def _infer_analysis_type(unit: str, default: str) -> str:
         return "SOIL_VOC"
     if "/l" in u or "mg/l" in u:
         return "GW_VOC"
-    # µg/m³ (soil gas) or empty unit → use the default derived from sheet name
     return default
 
 
 # ------------------------------------------------------------------
-# Detection helper (used by parsers/__init__.py auto-detection)
+# Detection helpers (used by parsers/__init__.py auto-detection)
 # ------------------------------------------------------------------
 
 def is_machon_energy_excel(file_bytes: bytes) -> bool:
-    """Return True if this Excel file is a מכון האנרגיה report.
+    """Return True if the Excel file is a מכון האנרגיה report.
 
-    Detection criteria:
-      1. At least one sheet named exactly 'VOC' or 'SVOC' (case-insensitive).
-      2. Any of the first 35 rows in that sheet has 'פרויקט' in column 0,
-         or 'תאריך לקיחת המדגם' in column 0.
+    Checks for a sheet named exactly 'VOC' or 'SVOC' (case-insensitive)
+    AND one of the first 35 rows having 'פרויקט' or 'תאריך לקיחת המדגם'
+    in column 0.
     """
     try:
         import io as _io
-        xl  = pd.ExcelFile(_io.BytesIO(file_bytes))
+        xl   = pd.ExcelFile(_io.BytesIO(file_bytes))
         smap = {s.strip().upper(): s for s in xl.sheet_names}
 
         target = next((smap[k] for k in ("VOC", "SVOC") if k in smap), None)
@@ -251,6 +265,21 @@ def is_machon_energy_excel(file_bytes: bytes) -> bool:
             col0 = str(df.iloc[i, 0]).strip()
             if "פרויקט" in col0 or "תאריך לקיחת המדגם" in col0:
                 return True
+    except Exception:
+        pass
+    return False
+
+
+def is_machon_energy_pdf(file_bytes: bytes) -> bool:
+    """Return True if the PDF text identifies it as a מכון האנרגיה report."""
+    try:
+        import io as _io
+        import pdfplumber
+        with pdfplumber.open(_io.BytesIO(file_bytes)) as pdf:
+            for page in pdf.pages[:3]:
+                text = page.extract_text() or ""
+                if "המכון הישראלי לאנרגיה" in text or "אנרגיה ולסביבה" in text:
+                    return True
     except Exception:
         pass
     return False

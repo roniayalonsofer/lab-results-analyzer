@@ -14,7 +14,7 @@ from parsers.soil.alchem        import AlchemSoilParser
 from parsers.soil.kte           import KTESoilParser
 from parsers.soil.kte_pr        import KTEPRParser
 from parsers.soil.machon_haneft import MachonHaneftSoilParser
-from parsers.soil.machon_energy import MachonEnergyParser, is_machon_energy_excel
+from parsers.soil.machon_energy import MachonEnergyParser, is_machon_energy_excel, is_machon_energy_pdf
 from parsers.soil.als           import ALSSoilParser, ALSGrainSizeParser
 from parsers.soil.bactochem     import BactochemSoilParser
 from parsers.soil.xrf           import XRFSoilParser
@@ -256,6 +256,8 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
     if file_bytes is not None and n.endswith(".pdf"):
         if _is_aminolab_pdf(file_bytes):
             return "aminolab"
+        if is_machon_energy_pdf(file_bytes):
+            return "מכון האנרגיה"
         try:
             import io as _io, pdfplumber as _plumber
             with _plumber.open(_io.BytesIO(file_bytes)) as _pdf:
