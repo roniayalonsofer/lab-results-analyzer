@@ -187,9 +187,11 @@ class MachonEnergyParser(BaseParser):
                             loq      = _parse_float(row, 5)
                             raw_val  = row[6]
                             if raw_val.upper() in ("ND", "N.D.", "N/D", "NOT DETECTED", "", "NAN"):
-                                value, flag = None, "ND"
+                                value, flag = loq, "<"
+                                result_raw = f"<{loq}" if loq is not None else "ND"
                             else:
                                 value, flag = self._vp.parse(raw_val)
+                                result_raw = raw_val
                             analysis_type = _infer_analysis_type(unit, page_default_atype)
                             records.append({
                                 "lab":           self.LAB_NAME,
@@ -203,6 +205,7 @@ class MachonEnergyParser(BaseParser):
                                 "loq":           loq,
                                 "analysis_type": analysis_type,
                                 "sampling_date": sampling_date,
+                                "result_raw":    result_raw,
                             })
 
         return records
@@ -275,9 +278,11 @@ class MachonEnergyParser(BaseParser):
             raw_val = str(vals[col_result]).strip() if col_result < len(vals) else ""
 
             if raw_val.upper() in ("ND", "N.D.", "N/D", "NOT DETECTED", "", "NAN"):
-                value, flag = None, "ND"
+                value, flag = loq, "<"
+                result_raw = f"<{loq}" if loq is not None else "ND"
             else:
                 value, flag = self._vp.parse(raw_val)
+                result_raw = raw_val
 
             records.append({
                 "lab":           self.LAB_NAME,
@@ -291,6 +296,7 @@ class MachonEnergyParser(BaseParser):
                 "loq":           loq,
                 "analysis_type": analysis_type,
                 "sampling_date": sampling_date,
+                "result_raw":    result_raw,
             })
 
         return records
