@@ -327,12 +327,11 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
         if _is_xrf_tabular(file_bytes, is_csv=True):
             return "אלכם"
 
-    # Alchem TPH PDF: detect encoded font markers in raw bytes before KTE fallback
-    if file_bytes is not None and n.endswith('.pdf'):
+    if file_bytes is not None and n.endswith(".pdf"):
         try:
-            _raw_pdf = file_bytes.decode('latin-1', errors='ignore')
-            if '3CFH' in _raw_pdf and 'E%;%' in _raw_pdf:
-                return 'alchem'
+            raw = file_bytes.decode("latin-1", errors="ignore")
+            if "3CFH" in raw and "E%;%" in raw and "CF;" in raw:
+                return "alchem"
         except Exception:
             pass
 

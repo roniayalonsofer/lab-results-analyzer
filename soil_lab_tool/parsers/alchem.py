@@ -31,6 +31,10 @@ class AlchemParser(BaseParser):
 
     # ------------------------------------------------------------------
     def parse(self, file_obj: io.BytesIO) -> list[dict]:
+        file_obj.seek(0)
+        if file_obj.read(4) == b"%PDF":
+            return self._parse_alchem_tph_pdf(file_obj)
+        file_obj.seek(0)
         xl = pd.ExcelFile(file_obj)
         sheet = xl.sheet_names[0]
         raw = xl.parse(sheet, header=None, dtype=str).fillna("")
@@ -149,6 +153,38 @@ class AlchemParser(BaseParser):
                     return i
         return None
 
+    def _parse_alchem_tph_pdf(self, file_obj: io.BytesIO, filename: str = "") -> list[dict]:
+        def decode(s: str) -> str:
+            return ''.join(chr(ord(c) + 9) if 0x20 <= ord(c) <= 0x76 else c for c in s)
+
+        import fitz  # pymupdf
+        file_obj.seek(0)
+        doc = fitz.open(stream=file_obj.read(), filetype="pdf")
+        loq = {"DRO": 30.0, "ORO": 20.0, "TPH": 50.0}
+        records: list[dict] = []
+        for page in doc:
+            for line in page.get_text().splitlines():
+                parts = decode(line).split()
+                if len(parts) == 4 and parts[0].startswith("p") and parts[0][1:2].isdigit():
+                    sample = parts[0]
+                    for compound, raw_val in zip(["DRO", "ORO", "TPH"], parts[1:]):
+                        if raw_val in ("N.D.", "ND", "<LOQ"):
+                            value, flag = loq[compound], "<"
+                        else:
+                            try:
+                                value, flag = float(raw_val.replace(",", "")), ""
+                            except Exception:
+                                continue
+                        records.append({
+                            "lab": self.LAB_NAME, "sample_id": sample,
+                            "compound": compound, "cas": compound,
+                            "value": value, "flag": flag,
+                            "unit": "mg/kg", "analysis_type": "SOIL_TPH",
+                            "sampling_date": "",
+                        })
+        doc.close()
+        return records
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Alchem TPH PDF parser (CID-font encoded, requires pymupdf / fitz)
@@ -211,12 +247,15 @@ def parse_alchem_tph_pdf(file_bytes: bytes) -> list[dict]:
     return records
 
 
-class AlchemTPHPDFParser(BaseParser):
-    """Wraps parse_alchem_tph_pdf as a BaseParser for use by the registry."""
+class AlchemTPHPDFParser(AlchemParser):
+    """Alchem TPH PDF parser; inherits _parse_alchem_tph_pdf from AlchemParser."""
 
     LAB_NAME = "Alchem Soil"
     ANALYSIS_TYPES = ["SOIL_TPH"]
 
     def parse(self, file_obj: io.BytesIO) -> list[dict]:
-        file_bytes = file_obj.read() if hasattr(file_obj, 'read') else file_obj
-        return parse_alchem_tph_pdf(file_bytes)
+        file_obj.seek(0)
+        if file_obj.read(4) == b"%PDF":
+            return self._parse_alchem_tph_pdf(file_obj)
+        file_obj.seek(0)
+        return super().parse(file_obj)
