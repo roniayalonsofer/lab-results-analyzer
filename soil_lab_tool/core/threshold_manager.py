@@ -426,6 +426,10 @@ class ThresholdManager:
         Like get_threshold but falls back to compound name lookup when CAS fails.
         The compound name column in the threshold file is 'chimical' (or similar).
         """
+        TPH_COMPOUNDS = {"tph", "dro", "oro"}
+        if compound_name and compound_name.strip().lower() in TPH_COMPOUNDS:
+            return 350.0, "TPH - DRO + ORO (Tier 1)"
+
         # TPH sub-fractions (DRO, ORO, TPH) share a single VSL entry keyed on C10-C40.
         name_lo = str(compound_name).strip().lower() if compound_name else ""
         cas_lo  = str(cas).strip().lower() if cas else ""
