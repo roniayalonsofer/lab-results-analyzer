@@ -467,3 +467,193 @@ class AlchemSoilParser(BaseParser):
             return float(val)
         except (ValueError, TypeError):
             return None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Alchem TPH PDF parser (CID-encoded fonts — requires pymupdf / fitz)
+# ──────────────────────────────────────────────────────────────────────────────
+
+class AlchemTPHPDFParser(BaseParser):
+    """Parser for Alchem TPH reports delivered as CID-font PDFs.
+
+    pdfplumber cannot read these files (CID encoding returns (cid:XX) garbage).
+    pymupdf (fitz) decodes the embedded font correctly.
+
+    Table layout (from the rendered PDF):
+      Header : Sample Name | DRO [mg/kg] | ORO [mg/kg] | TPH [mg/kg]
+      Data   : <sample_id> | <dro_val>   | <oro_val>   | <tph_val>
+      LOD row: LOD          | 7.00        | 7.00        | 15.00
+      LOQ row: LOQ          | 30.00       | 20.00       | 50.00
+
+    Values can be numeric, "N.D.", or "<LOQ".
+    """
+
+    LAB_NAME = "Alchem Soil"
+    ANALYSIS_TYPES = ["SOIL_TPH"]
+
+    # Map column header keywords → compound name
+    _PARAM_MAP = {
+        "dro": "DRO",
+        "oro": "ORO",
+        "tph": "TPH",
+    }
+
+    def parse(self, file_obj: io.BytesIO) -> list[dict]:
+        try:
+            import fitz  # pymupdf
+        except ImportError as exc:
+            raise ImportError(
+                "pymupdf is required for Alchem TPH PDF parsing: pip install pymupdf"
+            ) from exc
+
+        file_bytes = file_obj.read() if hasattr(file_obj, "read") else file_obj
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+
+        rows = self._extract_table_rows(doc)
+        doc.close()
+
+        if not rows:
+            raise ValueError("❌ לא נמצאו שורות טבלה ב-PDF של אלכם TPH.")
+
+        return self._build_records(rows)
+
+    # ------------------------------------------------------------------
+    def _extract_table_rows(self, doc) -> list[list[str]]:
+        """Extract table rows as lists of cell strings from all PDF pages."""
+        all_rows: list[list[str]] = []
+
+        for page in doc:
+            blocks = page.get_text("dict")["blocks"]
+            # Collect all text spans with their y-coordinates (top of bbox)
+            spans: list[tuple[float, float, str]] = []
+            for block in blocks:
+                if block.get("type") != 0:  # 0 = text block
+                    continue
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        text = span.get("text", "").strip()
+                        if not text:
+                            continue
+                        bbox = span.get("bbox", (0, 0, 0, 0))
+                        x0, y0 = bbox[0], bbox[1]
+                        spans.append((round(y0, 1), round(x0, 1), text))
+
+            if not spans:
+                continue
+
+            # Cluster spans into rows by y-coordinate (tolerance ±3 pt)
+            spans.sort()
+            rows_on_page: list[list[tuple[float, str]]] = []
+            current_y: float | None = None
+            current_row: list[tuple[float, str]] = []
+
+            for y, x, text in spans:
+                if current_y is None or abs(y - current_y) > 3:
+                    if current_row:
+                        rows_on_page.append(current_row)
+                    current_row = [(x, text)]
+                    current_y = y
+                else:
+                    current_row.append((x, text))
+            if current_row:
+                rows_on_page.append(current_row)
+
+            for row in rows_on_page:
+                # Sort spans left-to-right within each row
+                row.sort(key=lambda t: t[0])
+                cells = [text for _, text in row]
+                if cells:
+                    all_rows.append(cells)
+
+        return all_rows
+
+    # ------------------------------------------------------------------
+    def _build_records(self, rows: list[list[str]]) -> list[dict]:
+        """Identify header/LOD/LOQ rows and build measurement records."""
+        # --- Locate header row ---
+        header_idx = None
+        param_cols: list[tuple[int, str]] = []  # [(col_index, param_name)]
+
+        for ri, cells in enumerate(rows):
+            joined = " ".join(cells).lower()
+            if "dro" in joined and "oro" in joined and "tph" in joined:
+                header_idx = ri
+                # Map column positions → param names
+                for ci, cell in enumerate(cells):
+                    for kw, name in self._PARAM_MAP.items():
+                        if kw in cell.lower():
+                            param_cols.append((ci, name))
+                            break
+                break
+
+        if header_idx is None or not param_cols:
+            raise ValueError(
+                "❌ לא נמצאה שורת כותרת עם DRO/ORO/TPH ב-PDF של אלכם."
+            )
+
+        # --- Collect LOD / LOQ per param column ---
+        lod_values: dict[str, float | None] = {}
+        loq_values: dict[str, float | None] = {}
+
+        for ri, cells in enumerate(rows):
+            if ri <= header_idx:
+                continue
+            first = cells[0].strip().upper() if cells else ""
+            if first == "LOD":
+                for ci, name in param_cols:
+                    lod_values[name] = self._try_float(cells[ci]) if ci < len(cells) else None
+            elif first == "LOQ":
+                for ci, name in param_cols:
+                    loq_values[name] = self._try_float(cells[ci]) if ci < len(cells) else None
+
+        # --- Parse data rows ---
+        records: list[dict] = []
+        for ri, cells in enumerate(rows):
+            if ri <= header_idx:
+                continue
+            first = cells[0].strip().upper() if cells else ""
+            if first in ("LOD", "LOQ", "SAMPLE NAME", ""):
+                continue
+
+            sample_id = cells[0].strip()
+
+            for ci, name in param_cols:
+                raw_val = cells[ci].strip() if ci < len(cells) else ""
+
+                lod = lod_values.get(name)
+                loq = loq_values.get(name)
+
+                if raw_val.upper() in ("N.D.", "ND", "N/D", "NOT DETECTED", ""):
+                    value, flag = lod, "ND"
+                elif raw_val.upper() in ("<LOQ", "<MRL", "<RL"):
+                    value, flag = loq, "<LOQ"
+                else:
+                    try:
+                        value, flag = float(raw_val), None
+                    except ValueError:
+                        value, flag = None, raw_val
+
+                cas = "C10-C40" if name == "TPH" else ""
+
+                records.append({
+                    "lab":           self.LAB_NAME,
+                    "sample_id":     sample_id,
+                    "compound":      name,
+                    "cas":           cas,
+                    "value":         value,
+                    "flag":          flag,
+                    "unit":          "mg/kg",
+                    "lod":           lod,
+                    "loq":           loq,
+                    "analysis_type": "SOIL_TPH",
+                })
+
+        return records
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _try_float(val: str) -> float | None:
+        try:
+            return float(val.strip())
+        except (ValueError, AttributeError):
+            return None

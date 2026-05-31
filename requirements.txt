@@ -3,3 +3,4 @@ pandas
 streamlit
 python-docx
 pdfplumber
+pymupdf

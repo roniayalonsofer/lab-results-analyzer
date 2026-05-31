@@ -10,7 +10,7 @@ from parsers.base import BaseParser
 
 from parsers.soil_gas.alchem    import AlchemSoilGasParser
 from parsers.soil_gas.kte       import KTESoilGasParser
-from parsers.soil.alchem        import AlchemSoilParser
+from parsers.soil.alchem        import AlchemSoilParser, AlchemTPHPDFParser
 from parsers.soil.kte           import KTESoilParser
 from parsers.soil.kte_pr        import KTEPRParser
 from parsers.soil.machon_haneft import MachonHaneftSoilParser
@@ -33,6 +33,7 @@ _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
     ("machon energy", "soil_gas"):   MachonEnergyParser,
     ("machon energy", "soil"):       MachonEnergyParser,
     ("alchem",        "soil"):        AlchemSoilParser,
+    ("alchem",        "soil_tph_pdf"): AlchemTPHPDFParser,
     ("kte",           "soil"):        KTESoilParser,
     ("kte",           "groundwater"): KTEGroundwaterParser,
     ("kte",           "pfas"):        KTEPFASParser,
@@ -168,6 +169,33 @@ def _is_aminolab_pdf(file_bytes: bytes) -> bool:
     return False
 
 
+def _is_alchem_tph_pdf(file_bytes: bytes) -> bool:
+    """Return True if the PDF is an Alchem TPH report (CID-font, needs pymupdf).
+
+    Detects the lab by looking for "al-chem.com" or "אל-כם" in the raw text
+    extracted by pymupdf (pdfplumber cannot read this font encoding).
+    Falls back to checking for the table marker "DRO" + "ORO" + "TPH" in the
+    same document, which is unique enough to identify this report type even if
+    the domain string is on a different page.
+    """
+    try:
+        import fitz  # pymupdf
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        full_text = ""
+        for page in doc:
+            full_text += page.get_text()
+        doc.close()
+        t = full_text.lower()
+        if "al-chem.com" in t or "אל-כם" in t:
+            return True
+        # Secondary check: TPH table signature
+        if "dro" in t and "oro" in t and "tph" in t:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _xlsx_sheet_names(file_bytes: bytes) -> list[str]:
     """Return sheet names from Excel bytes. Tries pandas first, zipfile XML fallback."""
     import io as _io
@@ -258,6 +286,8 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
             return "aminolab"
         if is_machon_energy_pdf(file_bytes):
             return "מכון האנרגיה"
+        if _is_alchem_tph_pdf(file_bytes):
+            return "alchem"
         try:
             import io as _io, pdfplumber as _plumber
             with _plumber.open(_io.BytesIO(file_bytes)) as _pdf:
@@ -336,6 +366,8 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
     if file_bytes is not None and n.endswith(".pdf"):
         if _is_aminolab_pdf(file_bytes):
             return "groundwater"
+        if _is_alchem_tph_pdf(file_bytes):
+            return "soil_tph_pdf"
         try:
             import io as _io, pdfplumber as _plumber
             with _plumber.open(_io.BytesIO(file_bytes)) as _pdf:
