@@ -154,35 +154,74 @@ class AlchemParser(BaseParser):
         return None
 
     def _parse_alchem_tph_pdf(self, file_obj: io.BytesIO, filename: str = "") -> list[dict]:
+        import re as _re
+
         def decode(s: str) -> str:
             return ''.join(chr(ord(c) + 9) if 0x20 <= ord(c) <= 0x76 else c for c in s)
 
-        import fitz  # pymupdf
+        def is_sample_id(line: str) -> bool:
+            # Decoded sample-ID lines start with chr(0x0E) (the 'p' glyph CID)
+            # followed by the first digit of the sample number.
+            return len(line) >= 2 and ord(line[0]) == 0x0E and line[1].isdigit()
+
+        def sample_label(line: str) -> str:
+            # Build "p<num> - <depth>" from the decoded sample-ID line.
+            # chr(0x0E) → 'p'; keep digits and hyphens, replace everything else with space.
+            s = "p" + "".join(
+                c if (c.isdigit() or c == "-") else " "
+                for c in line[1:]
+            )
+            return _re.sub(r"\s+", " ", s).strip()
+
+        import fitz
         file_obj.seek(0)
         doc = fitz.open(stream=file_obj.read(), filetype="pdf")
-        loq = {"DRO": 30.0, "ORO": 20.0, "TPH": 50.0}
-        records: list[dict] = []
+
+        # Decode every line up-front so all later checks operate on readable text.
+        lines: list[str] = []
         for page in doc:
-            for line in page.get_text().splitlines():
-                parts = decode(line).split()
-                if len(parts) == 4 and parts[0].startswith("p") and parts[0][1:2].isdigit():
-                    sample = parts[0]
-                    for compound, raw_val in zip(["DRO", "ORO", "TPH"], parts[1:]):
-                        if raw_val in ("N.D.", "ND", "<LOQ"):
-                            value, flag = loq[compound], "<"
-                        else:
-                            try:
-                                value, flag = float(raw_val.replace(",", "")), ""
-                            except Exception:
-                                continue
-                        records.append({
-                            "lab": self.LAB_NAME, "sample_id": sample,
-                            "compound": compound, "cas": compound,
-                            "value": value, "flag": flag,
-                            "unit": "mg/kg", "analysis_type": "SOIL_TPH",
-                            "sampling_date": "",
-                        })
+            for raw in page.get_text().splitlines():
+                decoded = decode(raw.strip())
+                if decoded.strip():
+                    lines.append(decoded)
         doc.close()
+
+        # Read actual LOQ values from the LOQ row when present.
+        loq = {"DRO": 30.0, "ORO": 20.0, "TPH": 50.0}
+        for i, line in enumerate(lines):
+            if line == "LOQ" and i + 3 < len(lines):
+                try:
+                    loq["DRO"] = float(lines[i + 1].replace(",", ""))
+                    loq["ORO"] = float(lines[i + 2].replace(",", ""))
+                    loq["TPH"] = float(lines[i + 3].replace(",", ""))
+                except Exception:
+                    pass
+                break
+
+        # State machine: sample-ID line followed by exactly 3 value lines.
+        records: list[dict] = []
+        i = 0
+        while i < len(lines):
+            if is_sample_id(lines[i]) and i + 3 < len(lines):
+                sample = sample_label(lines[i])
+                for compound, val in zip(["DRO", "ORO", "TPH"], lines[i + 1: i + 4]):
+                    if val in ("N.D.", "ND", "<LOQ"):
+                        value, flag = loq[compound], "<"
+                    else:
+                        try:
+                            value, flag = float(val.replace(",", "")), ""
+                        except Exception:
+                            continue
+                    records.append({
+                        "lab": self.LAB_NAME, "sample_id": sample,
+                        "compound": compound, "cas": compound,
+                        "value": value, "flag": flag,
+                        "unit": "mg/kg", "analysis_type": "SOIL_TPH",
+                        "sampling_date": "",
+                    })
+                i += 4
+            else:
+                i += 1
         return records
 
 
