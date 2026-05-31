@@ -207,8 +207,10 @@ class AlchemParser(BaseParser):
                 if sample.startswith("p") and len(sample) > 1 and sample[1:2].isdigit():
                     sample = "ק" + sample[1:]
                 for compound, val in zip(["DRO", "ORO", "TPH"], lines[i + 1: i + 4]):
-                    if val in ("N.D.", "ND", "<LOQ"):
-                        value, flag = None, "<"
+                    if val in ("N.D.", "ND"):
+                        value, flag = None, "ND"
+                    elif val == "<LOQ":
+                        value, flag = loq[compound], "<"
                     else:
                         try:
                             value, flag = float(val.replace(",", "")), ""
