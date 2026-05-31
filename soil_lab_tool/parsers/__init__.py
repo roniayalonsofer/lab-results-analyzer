@@ -376,9 +376,9 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
         if _is_aminolab_pdf(file_bytes):
             return "groundwater"
         try:
-            _raw_pdf = file_bytes.decode('latin-1', errors='ignore')
-            if '3CFH' in _raw_pdf and 'E%;%' in _raw_pdf:
-                return 'soil_tph_pdf'
+            raw = file_bytes.decode("latin-1", errors="ignore")
+            if "3CFH" in raw and "E%;%" in raw and "CF;" in raw:
+                return "soil_tph_pdf"
         except Exception:
             pass
         if _is_alchem_tph_pdf(file_bytes):
