@@ -10,7 +10,8 @@ from parsers.base import BaseParser
 
 from parsers.soil_gas.alchem    import AlchemSoilGasParser
 from parsers.soil_gas.kte       import KTESoilGasParser
-from parsers.soil.alchem        import AlchemSoilParser, AlchemTPHPDFParser
+from parsers.soil.alchem        import AlchemSoilParser
+from parsers.alchem             import AlchemTPHPDFParser
 from parsers.soil.kte           import KTESoilParser
 from parsers.soil.kte_pr        import KTEPRParser
 from parsers.soil.machon_haneft import MachonHaneftSoilParser
@@ -326,6 +327,15 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
         if _is_xrf_tabular(file_bytes, is_csv=True):
             return "אלכם"
 
+    # Alchem TPH PDF: detect encoded font markers in raw bytes before KTE fallback
+    if file_bytes is not None and n.endswith('.pdf'):
+        try:
+            _raw_pdf = file_bytes.decode('latin-1', errors='ignore')
+            if '3CFH' in _raw_pdf and 'E%;%' in _raw_pdf:
+                return 'alchem'
+        except Exception:
+            pass
+
     # Filename fallback for KTE (after content checks)
     if any(k in n for k in ("kte", "excel_generic")):
         return "kte"
@@ -366,6 +376,12 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
     if file_bytes is not None and n.endswith(".pdf"):
         if _is_aminolab_pdf(file_bytes):
             return "groundwater"
+        try:
+            _raw_pdf = file_bytes.decode('latin-1', errors='ignore')
+            if '3CFH' in _raw_pdf and 'E%;%' in _raw_pdf:
+                return 'soil_tph_pdf'
+        except Exception:
+            pass
         if _is_alchem_tph_pdf(file_bytes):
             return "soil_tph_pdf"
         try:

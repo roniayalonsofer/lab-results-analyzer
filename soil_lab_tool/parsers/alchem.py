@@ -148,3 +148,75 @@ class AlchemParser(BaseParser):
                 if alias.lower() in h.lower():
                     return i
         return None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Alchem TPH PDF parser (CID-font encoded, requires pymupdf / fitz)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def decode_alchem(s: str) -> str:
+    """Shift each character in the PDF's custom CID encoding back to ASCII.
+
+    The font stores printable ASCII [0x20–0x76] shifted down by 9, so each
+    character must be shifted up by 9 to recover the original text.
+    Characters outside that range (Hebrew CIDs, control chars) are left as-is.
+    """
+    return ''.join(chr(ord(c) + 9) if 0x20 <= ord(c) <= 0x76 else c for c in s)
+
+
+def parse_alchem_tph_pdf(file_bytes: bytes) -> list[dict]:
+    """Extract DRO/ORO/TPH records from an Alchem TPH PDF.
+
+    The PDF uses a custom CID font encoding; decode_alchem() recovers the text.
+    After decoding, data rows start with 'p' + digit (e.g. 'p1 - 0-5') and
+    the last three tokens are the DRO, ORO, TPH values.
+    The final two rows contain LOD and LOQ per column.
+    """
+    import fitz  # pymupdf
+
+    doc = fitz.open(stream=file_bytes, filetype="pdf")
+    records: list[dict] = []
+    loq_dro, loq_oro, loq_tph = 30.0, 20.0, 50.0
+
+    for page in doc:
+        raw = page.get_text()
+        lines = [decode_alchem(l.strip()) for l in raw.splitlines() if l.strip()]
+        for line in lines:
+            parts = line.split()
+            if len(parts) >= 4 and parts[0].startswith('p') and parts[0][1:2].isdigit():
+                sample = ' '.join(parts[:-3])
+                dro_raw, oro_raw, tph_raw = parts[-3], parts[-2], parts[-1]
+                for compound, raw_val, loq in [
+                    ('DRO', dro_raw, loq_dro),
+                    ('ORO', oro_raw, loq_oro),
+                    ('TPH', tph_raw, loq_tph),
+                ]:
+                    if raw_val in ('N.D.', 'ND'):
+                        value, flag = loq, '<'
+                    elif raw_val == '<LOQ':
+                        value, flag = loq, '<'
+                    else:
+                        try:
+                            value, flag = float(raw_val.replace(',', '')), ''
+                        except Exception:
+                            continue
+                    records.append({
+                        'lab': 'אלכם', 'sample_id': sample,
+                        'compound': compound, 'cas': compound,
+                        'value': value, 'flag': flag,
+                        'unit': 'mg/kg', 'analysis_type': 'SOIL_TPH',
+                    })
+
+    doc.close()
+    return records
+
+
+class AlchemTPHPDFParser(BaseParser):
+    """Wraps parse_alchem_tph_pdf as a BaseParser for use by the registry."""
+
+    LAB_NAME = "Alchem Soil"
+    ANALYSIS_TYPES = ["SOIL_TPH"]
+
+    def parse(self, file_obj: io.BytesIO) -> list[dict]:
+        file_bytes = file_obj.read() if hasattr(file_obj, 'read') else file_obj
+        return parse_alchem_tph_pdf(file_bytes)
