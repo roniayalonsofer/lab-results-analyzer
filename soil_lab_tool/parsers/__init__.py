@@ -173,25 +173,16 @@ def _is_aminolab_pdf(file_bytes: bytes) -> bool:
 def _is_alchem_tph_pdf(file_bytes: bytes) -> bool:
     """Return True if the PDF is an Alchem TPH report (CID-font, needs pymupdf).
 
-    Detects the lab by looking for "al-chem.com" or "אל-כם" in the raw text
-    extracted by pymupdf (pdfplumber cannot read this font encoding).
-    Falls back to checking for the table marker "DRO" + "ORO" + "TPH" in the
-    same document, which is unique enough to identify this report type even if
-    the domain string is on a different page.
+    The font uses Identity-H encoding with a +9 CID shift, so readable text
+    like "DRO"/"N.D."/"<LOQ" appears as "3CFH"/"E%;%"/"CF;" in the text layer
+    extracted by fitz.  All three must be present.
     """
     try:
         import fitz  # pymupdf
         doc = fitz.open(stream=file_bytes, filetype="pdf")
-        full_text = ""
-        for page in doc:
-            full_text += page.get_text()
+        full_text = "".join(page.get_text() for page in doc)
         doc.close()
-        t = full_text.lower()
-        if "al-chem.com" in t or "אל-כם" in t:
-            return True
-        # Secondary check: TPH table signature
-        if "dro" in t and "oro" in t and "tph" in t:
-            return True
+        return "3CFH" in full_text and "E%;%" in full_text and "CF;" in full_text
     except Exception:
         pass
     return False
@@ -327,14 +318,6 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
         if _is_xrf_tabular(file_bytes, is_csv=True):
             return "אלכם"
 
-    if file_bytes is not None and n.endswith(".pdf"):
-        try:
-            raw = file_bytes.decode("latin-1", errors="ignore")
-            if "3CFH" in raw and "E%;%" in raw and "CF;" in raw:
-                return "alchem"
-        except Exception:
-            pass
-
     # Filename fallback for KTE (after content checks)
     if any(k in n for k in ("kte", "excel_generic")):
         return "kte"
@@ -375,12 +358,6 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
     if file_bytes is not None and n.endswith(".pdf"):
         if _is_aminolab_pdf(file_bytes):
             return "groundwater"
-        try:
-            raw = file_bytes.decode("latin-1", errors="ignore")
-            if "3CFH" in raw and "E%;%" in raw and "CF;" in raw:
-                return "soil_tph_pdf"
-        except Exception:
-            pass
         if _is_alchem_tph_pdf(file_bytes):
             return "soil_tph_pdf"
         try:
