@@ -222,6 +222,7 @@ class AlchemParser(BaseParser):
                         "value": value, "flag": flag,
                         "unit": "mg/kg", "analysis_type": "SOIL_TPH",
                         "sampling_date": "",
+                        "loq": loq[compound],
                     })
                 i += 4
             else:
