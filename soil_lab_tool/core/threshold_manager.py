@@ -417,12 +417,21 @@ class ThresholdManager:
             return self._lookup_rbtl(_rbtl_map[threshold_key], cas)
         return None
 
+    # Compound names/CAS values that all map to the VSL entry "TPH - DRO + ORO (Tier 1)"
+    _TPH_ALIASES: frozenset[str] = frozenset({"tph", "dro", "oro", "tph - dro + oro"})
+
     def get_threshold_with_name(self, cas: str, threshold_key: str,
                                 compound_name: str = "") -> float | None:
         """
         Like get_threshold but falls back to compound name lookup when CAS fails.
         The compound name column in the threshold file is 'chimical' (or similar).
         """
+        # TPH sub-fractions (DRO, ORO, TPH) share a single VSL entry keyed on C10-C40.
+        name_lo = str(compound_name).strip().lower() if compound_name else ""
+        cas_lo  = str(cas).strip().lower() if cas else ""
+        if name_lo in self._TPH_ALIASES or cas_lo in self._TPH_ALIASES:
+            cas = "C10-C40"
+
         val = self.get_threshold(cas, threshold_key)
         if val is not None or not compound_name:
             return val
