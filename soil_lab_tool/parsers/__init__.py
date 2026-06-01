@@ -278,6 +278,17 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
             return "aminolab"
         if is_machon_energy_pdf(file_bytes):
             return "מכון האנרגיה"
+        try:
+            import pdfplumber, io as _io
+            with pdfplumber.open(_io.BytesIO(file_bytes)) as _pdf:
+                _text = (_pdf.pages[0].extract_text() or "") + \
+                        (_pdf.pages[1].extract_text() if len(_pdf.pages) > 1 else "")
+                if ("al-chem.com" in _text.lower() or
+                        'םכ-לא' in _text or
+                        'al-chem' in _text.lower()):
+                    return "alchem"
+        except Exception:
+            pass
         if _is_alchem_tph_pdf(file_bytes):
             return "alchem"
         try:

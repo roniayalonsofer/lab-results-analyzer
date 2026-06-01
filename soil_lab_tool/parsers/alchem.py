@@ -156,6 +156,14 @@ class AlchemParser(BaseParser):
     def _parse_alchem_tph_pdf(self, file_obj: io.BytesIO, filename: str = "") -> list[dict]:
         import re as _re
 
+        file_obj.seek(0)
+        raw_bytes = file_obj.read()
+
+        # Readable format: 3CFH marker absent from raw bytes → use pdfplumber
+        if b"3CFH" not in raw_bytes:
+            return self._parse_alchem_readable_pdf(raw_bytes)
+
+        # Encoded (CID-font) format: use fitz
         def decode(s: str) -> str:
             return ''.join(chr(ord(c) + 9) if 0x20 <= ord(c) <= 0x76 else c for c in s)
 
@@ -174,8 +182,7 @@ class AlchemParser(BaseParser):
             return _re.sub(r"\s+", " ", s).strip()
 
         import fitz
-        file_obj.seek(0)
-        doc = fitz.open(stream=file_obj.read(), filetype="pdf")
+        doc = fitz.open(stream=raw_bytes, filetype="pdf")
 
         # Decode every line up-front so all later checks operate on readable text.
         lines: list[str] = []
@@ -228,6 +235,147 @@ class AlchemParser(BaseParser):
             else:
                 i += 1
         return records
+
+    def _parse_alchem_readable_pdf(self, raw_bytes: bytes) -> list[dict]:
+        """Parse a readable (non-CID-encoded) Alchem PDF using pdfplumber."""
+        import pdfplumber, io as _io
+
+        records: list[dict] = []
+        with pdfplumber.open(_io.BytesIO(raw_bytes)) as pdf:
+            for page in pdf.pages:
+                tables = page.extract_tables()
+                if not tables:
+                    continue
+                page_text = (page.extract_text() or "").lower()
+                for table in tables:
+                    if not table or len(table) < 2:
+                        continue
+                    headers_lower = [str(h or "").strip().lower() for h in table[0]]
+                    if any("dro" in h for h in headers_lower) and any("tph" in h for h in headers_lower):
+                        records.extend(self._parse_readable_tph_table(table))
+                    elif any("cas" in h for h in headers_lower) and any("final conc" in h for h in headers_lower):
+                        analysis_type = "SOIL_SVOC" if "svoc" in page_text else "SOIL_VOC"
+                        records.extend(self._parse_readable_voc_table(table, analysis_type))
+        return records
+
+    def _parse_readable_tph_table(self, table: list) -> list[dict]:
+        """Parse: Sample Name | DRO [mg/kg] | ORO [mg/kg] | TPH [mg/kg]"""
+        headers_lower = [str(h or "").strip().lower() for h in table[0]]
+        col_sample = next((i for i, h in enumerate(headers_lower) if "sample" in h or "name" in h), 0)
+        col_dro = next((i for i, h in enumerate(headers_lower) if "dro" in h), None)
+        col_oro = next((i for i, h in enumerate(headers_lower) if "oro" in h), None)
+        col_tph = next((i for i, h in enumerate(headers_lower) if "tph" in h), None)
+
+        records = []
+        for row in table[1:]:
+            if not row or not any(row):
+                continue
+            sample = str(row[col_sample] or "").strip() if col_sample < len(row) else ""
+            if not sample or sample.lower() in ("nan", "sample name", "name", ""):
+                continue
+            for compound, col_idx in [("DRO", col_dro), ("ORO", col_oro), ("TPH", col_tph)]:
+                if col_idx is None or col_idx >= len(row):
+                    continue
+                value, flag = self._parse_readable_value(str(row[col_idx] or "").strip())
+                records.append({
+                    "lab": self.LAB_NAME, "sample_id": sample,
+                    "compound": compound, "cas": compound,
+                    "value": value, "flag": flag,
+                    "unit": "mg/kg", "analysis_type": "SOIL_TPH",
+                    "sampling_date": "",
+                })
+        return records
+
+    def _parse_readable_voc_table(self, table: list, analysis_type: str = "SOIL_VOC") -> list[dict]:
+        """Parse: Sample Name | CAS | Final Conc. [mg/kg] x N | LOD | LOQ"""
+        headers = [str(h or "").strip() for h in table[0]]
+        headers_lower = [h.lower() for h in headers]
+
+        col_compound = next(
+            (i for i, h in enumerate(headers_lower)
+             if "sample name" in h or "compound" in h or (i == 0 and "name" in h)),
+            0,
+        )
+        col_cas = next((i for i, h in enumerate(headers_lower) if "cas" in h), None)
+        col_lod = next((i for i, h in enumerate(headers_lower) if h.strip() == "lod"), None)
+        col_loq = next((i for i, h in enumerate(headers_lower) if h.strip() == "loq"), None)
+        conc_col_indices = [i for i, h in enumerate(headers_lower) if "final conc" in h]
+
+        if not conc_col_indices:
+            return []
+
+        # Row 1 may carry sample IDs when the compound cell is blank
+        data_start = 1
+        sample_ids = [f"Sample-{j+1}" for j in range(len(conc_col_indices))]
+        if len(table) > 1:
+            row1 = table[1]
+            compound_val = str(row1[col_compound] or "").strip() if col_compound < len(row1) else ""
+            if not compound_val or compound_val.lower() in ("nan", ""):
+                sample_ids = [
+                    (str(row1[i] or "").strip() if i < len(row1) else "") or f"Sample-{j+1}"
+                    for j, i in enumerate(conc_col_indices)
+                ]
+                data_start = 2
+
+        records = []
+        for row in table[data_start:]:
+            if not row or not any(row):
+                continue
+            compound = str(row[col_compound] or "").strip() if col_compound < len(row) else ""
+            if not compound or compound.lower() in ("nan", ""):
+                continue
+            cas = ""
+            if col_cas is not None and col_cas < len(row):
+                cas = str(row[col_cas] or "").strip()
+                if cas.lower() == "nan":
+                    cas = ""
+            lod = None
+            if col_lod is not None and col_lod < len(row):
+                try:
+                    lod = float(str(row[col_lod] or "").replace(",", ""))
+                except (ValueError, TypeError):
+                    pass
+            loq = None
+            if col_loq is not None and col_loq < len(row):
+                try:
+                    loq = float(str(row[col_loq] or "").replace(",", ""))
+                except (ValueError, TypeError):
+                    pass
+            for j, col_idx in enumerate(conc_col_indices):
+                if col_idx >= len(row):
+                    continue
+                raw_val = str(row[col_idx] or "").strip()
+                if not raw_val or raw_val.lower() == "nan":
+                    continue
+                value, flag = self._parse_readable_value(raw_val, lod=lod, loq=loq)
+                records.append({
+                    "lab": self.LAB_NAME,
+                    "sample_id": sample_ids[j] if j < len(sample_ids) else f"Sample-{j+1}",
+                    "compound": compound, "cas": cas,
+                    "value": value, "flag": flag,
+                    "unit": "mg/kg", "analysis_type": analysis_type,
+                    "sampling_date": "", "lod": lod, "loq": loq,
+                })
+        return records
+
+    @staticmethod
+    def _parse_readable_value(
+        raw_val: str,
+        lod: float | None = None,
+        loq: float | None = None,
+    ) -> tuple:
+        v = raw_val.strip()
+        upper = v.upper()
+        if upper in ("N.D.", "ND", "N/D", "NOT DETECTED", ""):
+            return lod, "ND"
+        if upper in ("<LOQ", "< LOQ"):
+            return loq, "<"
+        if upper in ("<MDL", "< MDL"):
+            return lod, "<"
+        try:
+            return float(v.replace(",", "")), ""
+        except (ValueError, TypeError):
+            return None, ""
 
 
 # ──────────────────────────────────────────────────────────────────────────────
