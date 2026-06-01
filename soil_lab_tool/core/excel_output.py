@@ -199,6 +199,17 @@ def _borehole_sort_key(bh: str) -> tuple:
     return (priority, num, bh_n)
 
 
+def _tph_sort_key(sid_depth):
+    """Numeric sort key for TPH sample IDs (strings or (sid, depth) tuples).
+
+    Extracts the first integer from the sample name for numeric ordering.
+    """
+    sid = sid_depth[0] if isinstance(sid_depth, tuple) else sid_depth
+    nums = re.findall(r'\d+', str(sid))
+    depth_part = sid_depth[1] if isinstance(sid_depth, tuple) else ""
+    return (int(nums[0]) if nums else 999, depth_part)
+
+
 def _dup_rich_text(bh: str):
     """
     Return CellRichText for borehole names containing 'DUP':
@@ -494,6 +505,8 @@ class LabReportExcel:
             return f"{sid} {d}" if d else sid
 
         samples   = _ordered_unique(_sid(r) for r in records)
+        if cfg.get("analysis_type") == "SOIL_TPH" or all(r.get("analysis_type") == "SOIL_TPH" for r in records):
+            samples = sorted(samples, key=_tph_sort_key)
         compounds = _ordered_unique(r["compound"]  for r in records)
 
         # Pivot: compound → sample_id → (value, flag, lod)
