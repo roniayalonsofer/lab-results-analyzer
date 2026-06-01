@@ -484,7 +484,16 @@ class LabReportExcel:
     # Sheet writers
     # ------------------------------------------------------------------
     def _write_data_sheet(self, ws, records, cfg, thresh_keys):
-        samples   = _ordered_unique(r["sample_id"] for r in records)
+        # When a record carries an explicit "depth" field (e.g. from readable
+        # Alchem PDFs), embed it into the sample key as "name depth" so that
+        # different depths of the same borehole become distinct columns.
+        # _split_sample_depth already handles "name depth" space-separated format.
+        def _sid(r):
+            sid = r["sample_id"]
+            d   = r.get("depth", "")
+            return f"{sid} {d}" if d else sid
+
+        samples   = _ordered_unique(_sid(r) for r in records)
         compounds = _ordered_unique(r["compound"]  for r in records)
 
         # Pivot: compound → sample_id → (value, flag, lod)
@@ -504,7 +513,7 @@ class LabReportExcel:
 
         for r in records:
             cmp = r["compound"]
-            sid = r["sample_id"]
+            sid = _sid(r)
             if cmp not in pivot:
                 pivot[cmp]    = {}
                 cas_map[cmp]  = r.get("cas", "")
@@ -538,7 +547,7 @@ class LabReportExcel:
         # Per-sample metadata (soil gas: canister, sampling date, PID reading)
         sample_meta: dict[str, dict] = {}
         for r in records:
-            sid = r["sample_id"]
+            sid = _sid(r)
             if sid not in sample_meta:
                 sample_meta[sid] = {
                     "canister": r.get("canister_num", ""),
@@ -546,12 +555,9 @@ class LabReportExcel:
                     "pid":      r.get("pid_reading", ""),
                 }
 
-        # Explicit depth map from records that already have depth split off
+        # depth_map not needed when depth is embedded in the composite key,
+        # but kept as a fallback for any callers that rely on it.
         depth_map: dict[str, str] = {}
-        for r in records:
-            sid = r["sample_id"]
-            if r.get("depth") and sid not in depth_map:
-                depth_map[sid] = str(r["depth"])
 
         # Decide orientation: portrait when n_compounds >= n_samples
         portrait = len(compounds) >= len(samples)
