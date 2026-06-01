@@ -273,31 +273,57 @@ class AlchemParser(BaseParser):
         return records
 
     def _parse_readable_tph_table(self, table: list) -> list[dict]:
-        """Parse: Sample Name | DRO [mg/kg] | ORO [mg/kg] | TPH [mg/kg]"""
-        headers_lower = [str(h or "").strip().lower() for h in table[0]]
-        col_sample = next((i for i, h in enumerate(headers_lower) if "sample" in h or "name" in h), 0)
-        col_dro = next((i for i, h in enumerate(headers_lower) if "dro" in h), None)
-        col_oro = next((i for i, h in enumerate(headers_lower) if "oro" in h), None)
-        col_tph = next((i for i, h in enumerate(headers_lower) if "tph" in h), None)
+        """Parse TPH table as extracted by pdfplumber.
 
+        Actual structure:
+          Row 0: ['', 'dro', 'oro', 'tph']
+          Row 1: ['Sample Name', None, ...]   ← skipped
+          Row 2: ['[mg/kg]', ...]             ← skipped
+          Row 3+: ['K-10-3.0', '88.75', ...]  ← data
+          Near end: ['LOD', ...] / ['LOQ', ...] ← read, then skipped
+        """
+        if not table or len(table) < 2:
+            return []
+
+        headers_lower = [str(h or "").strip().lower() for h in table[0]]
+        col_dro = next((i for i, h in enumerate(headers_lower) if "dro" in h), 1)
+        col_oro = next((i for i, h in enumerate(headers_lower) if "oro" in h), 2)
+        col_tph = next((i for i, h in enumerate(headers_lower) if "tph" in h), 3)
+
+        # Read per-compound LOQ values from the LOQ row for <LOQ/<MDL resolution
+        loq_vals = {"DRO": None, "ORO": None, "TPH": None}
+        for row in table:
+            if row and str(row[0] or "").strip().upper() == "LOQ":
+                for compound, col_idx in [("DRO", col_dro), ("ORO", col_oro), ("TPH", col_tph)]:
+                    try:
+                        loq_vals[compound] = float(str(row[col_idx] or "").replace(",", ""))
+                    except (ValueError, TypeError):
+                        pass
+                break
+
+        _SKIP = {"", "nan", "sample name", "name", "[mg/kg]", "lod", "loq", "unit", "units"}
         records = []
         for row in table[1:]:
-            if not row or not any(row):
+            if not row:
                 continue
-            raw_sample = str(row[col_sample] or "").strip() if col_sample < len(row) else ""
-            if not raw_sample or raw_sample.lower() in ("nan", "sample name", "name", ""):
+            raw_sample = str(row[0] or "").strip()
+            if raw_sample.lower() in _SKIP:
                 continue
             sample_id, depth = self._normalize_sample(raw_sample)
             for compound, col_idx in [("DRO", col_dro), ("ORO", col_oro), ("TPH", col_tph)]:
-                if col_idx is None or col_idx >= len(row):
+                if col_idx >= len(row):
                     continue
-                value, flag = self._parse_readable_value(str(row[col_idx] or "").strip())
+                raw_val = str(row[col_idx] or "").strip()
+                if not raw_val or raw_val.lower() == "nan":
+                    continue
+                loq = loq_vals[compound]
+                value, flag = self._parse_readable_value(raw_val, loq=loq)
                 rec = {
                     "lab": self.LAB_NAME, "sample_id": sample_id,
                     "compound": compound, "cas": compound,
                     "value": value, "flag": flag,
                     "unit": "mg/kg", "analysis_type": "SOIL_TPH",
-                    "sampling_date": "",
+                    "sampling_date": "", "loq": loq,
                 }
                 if depth:
                     rec["depth"] = depth
@@ -305,65 +331,71 @@ class AlchemParser(BaseParser):
         return records
 
     def _parse_readable_voc_table(self, table: list, analysis_type: str = "SOIL_VOC") -> list[dict]:
-        """Parse: Sample Name | CAS | Final Conc. [mg/kg] x N | LOD | LOQ"""
-        headers = [str(h or "").strip() for h in table[0]]
-        headers_lower = [h.lower() for h in headers]
+        """Parse VOC/SVOC table as extracted by pdfplumber.
 
-        col_compound = next(
-            (i for i, h in enumerate(headers_lower)
-             if "sample name" in h or "compound" in h or (i == 0 and "name" in h)),
-            0,
-        )
-        col_cas = next((i for i, h in enumerate(headers_lower) if "cas" in h), None)
-        col_lod = next((i for i, h in enumerate(headers_lower) if h.strip() == "lod"), None)
-        col_loq = next((i for i, h in enumerate(headers_lower) if h.strip() == "loq"), None)
-        conc_col_indices = [i for i, h in enumerate(headers_lower) if "final conc" in h]
+        Actual structure:
+          Row 0: ['sample name:', '', 'ק10-3.0', 'ק10-8.0', ..., 'LOD', 'LOQ']
+          Row 1: ['compound name', 'cas', 'Final Conc.', ..., 'LOD', 'LOQ'] ← skipped
+          Row 2: ['', '', '[mg/kg]', ...]                                    ← skipped
+          Row 3+: ['Benzene', '71-43-2', '<MDL', ..., '0.01', '0.02']       ← data
 
-        if not conc_col_indices:
+        Sample names  = header row cols 2..-2 (non-empty only)
+        Per-row LOD   = col -2 of each data row
+        Per-row LOQ   = col -1 of each data row
+        """
+        if not table or len(table) < 4:
             return []
 
-        # Row 1 may carry sample IDs when the compound cell is blank
-        data_start = 1
-        sample_ids = [f"Sample-{j+1}" for j in range(len(conc_col_indices))]
-        sample_depths: list[str] = [""] * len(conc_col_indices)
-        if len(table) > 1:
-            row1 = table[1]
-            compound_val = str(row1[col_compound] or "").strip() if col_compound < len(row1) else ""
-            if not compound_val or compound_val.lower() in ("nan", ""):
-                raw_ids = [
-                    (str(row1[i] or "").strip() if i < len(row1) else "") or f"Sample-{j+1}"
-                    for j, i in enumerate(conc_col_indices)
-                ]
-                normalized = [self._normalize_sample(r) for r in raw_ids]
-                sample_ids   = [sid for sid, _ in normalized]
-                sample_depths = [dep for _, dep in normalized]
-                data_start = 2
+        header_row = table[0]
+        n_cols = len(header_row)
+        if n_cols < 4:
+            return []
 
+        # Sample names from header row cols [2 .. n-2), skip blanks
+        sample_cols: list[tuple[int, str, str]] = []  # (col_idx, sample_id, depth)
+        for i in range(2, n_cols - 2):
+            name = str(header_row[i] or "").strip()
+            if name and name.lower() not in ("nan", "", "lod", "loq"):
+                sid, dep = self._normalize_sample(name)
+                sample_cols.append((i, sid, dep))
+
+        if not sample_cols:
+            return []
+
+        col_lod_data = n_cols - 2
+        col_loq_data = n_cols - 1
+
+        _SKIP_COMPOUND = {
+            "", "nan", "compound name", "compound", "sample name",
+            "[mg/kg]", "lod", "loq", "final conc.", "final conc",
+        }
         records = []
-        for row in table[data_start:]:
-            if not row or not any(row):
+        for row in table[1:]:
+            if not row:
                 continue
-            compound = str(row[col_compound] or "").strip() if col_compound < len(row) else ""
-            if not compound or compound.lower() in ("nan", ""):
+            compound = str(row[0] or "").strip()
+            if compound.lower() in _SKIP_COMPOUND:
                 continue
-            cas = ""
-            if col_cas is not None and col_cas < len(row):
-                cas = str(row[col_cas] or "").strip()
-                if cas.lower() == "nan":
-                    cas = ""
+
+            cas = str(row[1] or "").strip() if len(row) > 1 else ""
+            if cas.lower() == "nan":
+                cas = ""
+
             lod = None
-            if col_lod is not None and col_lod < len(row):
+            if col_lod_data < len(row):
                 try:
-                    lod = float(str(row[col_lod] or "").replace(",", ""))
+                    lod = float(str(row[col_lod_data] or "").replace(",", ""))
                 except (ValueError, TypeError):
                     pass
+
             loq = None
-            if col_loq is not None and col_loq < len(row):
+            if col_loq_data < len(row):
                 try:
-                    loq = float(str(row[col_loq] or "").replace(",", ""))
+                    loq = float(str(row[col_loq_data] or "").replace(",", ""))
                 except (ValueError, TypeError):
                     pass
-            for j, col_idx in enumerate(conc_col_indices):
+
+            for col_idx, sample_id, depth in sample_cols:
                 if col_idx >= len(row):
                     continue
                 raw_val = str(row[col_idx] or "").strip()
@@ -371,15 +403,14 @@ class AlchemParser(BaseParser):
                     continue
                 value, flag = self._parse_readable_value(raw_val, lod=lod, loq=loq)
                 rec = {
-                    "lab": self.LAB_NAME,
-                    "sample_id": sample_ids[j] if j < len(sample_ids) else f"Sample-{j+1}",
+                    "lab": self.LAB_NAME, "sample_id": sample_id,
                     "compound": compound, "cas": cas,
                     "value": value, "flag": flag,
                     "unit": "mg/kg", "analysis_type": analysis_type,
                     "sampling_date": "", "lod": lod, "loq": loq,
                 }
-                if j < len(sample_depths) and sample_depths[j]:
-                    rec["depth"] = sample_depths[j]
+                if depth:
+                    rec["depth"] = depth
                 records.append(rec)
         return records
 
