@@ -546,6 +546,13 @@ class LabReportExcel:
                     "pid":      r.get("pid_reading", ""),
                 }
 
+        # Explicit depth map from records that already have depth split off
+        depth_map: dict[str, str] = {}
+        for r in records:
+            sid = r["sample_id"]
+            if r.get("depth") and sid not in depth_map:
+                depth_map[sid] = str(r["depth"])
+
         # Decide orientation: portrait when n_compounds >= n_samples
         portrait = len(compounds) >= len(samples)
 
@@ -560,12 +567,14 @@ class LabReportExcel:
             self._write_portrait(ws, compounds, samples, pivot, cas_map,
                                  lod_map, loq_map,
                                  thresh_keys, thresh_vals, header_info, cfg,
-                                 sample_meta=sample_meta, unit_map=unit_map)
+                                 sample_meta=sample_meta, unit_map=unit_map,
+                                 depth_map=depth_map)
         else:
             self._write_landscape(ws, compounds, samples, pivot, cas_map,
                                   lod_map, loq_map,
                                   thresh_keys, thresh_vals, header_info, cfg,
-                                  sample_meta=sample_meta, unit_map=unit_map)
+                                  sample_meta=sample_meta, unit_map=unit_map,
+                                  depth_map=depth_map)
 
     def _write_lowflow_sheet(self, ws, records, cfg):
         """LOWFLOW/pH: field parameters as rows, samples as columns, no thresholds.
@@ -721,7 +730,7 @@ class LabReportExcel:
     def _write_portrait(self, ws, compounds, samples, pivot, cas_map,
                         lod_map, loq_map,
                         thresh_keys, thresh_vals, hinfo, cfg=None, sample_meta=None,
-                        unit_map=None):
+                        unit_map=None, depth_map=None):
         cfg         = cfg or {}
         sample_meta = sample_meta or {}
         unit            = hinfo["unit"]
@@ -800,6 +809,9 @@ class LabReportExcel:
             # ── Rows 2-N: sample metadata ──────────────────────────────
             # Sort samples: ק first, נ second, others; within group by number then depth
             split_p = {sid: _split_sample_depth(sid) for sid in samples}
+            if depth_map:
+                split_p = {sid: (split_p[sid][0], depth_map.get(sid, split_p[sid][1]))
+                           for sid in samples}
             samples = sorted(samples,
                              key=lambda sid: (*_borehole_sort_key(split_p[sid][0]),
                                               float(split_p[sid][1]) if split_p[sid][1] else 0.0))
@@ -1012,7 +1024,7 @@ class LabReportExcel:
     def _write_landscape(self, ws, compounds, samples, pivot, cas_map,
                          lod_map, loq_map,
                          thresh_keys, thresh_vals, hinfo, cfg=None, sample_meta=None,
-                         unit_map=None):
+                         unit_map=None, depth_map=None):
         cfg      = cfg or {}
         unit_map = unit_map or {}
 
@@ -1020,6 +1032,9 @@ class LabReportExcel:
         # Split each sample_id into (borehole, depth_str) for display.
         # If ANY sample has a depth suffix (e.g. "ב-1 3.0") we add a depth column.
         split_map = {sid: _split_sample_depth(sid) for sid in samples}
+        if depth_map:
+            split_map = {sid: (split_map[sid][0], depth_map.get(sid, split_map[sid][1]))
+                         for sid in samples}
         has_depth = any(depth for _, depth in split_map.values())
 
         if has_depth:

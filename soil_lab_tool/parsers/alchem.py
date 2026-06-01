@@ -299,6 +299,10 @@ class AlchemParser(BaseParser):
             compound = str(row[0] or "").strip().replace("\n", " ")
             if not compound or compound.lower() in ("compound name", "", "[mg/kg]", "lod", "loq", "sample name", "cas"): continue
             cas = str(row[1] or "").strip() if len(row) > 1 else ""
+            lod_val = 0.01
+            if col_lod and col_lod < len(row):
+                try: lod_val = float(str(row[col_lod] or "").strip())
+                except: pass
             loq_val = 0.02
             if col_loq and col_loq < len(row):
                 try: loq_val = float(str(row[col_loq] or "").strip())
@@ -308,7 +312,8 @@ class AlchemParser(BaseParser):
                 value, flag = self._parse_readable_value(str(row[ci] or "").strip(), loq_val)
                 records.append({"lab": self.LAB_NAME, "sample_id": sid, "depth": depth,
                     "compound": compound, "cas": cas, "value": value, "flag": flag,
-                    "unit": "mg/kg", "analysis_type": analysis_type, "sampling_date": ""})
+                    "unit": "mg/kg", "analysis_type": analysis_type, "sampling_date": "",
+                    "lod": lod_val, "loq": loq_val})
         return records
 
     def _normalize_sample(self, raw):
