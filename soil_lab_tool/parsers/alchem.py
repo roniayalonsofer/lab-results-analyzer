@@ -316,20 +316,42 @@ class AlchemParser(BaseParser):
                     "lod": lod_val, "loq": loq_val})
         return records
 
-    def _normalize_sample(self, raw):
-        s = raw.strip().replace("K-", "ק-").replace("K ", "ק ").replace("k-", "ק-")
+    def _normalize_sample(self, raw: str):
+        s = raw.strip()
+        # Convert K to ק
+        s = s.replace("K-", "ק-").replace("K ", "ק ").replace("k-", "ק-")
+
+        # Format: "3-0 - 11ק" → split by " - "
+        if " - " in s:
+            parts = s.split(" - ", 1)
+            # Check if first part looks like a depth (number with optional decimal)
+            depth_candidate = parts[0].strip().replace("-", ".")
+            try:
+                float(depth_candidate)
+                depth = depth_candidate
+                sample_id = "ק-" + parts[1].strip().lstrip("ק").lstrip("-") if parts[1].strip().startswith("ק") else parts[1].strip()
+                return sample_id, depth
+            except ValueError:
+                pass
+
+        # Format: "K-10-3.0" or "ק-10-3.0"
         parts = s.rsplit("-", 1)
         if len(parts) == 2:
             try:
                 float(parts[1].replace("m", ""))
                 return parts[0], parts[1].replace("m", "")
-            except: pass
+            except ValueError:
+                pass
+
+        # Format: "ק-9 3.0m"
         parts2 = s.rsplit(" ", 1)
         if len(parts2) == 2:
             try:
                 float(parts2[1].replace("m", ""))
                 return parts2[0], parts2[1].replace("m", "")
-            except: pass
+            except ValueError:
+                pass
+
         return s, ""
 
     def _parse_readable_value(self, v, loq=0.02):
