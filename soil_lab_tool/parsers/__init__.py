@@ -258,6 +258,16 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
     """
     n = filename.lower()
 
+    try:
+        import pdfplumber as _pl, io as _io2
+        if file_bytes and filename.lower().endswith('.pdf'):
+            with _pl.open(_io2.BytesIO(file_bytes)) as _p:
+                _t = _p.pages[0].extract_text() or ''
+                if 'םכ-לא' in _t:
+                    return "alchem"
+    except Exception:
+        pass
+
     # Unambiguous filename hints (checked first — these are specific enough)
     if "xrf" in n:
         return "אלכם"
