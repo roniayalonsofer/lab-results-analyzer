@@ -453,6 +453,13 @@ class AlchemTPHPDFParser(AlchemParser):
     def parse(self, file_obj: io.BytesIO) -> list[dict]:
         file_obj.seek(0)
         if file_obj.read(4) == b"%PDF":
-            return self._parse_alchem_tph_pdf(file_obj)
+            file_obj.seek(0)
+            raw = file_obj.read().decode('latin-1', errors='ignore')
+            if '3CFH' in raw:
+                file_obj.seek(0)
+                return self._parse_alchem_tph_pdf(file_obj)
+            else:
+                file_obj.seek(0)
+                return self._parse_alchem_readable_pdf(file_obj)
         file_obj.seek(0)
         return super().parse(file_obj)
