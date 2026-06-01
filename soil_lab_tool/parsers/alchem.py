@@ -256,11 +256,20 @@ class AlchemParser(BaseParser):
                     if not table or len(table) < 2:
                         continue
                     headers_lower = [str(h or "").strip().lower() for h in table[0]]
-                    if any("dro" in h for h in headers_lower) and any("tph" in h for h in headers_lower):
+                    hdrs = " ".join(headers_lower)
+                    is_tph = ("dro" in hdrs and "oro" in hdrs and "tph" in hdrs)
+                    has_cmpd_conc = (
+                        any("compound name" in h for h in headers_lower) and
+                        any("final conc" in h for h in headers_lower)
+                    )
+                    is_voc  = "8260" in hdrs or ("8260" in page_text and has_cmpd_conc)
+                    is_svoc = "8270" in hdrs or ("8270" in page_text and has_cmpd_conc)
+                    if is_tph:
                         records.extend(self._parse_readable_tph_table(table))
-                    elif any("cas" in h for h in headers_lower) and any("final conc" in h for h in headers_lower):
-                        analysis_type = "SOIL_SVOC" if "svoc" in page_text else "SOIL_VOC"
-                        records.extend(self._parse_readable_voc_table(table, analysis_type))
+                    elif is_svoc:
+                        records.extend(self._parse_readable_voc_table(table, "SOIL_SVOC"))
+                    elif is_voc:
+                        records.extend(self._parse_readable_voc_table(table, "SOIL_VOC"))
         return records
 
     def _parse_readable_tph_table(self, table: list) -> list[dict]:
@@ -275,20 +284,24 @@ class AlchemParser(BaseParser):
         for row in table[1:]:
             if not row or not any(row):
                 continue
-            sample = str(row[col_sample] or "").strip() if col_sample < len(row) else ""
-            if not sample or sample.lower() in ("nan", "sample name", "name", ""):
+            raw_sample = str(row[col_sample] or "").strip() if col_sample < len(row) else ""
+            if not raw_sample or raw_sample.lower() in ("nan", "sample name", "name", ""):
                 continue
+            sample_id, depth = self._normalize_sample(raw_sample)
             for compound, col_idx in [("DRO", col_dro), ("ORO", col_oro), ("TPH", col_tph)]:
                 if col_idx is None or col_idx >= len(row):
                     continue
                 value, flag = self._parse_readable_value(str(row[col_idx] or "").strip())
-                records.append({
-                    "lab": self.LAB_NAME, "sample_id": sample,
+                rec = {
+                    "lab": self.LAB_NAME, "sample_id": sample_id,
                     "compound": compound, "cas": compound,
                     "value": value, "flag": flag,
                     "unit": "mg/kg", "analysis_type": "SOIL_TPH",
                     "sampling_date": "",
-                })
+                }
+                if depth:
+                    rec["depth"] = depth
+                records.append(rec)
         return records
 
     def _parse_readable_voc_table(self, table: list, analysis_type: str = "SOIL_VOC") -> list[dict]:
@@ -312,14 +325,18 @@ class AlchemParser(BaseParser):
         # Row 1 may carry sample IDs when the compound cell is blank
         data_start = 1
         sample_ids = [f"Sample-{j+1}" for j in range(len(conc_col_indices))]
+        sample_depths: list[str] = [""] * len(conc_col_indices)
         if len(table) > 1:
             row1 = table[1]
             compound_val = str(row1[col_compound] or "").strip() if col_compound < len(row1) else ""
             if not compound_val or compound_val.lower() in ("nan", ""):
-                sample_ids = [
+                raw_ids = [
                     (str(row1[i] or "").strip() if i < len(row1) else "") or f"Sample-{j+1}"
                     for j, i in enumerate(conc_col_indices)
                 ]
+                normalized = [self._normalize_sample(r) for r in raw_ids]
+                sample_ids   = [sid for sid, _ in normalized]
+                sample_depths = [dep for _, dep in normalized]
                 data_start = 2
 
         records = []
@@ -353,14 +370,17 @@ class AlchemParser(BaseParser):
                 if not raw_val or raw_val.lower() == "nan":
                     continue
                 value, flag = self._parse_readable_value(raw_val, lod=lod, loq=loq)
-                records.append({
+                rec = {
                     "lab": self.LAB_NAME,
                     "sample_id": sample_ids[j] if j < len(sample_ids) else f"Sample-{j+1}",
                     "compound": compound, "cas": cas,
                     "value": value, "flag": flag,
                     "unit": "mg/kg", "analysis_type": analysis_type,
                     "sampling_date": "", "lod": lod, "loq": loq,
-                })
+                }
+                if j < len(sample_depths) and sample_depths[j]:
+                    rec["depth"] = sample_depths[j]
+                records.append(rec)
         return records
 
     @staticmethod
@@ -372,15 +392,29 @@ class AlchemParser(BaseParser):
         v = raw_val.strip()
         upper = v.upper()
         if upper in ("N.D.", "ND", "N/D", "NOT DETECTED", ""):
-            return lod, "ND"
-        if upper in ("<LOQ", "< LOQ"):
+            return None, "ND"
+        if upper in ("<LOQ", "< LOQ", "<MDL", "< MDL"):
             return loq, "<"
-        if upper in ("<MDL", "< MDL"):
-            return lod, "<"
         try:
             return float(v.replace(",", "")), ""
         except (ValueError, TypeError):
             return None, ""
+
+    @staticmethod
+    def _normalize_sample(raw: str) -> tuple[str, str]:
+        """Convert K→ק and split trailing depth from sample name.
+
+        'K-10-3.0' → ('ק-10', '3.0')
+        'K-9'      → ('ק-9',  '')
+        """
+        import re as _re
+        s = raw.strip()
+        if s.startswith("K-") or s.startswith("K "):
+            s = "ק" + s[1:]
+        m = _re.match(r'^(.+)-(\d+(?:[.,]\d+)?)$', s)
+        if m:
+            return m.group(1), m.group(2)
+        return s, ""
 
 
 # ──────────────────────────────────────────────────────────────────────────────
