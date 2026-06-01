@@ -273,6 +273,8 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
         return "rj lee"
 
     # PDF content-based detection
+    import logging
+    logging.warning(f"DEBUG auto_detect_lab: filename={filename}, n={n}")
     if file_bytes is not None and n.endswith(".pdf"):
         if _is_aminolab_pdf(file_bytes):
             return "aminolab"
