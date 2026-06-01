@@ -33,7 +33,14 @@ class AlchemParser(BaseParser):
     def parse(self, file_obj: io.BytesIO) -> list[dict]:
         file_obj.seek(0)
         if file_obj.read(4) == b"%PDF":
-            return self._parse_alchem_tph_pdf(file_obj)
+            file_obj.seek(0)
+            raw = file_obj.read().decode('latin-1', errors='ignore')
+            if '3CFH' in raw:
+                file_obj.seek(0)
+                return self._parse_alchem_tph_pdf(file_obj)
+            else:
+                file_obj.seek(0)
+                return self._parse_alchem_readable_pdf(file_obj)
         file_obj.seek(0)
         xl = pd.ExcelFile(file_obj)
         sheet = xl.sheet_names[0]
@@ -159,10 +166,6 @@ class AlchemParser(BaseParser):
         file_obj.seek(0)
         raw_bytes = file_obj.read()
 
-        # Readable format: 3CFH marker absent from raw bytes → use pdfplumber
-        if b"3CFH" not in raw_bytes:
-            return self._parse_alchem_readable_pdf(raw_bytes)
-
         # Encoded (CID-font) format: use fitz
         def decode(s: str) -> str:
             return ''.join(chr(ord(c) + 9) if 0x20 <= ord(c) <= 0x76 else c for c in s)
@@ -236,12 +239,14 @@ class AlchemParser(BaseParser):
                 i += 1
         return records
 
-    def _parse_alchem_readable_pdf(self, raw_bytes: bytes) -> list[dict]:
+    def _parse_alchem_readable_pdf(self, file_obj: io.BytesIO, filename: str = "") -> list[dict]:
         """Parse a readable (non-CID-encoded) Alchem PDF using pdfplumber."""
-        import pdfplumber, io as _io
+        import pdfplumber
 
+        file_obj.seek(0)
+        raw_bytes = file_obj.read()
         records: list[dict] = []
-        with pdfplumber.open(_io.BytesIO(raw_bytes)) as pdf:
+        with pdfplumber.open(io.BytesIO(raw_bytes)) as pdf:
             for page in pdf.pages:
                 tables = page.extract_tables()
                 if not tables:
