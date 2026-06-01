@@ -283,37 +283,66 @@ class AlchemParser(BaseParser):
         return records
 
     def _parse_readable_voc_table(self, table, analysis_type="SOIL_VOC"):
+        """Parse VOC/SVOC table from pdfplumber.
+
+        Header row (table[0]) cols [2 .. -2) hold sample names (RTL-reversed).
+        Every data row has LOD at col -2 and LOQ at col -1.
+        Sample columns = indices 2 .. len(row)-2 (exclusive).
+        """
+        if not table or len(table) < 2:
+            return []
+
+        # Extract sample names from header row cols [2 .. -2)
         h0 = [str(c or "").strip() for c in table[0]]
-        h0_low = [h.lower() for h in h0]
-        col_lod = next((i for i, h in enumerate(h0_low) if h.strip() == "lod"), None)
-        col_loq = next((i for i, h in enumerate(h0_low) if h.strip() == "loq"), None)
-        end_col = col_lod if col_lod else (len(h0) - 2)
-        sample_names = []
-        for i in range(2, end_col):
-            if h0[i].strip():
-                sid, depth = self._normalize_sample(h0[i])
-                sample_names.append((i, sid, depth))
+        sample_cols: list[tuple[int, str, str]] = []  # (col_idx, sample_id, depth)
+        for i in range(2, len(h0) - 2):
+            name = h0[i]
+            if name and name.lower() not in ("", "nan"):
+                sid, depth = self._normalize_sample(name)
+                sample_cols.append((i, sid, depth))
+
+        if not sample_cols:
+            return []
+
+        _SKIP = {
+            "compound name", "", "[mg/kg]", "lod", "loq",
+            "sample name", "sample name:", "cas", "final conc.", "final conc",
+        }
         records = []
-        for row in table[2:]:
-            if not row or not row[0]: continue
+        for row in table[1:]:  # table[0] is the header
+            if not row or not row[0]:
+                continue
             compound = str(row[0] or "").strip().replace("\n", " ")
-            if not compound or compound.lower() in ("compound name", "", "[mg/kg]", "lod", "loq", "sample name", "cas"): continue
+            if not compound or compound.lower() in _SKIP:
+                continue
+
             cas = str(row[1] or "").strip() if len(row) > 1 else ""
+            if cas.lower() == "nan":
+                cas = ""
+
+            # LOD and LOQ are always the last two columns of each data row
             lod_val = 0.01
-            if col_lod and col_lod < len(row):
-                try: lod_val = float(str(row[col_lod] or "").strip())
-                except: pass
             loq_val = 0.02
-            if col_loq and col_loq < len(row):
-                try: loq_val = float(str(row[col_loq] or "").strip())
-                except: pass
-            for ci, sid, depth in sample_names:
-                if ci >= len(row): continue
-                value, flag = self._parse_readable_value(str(row[ci] or "").strip(), loq=loq_val, lod=lod_val)
-                records.append({"lab": self.LAB_NAME, "sample_id": sid, "depth": depth,
-                    "compound": compound, "cas": cas, "value": value, "flag": flag,
-                    "unit": "mg/kg", "analysis_type": analysis_type, "sampling_date": "",
-                    "lod": lod_val, "loq": loq_val})
+            if len(row) >= 2:
+                try: lod_val = float(str(row[-2] or "").strip())
+                except (ValueError, TypeError): pass
+                try: loq_val = float(str(row[-1] or "").strip())
+                except (ValueError, TypeError): pass
+
+            for ci, sid, depth in sample_cols:
+                if ci >= len(row):
+                    continue
+                raw_val = str(row[ci] or "").strip()
+                if not raw_val or raw_val.lower() == "nan":
+                    continue
+                value, flag = self._parse_readable_value(raw_val, loq=loq_val, lod=lod_val)
+                records.append({
+                    "lab": self.LAB_NAME, "sample_id": sid, "depth": depth,
+                    "compound": compound, "cas": cas,
+                    "value": value, "flag": flag,
+                    "unit": "mg/kg", "analysis_type": analysis_type,
+                    "sampling_date": "", "lod": lod_val, "loq": loq_val,
+                })
         return records
 
     def _normalize_sample(self, raw: str):
