@@ -317,6 +317,14 @@ class AlchemParser(BaseParser):
         return records
 
     def _normalize_sample(self, raw: str):
+        import re as _re
+
+        def _fix_sid(sid: str) -> str:
+            """Normalize '9ק' → 'ק-9', '9ק-DUP' → 'ק-9-DUP'."""
+            sid = _re.sub(r'^(\d+)(ק)$', r'ק-\1', sid)
+            sid = _re.sub(r'^(\d+)(ק)-DUP$', r'ק-\1-DUP', sid)
+            return sid
+
         s = raw.strip()
         # Convert K to ק
         s = s.replace("K-", "ק-").replace("K ", "ק ").replace("k-", "ק-")
@@ -324,13 +332,12 @@ class AlchemParser(BaseParser):
         # Format: "3-0 - 11ק" → split by " - "
         if " - " in s:
             parts = s.split(" - ", 1)
-            # Check if first part looks like a depth (number with optional decimal)
             depth_candidate = parts[0].strip().replace("-", ".")
             try:
                 float(depth_candidate)
                 depth = depth_candidate
                 sample_id = "ק-" + parts[1].strip().lstrip("ק").lstrip("-") if parts[1].strip().startswith("ק") else parts[1].strip()
-                return sample_id, depth
+                return _fix_sid(sample_id), depth
             except ValueError:
                 pass
 
@@ -339,7 +346,7 @@ class AlchemParser(BaseParser):
         if len(parts) == 2:
             try:
                 float(parts[1].replace("m", ""))
-                return parts[0], parts[1].replace("m", "")
+                return _fix_sid(parts[0]), parts[1].replace("m", "")
             except ValueError:
                 pass
 
@@ -348,11 +355,11 @@ class AlchemParser(BaseParser):
         if len(parts2) == 2:
             try:
                 float(parts2[1].replace("m", ""))
-                return parts2[0], parts2[1].replace("m", "")
+                return _fix_sid(parts2[0]), parts2[1].replace("m", "")
             except ValueError:
                 pass
 
-        return s, ""
+        return _fix_sid(s), ""
 
     def _parse_readable_value(self, v, loq=0.02):
         if v in ("<MDL", "<LOQ", "<MRL", "<mdl", "<loq"):
