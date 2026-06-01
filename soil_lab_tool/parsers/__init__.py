@@ -381,6 +381,15 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
     if file_bytes is not None and n.endswith(".pdf"):
         if _is_aminolab_pdf(file_bytes):
             return "groundwater"
+        if file_bytes and filename.lower().endswith('.pdf'):
+            try:
+                import pdfplumber as _pl, io as _io2
+                with _pl.open(_io2.BytesIO(file_bytes)) as _p:
+                    _t = _p.pages[0].extract_text() or ''
+                    if 'םכ-לא' in _t:
+                        return "soil_tph_pdf"
+            except Exception:
+                pass
         if _is_alchem_tph_pdf(file_bytes):
             return "soil_tph_pdf"
         try:
