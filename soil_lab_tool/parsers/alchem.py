@@ -240,212 +240,102 @@ class AlchemParser(BaseParser):
         return records
 
     def _parse_alchem_readable_pdf(self, file_obj: io.BytesIO, filename: str = "") -> list[dict]:
-        """Parse a readable (non-CID-encoded) Alchem PDF using pdfplumber."""
         import pdfplumber
-
         file_obj.seek(0)
         raw_bytes = file_obj.read()
-        records: list[dict] = []
+        records = []
         with pdfplumber.open(io.BytesIO(raw_bytes)) as pdf:
             for page in pdf.pages:
-                tables = page.extract_tables()
-                if not tables:
-                    continue
                 page_text = (page.extract_text() or "").lower()
-                for table in tables:
+                for table in (page.extract_tables() or []):
                     if not table or len(table) < 2:
                         continue
-                    headers_lower = [str(h or "").strip().lower() for h in table[0]]
-                    hdrs = " ".join(headers_lower)
-                    is_tph = ("dro" in hdrs and "oro" in hdrs and "tph" in hdrs)
-                    has_cmpd_conc = (
-                        any("compound name" in h for h in headers_lower) and
-                        any("final conc" in h for h in headers_lower)
-                    )
-                    is_voc  = "8260" in hdrs or ("8260" in page_text and has_cmpd_conc)
-                    is_svoc = "8270" in hdrs or ("8270" in page_text and has_cmpd_conc)
-                    if is_tph:
+                    h0 = [str(c or "").strip() for c in table[0]]
+                    h0_low = [h.lower() for h in h0]
+                    hdrs = " ".join(h0_low)
+                    if "dro" in hdrs and "oro" in hdrs and "tph" in hdrs:
                         records.extend(self._parse_readable_tph_table(table))
-                    elif is_svoc:
-                        records.extend(self._parse_readable_voc_table(table, "SOIL_SVOC"))
-                    elif is_voc:
-                        records.extend(self._parse_readable_voc_table(table, "SOIL_VOC"))
+                    elif "sample name" in hdrs or (h0_low and "sample name" in h0_low[0]):
+                        atype = "SOIL_SVOC" if "8270" in page_text else "SOIL_VOC"
+                        records.extend(self._parse_readable_voc_table(table, atype))
         return records
 
-    def _parse_readable_tph_table(self, table: list) -> list[dict]:
-        """Parse TPH table as extracted by pdfplumber.
-
-        Actual structure:
-          Row 0: ['', 'dro', 'oro', 'tph']
-          Row 1: ['Sample Name', None, ...]   ← skipped
-          Row 2: ['[mg/kg]', ...]             ← skipped
-          Row 3+: ['K-10-3.0', '88.75', ...]  ← data
-          Near end: ['LOD', ...] / ['LOQ', ...] ← read, then skipped
-        """
-        if not table or len(table) < 2:
-            return []
-
-        headers_lower = [str(h or "").strip().lower() for h in table[0]]
-        col_dro = next((i for i, h in enumerate(headers_lower) if "dro" in h), 1)
-        col_oro = next((i for i, h in enumerate(headers_lower) if "oro" in h), 2)
-        col_tph = next((i for i, h in enumerate(headers_lower) if "tph" in h), 3)
-
-        # Read per-compound LOQ values from the LOQ row for <LOQ/<MDL resolution
-        loq_vals = {"DRO": None, "ORO": None, "TPH": None}
-        for row in table:
-            if row and str(row[0] or "").strip().upper() == "LOQ":
-                for compound, col_idx in [("DRO", col_dro), ("ORO", col_oro), ("TPH", col_tph)]:
-                    try:
-                        loq_vals[compound] = float(str(row[col_idx] or "").replace(",", ""))
-                    except (ValueError, TypeError):
-                        pass
-                break
-
-        _SKIP = {"", "nan", "sample name", "name", "[mg/kg]", "lod", "loq", "unit", "units"}
+    def _parse_readable_tph_table(self, table):
+        h = [str(c or "").strip().lower() for c in table[0]]
+        col_s = 0
+        col_d = next((i for i, x in enumerate(h) if "dro" in x), None)
+        col_o = next((i for i, x in enumerate(h) if "oro" in x), None)
+        col_t = next((i for i, x in enumerate(h) if "tph" in x), None)
+        loq = {"DRO": 30.0, "ORO": 20.0, "TPH": 50.0}
         records = []
         for row in table[1:]:
-            if not row:
-                continue
-            raw_sample = str(row[0] or "").strip()
-            if raw_sample.lower() in _SKIP:
-                continue
-            sample_id, depth = self._normalize_sample(raw_sample)
-            for compound, col_idx in [("DRO", col_dro), ("ORO", col_oro), ("TPH", col_tph)]:
-                if col_idx >= len(row):
-                    continue
-                raw_val = str(row[col_idx] or "").strip()
-                if not raw_val or raw_val.lower() == "nan":
-                    continue
-                loq = loq_vals[compound]
-                value, flag = self._parse_readable_value(raw_val, loq=loq)
-                rec = {
-                    "lab": self.LAB_NAME, "sample_id": sample_id,
-                    "compound": compound, "cas": compound,
-                    "value": value, "flag": flag,
-                    "unit": "mg/kg", "analysis_type": "SOIL_TPH",
-                    "sampling_date": "", "loq": loq,
-                }
-                if depth:
-                    rec["depth"] = depth
-                records.append(rec)
+            if not row: continue
+            s = str(row[col_s] or "").strip()
+            if not s or s.lower() in ("sample name", "loq", "lod", "[mg/kg]", ""): continue
+            if not any(c.isdigit() for c in s): continue
+            sid, depth = self._normalize_sample(s)
+            for cmp, ci, lq in [("DRO", col_d, loq["DRO"]), ("ORO", col_o, loq["ORO"]), ("TPH", col_t, loq["TPH"])]:
+                if ci is None or ci >= len(row): continue
+                value, flag = self._parse_readable_value(str(row[ci] or "").strip(), lq)
+                records.append({"lab": self.LAB_NAME, "sample_id": sid, "depth": depth,
+                    "compound": cmp, "cas": cmp, "value": value, "flag": flag,
+                    "unit": "mg/kg", "analysis_type": "SOIL_TPH", "sampling_date": ""})
         return records
 
-    def _parse_readable_voc_table(self, table: list, analysis_type: str = "SOIL_VOC") -> list[dict]:
-        """Parse VOC/SVOC table as extracted by pdfplumber.
-
-        Actual structure:
-          Row 0: ['sample name:', '', 'ק10-3.0', 'ק10-8.0', ..., 'LOD', 'LOQ']
-          Row 1: ['compound name', 'cas', 'Final Conc.', ..., 'LOD', 'LOQ'] ← skipped
-          Row 2: ['', '', '[mg/kg]', ...]                                    ← skipped
-          Row 3+: ['Benzene', '71-43-2', '<MDL', ..., '0.01', '0.02']       ← data
-
-        Sample names  = header row cols 2..-2 (non-empty only)
-        Per-row LOD   = col -2 of each data row
-        Per-row LOQ   = col -1 of each data row
-        """
-        if not table or len(table) < 4:
-            return []
-
-        header_row = table[0]
-        n_cols = len(header_row)
-        if n_cols < 4:
-            return []
-
-        # Sample names from header row cols [2 .. n-2), skip blanks
-        sample_cols: list[tuple[int, str, str]] = []  # (col_idx, sample_id, depth)
-        for i in range(2, n_cols - 2):
-            name = str(header_row[i] or "").strip()
-            if name and name.lower() not in ("nan", "", "lod", "loq"):
-                sid, dep = self._normalize_sample(name)
-                sample_cols.append((i, sid, dep))
-
-        if not sample_cols:
-            return []
-
-        col_lod_data = n_cols - 2
-        col_loq_data = n_cols - 1
-
-        _SKIP_COMPOUND = {
-            "", "nan", "compound name", "compound", "sample name",
-            "[mg/kg]", "lod", "loq", "final conc.", "final conc",
-        }
+    def _parse_readable_voc_table(self, table, analysis_type="SOIL_VOC"):
+        h0 = [str(c or "").strip() for c in table[0]]
+        h0_low = [h.lower() for h in h0]
+        col_lod = next((i for i, h in enumerate(h0_low) if h.strip() == "lod"), None)
+        col_loq = next((i for i, h in enumerate(h0_low) if h.strip() == "loq"), None)
+        end_col = col_lod if col_lod else (len(h0) - 2)
+        sample_names = []
+        for i in range(2, end_col):
+            if h0[i].strip():
+                sid, depth = self._normalize_sample(h0[i])
+                sample_names.append((i, sid, depth))
         records = []
-        for row in table[1:]:
-            if not row:
-                continue
-            compound = str(row[0] or "").strip()
-            if compound.lower() in _SKIP_COMPOUND:
-                continue
-
+        for row in table[2:]:
+            if not row or not row[0]: continue
+            compound = str(row[0] or "").strip().replace("\n", " ")
+            if not compound or compound.lower() in ("compound name", "", "[mg/kg]", "lod", "loq", "sample name", "cas"): continue
             cas = str(row[1] or "").strip() if len(row) > 1 else ""
-            if cas.lower() == "nan":
-                cas = ""
-
-            lod = None
-            if col_lod_data < len(row):
-                try:
-                    lod = float(str(row[col_lod_data] or "").replace(",", ""))
-                except (ValueError, TypeError):
-                    pass
-
-            loq = None
-            if col_loq_data < len(row):
-                try:
-                    loq = float(str(row[col_loq_data] or "").replace(",", ""))
-                except (ValueError, TypeError):
-                    pass
-
-            for col_idx, sample_id, depth in sample_cols:
-                if col_idx >= len(row):
-                    continue
-                raw_val = str(row[col_idx] or "").strip()
-                if not raw_val or raw_val.lower() == "nan":
-                    continue
-                value, flag = self._parse_readable_value(raw_val, lod=lod, loq=loq)
-                rec = {
-                    "lab": self.LAB_NAME, "sample_id": sample_id,
-                    "compound": compound, "cas": cas,
-                    "value": value, "flag": flag,
-                    "unit": "mg/kg", "analysis_type": analysis_type,
-                    "sampling_date": "", "lod": lod, "loq": loq,
-                }
-                if depth:
-                    rec["depth"] = depth
-                records.append(rec)
+            loq_val = 0.02
+            if col_loq and col_loq < len(row):
+                try: loq_val = float(str(row[col_loq] or "").strip())
+                except: pass
+            for ci, sid, depth in sample_names:
+                if ci >= len(row): continue
+                value, flag = self._parse_readable_value(str(row[ci] or "").strip(), loq_val)
+                records.append({"lab": self.LAB_NAME, "sample_id": sid, "depth": depth,
+                    "compound": compound, "cas": cas, "value": value, "flag": flag,
+                    "unit": "mg/kg", "analysis_type": analysis_type, "sampling_date": ""})
         return records
 
-    @staticmethod
-    def _parse_readable_value(
-        raw_val: str,
-        lod: float | None = None,
-        loq: float | None = None,
-    ) -> tuple:
-        v = raw_val.strip()
-        upper = v.upper()
-        if upper in ("N.D.", "ND", "N/D", "NOT DETECTED", ""):
-            return None, "ND"
-        if upper in ("<LOQ", "< LOQ", "<MDL", "< MDL"):
+    def _normalize_sample(self, raw):
+        s = raw.strip().replace("K-", "ק-").replace("K ", "ק ").replace("k-", "ק-")
+        parts = s.rsplit("-", 1)
+        if len(parts) == 2:
+            try:
+                float(parts[1].replace("m", ""))
+                return parts[0], parts[1].replace("m", "")
+            except: pass
+        parts2 = s.rsplit(" ", 1)
+        if len(parts2) == 2:
+            try:
+                float(parts2[1].replace("m", ""))
+                return parts2[0], parts2[1].replace("m", "")
+            except: pass
+        return s, ""
+
+    def _parse_readable_value(self, v, loq=0.02):
+        if v in ("<MDL", "<LOQ", "<MRL", "<mdl", "<loq"):
             return loq, "<"
+        if v in ("N.D.", "ND", "N.D", "n.d."):
+            return None, "ND"
         try:
             return float(v.replace(",", "")), ""
-        except (ValueError, TypeError):
-            return None, ""
-
-    @staticmethod
-    def _normalize_sample(raw: str) -> tuple[str, str]:
-        """Convert K→ק and split trailing depth from sample name.
-
-        'K-10-3.0' → ('ק-10', '3.0')
-        'K-9'      → ('ק-9',  '')
-        """
-        import re as _re
-        s = raw.strip()
-        if s.startswith("K-") or s.startswith("K "):
-            s = "ק" + s[1:]
-        m = _re.match(r'^(.+)-(\d+(?:[.,]\d+)?)$', s)
-        if m:
-            return m.group(1), m.group(2)
-        return s, ""
+        except:
+            return None, "ND"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
