@@ -485,3 +485,4 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
             pass
 
     return "soil"
+
