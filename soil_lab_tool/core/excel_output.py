@@ -903,10 +903,13 @@ class LabReportExcel:
                 for ci in range(sample_start + 1, sample_end + 1):
                     ws.cell(row=hdr_row, column=ci).border = THIN
             else:
-                # Soil/GW format: individual sample IDs as column headers
+                # Soil/GW format: individual sample IDs as column headers.
+                # Use borehole name only (split_p[sid][0]) when depth is embedded
+                # in the composite key — depth is already shown in the עומק row.
                 for ci, sid in enumerate(samples, sample_start):
-                    c = ws.cell(row=hdr_row, column=ci, value=sid)
-                    c.font      = _font(sid, bold=True)
+                    display = split_p[sid][0] if split_p and sid in split_p else sid
+                    c = ws.cell(row=hdr_row, column=ci, value=display)
+                    c.font      = _font(display, bold=True)
                     c.alignment = CENTER
                     c.border    = THIN
 

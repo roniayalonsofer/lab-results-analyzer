@@ -309,7 +309,7 @@ class AlchemParser(BaseParser):
                 except: pass
             for ci, sid, depth in sample_names:
                 if ci >= len(row): continue
-                value, flag = self._parse_readable_value(str(row[ci] or "").strip(), loq_val)
+                value, flag = self._parse_readable_value(str(row[ci] or "").strip(), loq=loq_val, lod=lod_val)
                 records.append({"lab": self.LAB_NAME, "sample_id": sid, "depth": depth,
                     "compound": compound, "cas": cas, "value": value, "flag": flag,
                     "unit": "mg/kg", "analysis_type": analysis_type, "sampling_date": "",
@@ -361,8 +361,10 @@ class AlchemParser(BaseParser):
 
         return _fix_sid(s), ""
 
-    def _parse_readable_value(self, v, loq=0.02):
-        if v in ("<MDL", "<LOQ", "<MRL", "<mdl", "<loq"):
+    def _parse_readable_value(self, v, loq=0.02, lod=None):
+        if v in ("<MDL", "<mdl"):
+            return lod, "<"
+        if v in ("<LOQ", "<MRL", "<loq"):
             return loq, "<"
         if v in ("N.D.", "ND", "N.D", "n.d."):
             return None, "ND"
