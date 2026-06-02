@@ -335,7 +335,7 @@ class AlchemParser(BaseParser):
                 raw_val = str(row[ci] or "").strip()
                 if not raw_val or raw_val.lower() == "nan":
                     continue
-                value, flag = self._parse_readable_value(raw_val, loq=loq_val, lod=lod_val)
+                value, flag = self._parse_readable_value(raw_val, lod_val=lod_val, loq_val=loq_val)
                 records.append({
                     "lab": self.LAB_NAME, "sample_id": sid, "depth": depth,
                     "compound": compound, "cas": cas,
@@ -346,36 +346,38 @@ class AlchemParser(BaseParser):
         return records
 
     def _normalize_sample(self, raw: str):
-        import re as _re
-
-        def _fix_sid(sid: str) -> str:
-            """Normalize '9ק' → 'ק-9', '9ק-DUP' → 'ק-9-DUP'."""
-            sid = _re.sub(r'^(\d+)(ק)$', r'ק-\1', sid)
-            sid = _re.sub(r'^(\d+)(ק)-DUP$', r'ק-\1-DUP', sid)
-            return sid
-
+        import re
         s = raw.strip()
-        # Convert K to ק
         s = s.replace("K-", "ק-").replace("K ", "ק ").replace("k-", "ק-")
 
-        # Format: "3-0 - 11ק" → split by " - "
+        # Format: "3-3ק" or "5.0-7ק" (RTL reversed, ends with ק)
+        m = re.match(r'^([\d.]+)-([\d]+)(ק(?:-DUP)?)$', s)
+        if m:
+            depth = m.group(1)
+            num = m.group(2)
+            dup = "-DUP" if "DUP" in m.group(3) else ""
+            return f"ק-{num}{dup}", depth
+
+        # Format: "3-0 - 11ק" or "3-0 - 11ק-DUP" (TPH RTL format)
         if " - " in s:
             parts = s.split(" - ", 1)
-            depth_candidate = parts[0].strip().replace("-", ".")
+            depth_str = parts[0].strip().replace("-", ".")
             try:
-                float(depth_candidate)
-                depth = depth_candidate
-                sample_id = "ק-" + parts[1].strip().lstrip("ק").lstrip("-") if parts[1].strip().startswith("ק") else parts[1].strip()
-                return _fix_sid(sample_id), depth
+                float(depth_str)
+                rest = parts[1].strip()
+                m2 = re.match(r'^(\d+)(ק(?:-DUP)?)$', rest)
+                if m2:
+                    dup = "-DUP" if "DUP" in m2.group(2) else ""
+                    return f"ק-{m2.group(1)}{dup}", depth_str
             except ValueError:
                 pass
 
-        # Format: "K-10-3.0" or "ק-10-3.0"
+        # Format: "ק-10-3.0"
         parts = s.rsplit("-", 1)
         if len(parts) == 2:
             try:
                 float(parts[1].replace("m", ""))
-                return _fix_sid(parts[0]), parts[1].replace("m", "")
+                return parts[0], parts[1].replace("m", "")
             except ValueError:
                 pass
 
@@ -384,23 +386,22 @@ class AlchemParser(BaseParser):
         if len(parts2) == 2:
             try:
                 float(parts2[1].replace("m", ""))
-                return _fix_sid(parts2[0]), parts2[1].replace("m", "")
+                return parts2[0], parts2[1].replace("m", "")
             except ValueError:
                 pass
 
-        return _fix_sid(s), ""
+        return s, ""
 
-    def _parse_readable_value(self, v, loq=0.02, lod=None):
-        if v in ("<MDL", "<mdl"):
-            return lod, "<"
-        if v in ("<LOQ", "<MRL", "<loq"):
-            return loq, "<"
-        if v in ("N.D.", "ND", "N.D", "n.d."):
-            return None, "ND"
+    def _parse_readable_value(self, v, lod_val=0.01, loq_val=0.02):
+        v = str(v or "").strip()
+        if v in ("<MDL", "<MRL", "N.D.", "ND", "N.D", "n.d."):
+            return lod_val, "<"
+        if v == "<LOQ":
+            return loq_val, "<"
         try:
             return float(v.replace(",", "")), ""
         except:
-            return None, "ND"
+            return lod_val, "<"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
