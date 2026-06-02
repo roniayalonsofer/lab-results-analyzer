@@ -286,17 +286,24 @@ class AlchemParser(BaseParser):
         if not table or len(table) < 2:
             return []
 
+        # Debug: show the first 3 rows of every table this function sees
+        for _ri in range(min(3, len(table))):
+            print(f"[VOC table row {_ri}]: {[str(c or '').strip() for c in table[_ri]]}")
+
         _HDR_SKIP = {
             "compound name", "cas", "sample name", "sample name:", "",
             "final conc.", "final conc", "[mg/kg]", "lod", "loq", "nan",
         }
-        _DATA_SKIP = _HDR_SKIP
 
         # Scan header rows 0-2 to locate LOD/LOQ columns and sample names.
-        # Layout varies: multi-sample has everything in row 0; single-sample
-        # has the sample name in row 0 and LOD/LOQ labels in row 1.
+        # Layouts seen in the wild:
+        #   Multi-sample : ['Sample Name:', '', 'ק3.0-10', 'ק8.0-10', 'LOD', 'LOQ']
+        #   Single-sample: row 0 = ['Sample Name:', '', 'K-9 8.0m', '', 'LOD', 'LOQ']
+        #                  row 1 = ['Compound Name', 'CAS', 'Final Conc.', 'LOD', 'LOQ']
+        #   Single-sample (no name row): ['Compound Name', 'CAS', 'Final Conc.', 'LOD', 'LOQ']
         col_lod: int | None = None
         col_loq: int | None = None
+        col_final_conc: int | None = None
         sample_cols: list[tuple[int, str, str]] = []  # (col_idx, sample_id, depth)
 
         for ri in range(min(3, len(table))):
@@ -307,28 +314,34 @@ class AlchemParser(BaseParser):
                     col_lod = ci
                 elif cl == "loq" and col_loq is None:
                     col_loq = ci
+                elif cl in ("final conc.", "final conc") and col_final_conc is None:
+                    col_final_conc = ci
                 elif ci >= 2 and cell and cl not in _HDR_SKIP:
                     if any(ch.isdigit() or ch == "ק" for ch in cell):
                         if not any(sc[0] == ci for sc in sample_cols):
                             sid, depth = self._normalize_sample(cell)
                             sample_cols.append((ci, sid, depth))
 
+        # Single-sample fallback: header has "Final Conc." but no sample-name cell
+        if not sample_cols and col_final_conc is not None:
+            sample_cols = [(col_final_conc, "Sample-1", "")]
+
         if not sample_cols:
             return []
 
-        # Fall back to last two columns if labels were not found
+        # Fall back to last two columns if LOD/LOQ labels were not found
         if col_lod is None:
             col_lod = -2
         if col_loq is None:
             col_loq = -1
 
-        # Find data start: first row where col 0 is a compound name
+        # Find data start: first row where col 0 looks like a compound name
         data_start = 1
         for ri, row in enumerate(table):
             if ri == 0:
                 continue
             cell0 = str(row[0] or "").strip().lower() if row else ""
-            if cell0 and cell0 not in _DATA_SKIP:
+            if cell0 and cell0 not in _HDR_SKIP:
                 data_start = ri
                 break
 
@@ -337,7 +350,7 @@ class AlchemParser(BaseParser):
             if not row or not row[0]:
                 continue
             compound = str(row[0] or "").strip().replace("\n", " ")
-            if not compound or compound.lower() in _DATA_SKIP:
+            if not compound or compound.lower() in _HDR_SKIP:
                 continue
 
             cas = str(row[1] or "").strip() if len(row) > 1 else ""
@@ -361,7 +374,18 @@ class AlchemParser(BaseParser):
                 raw_val = str(row[ci] or "").strip()
                 if not raw_val or raw_val.lower() == "nan":
                     continue
-                value, flag = self._parse_readable_value(raw_val, lod_val=lod_val, loq_val=loq_val)
+
+                # N.D. / <MDL / <DL / <LOQ / <MRL all mean "below reporting limit"
+                # → store as loq_val with flag "<LOQ"
+                rv = raw_val.upper()
+                if rv in ("N.D.", "ND", "N.D", "N/D", "<MDL", "<DL", "<MRL", "<LOQ"):
+                    value, flag = loq_val, "<LOQ"
+                else:
+                    try:
+                        value, flag = float(raw_val.replace(",", "")), ""
+                    except (ValueError, TypeError):
+                        value, flag = loq_val, "<LOQ"
+
                 records.append({
                     "lab": self.LAB_NAME, "sample_id": sid, "depth": depth,
                     "compound": compound, "cas": cas,
