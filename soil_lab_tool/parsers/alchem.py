@@ -115,7 +115,7 @@ class AlchemParser(BaseParser):
                 # N.D. → use LOD as value with '<' flag
                 if raw_val.upper() in ("N.D.", "ND", "N/D", "<DL", "NOT DETECTED", ""):
                     value = lod
-                    flag  = "ND"
+                    flag  = "<"
                 else:
                     value, flag = self._vp.parse(raw_val)
 
@@ -218,7 +218,7 @@ class AlchemParser(BaseParser):
                     sample = "ק" + sample[1:]
                 for compound, val in zip(["DRO", "ORO", "TPH"], lines[i + 1: i + 4]):
                     if val in ("N.D.", "ND"):
-                        value, flag = None, "ND"
+                        value, flag = loq[compound], "<"
                     elif val == "<LOQ":
                         value, flag = loq[compound], "<"
                     else:
