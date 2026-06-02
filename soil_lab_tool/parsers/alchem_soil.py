@@ -120,10 +120,10 @@ class AlchemSoilParser(BaseParser):
                 # Map detection flags
                 if raw_val.upper() in ("N.D.", "ND", "N/D", "NOT DETECTED", ""):
                     value = lod
-                    flag  = "ND"
+                    flag  = "<"
                 elif raw_val.lower() in ("<mdl", "<dl"):
                     value = lod
-                    flag  = "ND"
+                    flag  = "<"
                 elif raw_val.lower() in ("<mrl", "<loq", "<rl"):
                     value = loq
                     flag  = "<LOQ"
@@ -164,8 +164,8 @@ class AlchemSoilParser(BaseParser):
                     continue
 
                 if raw_val.upper() in ("N.D.", "ND", "N/D"):
-                    value = None
-                    flag  = "ND"
+                    value = 0.01
+                    flag  = "<"
                 else:
                     try:
                         value = float(raw_val)
