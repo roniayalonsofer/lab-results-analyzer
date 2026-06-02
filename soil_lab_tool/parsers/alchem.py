@@ -283,51 +283,77 @@ class AlchemParser(BaseParser):
         return records
 
     def _parse_readable_voc_table(self, table, analysis_type="SOIL_VOC"):
-        """Parse VOC/SVOC table from pdfplumber.
-
-        Header row (table[0]) cols [2 .. -2) hold sample names (RTL-reversed).
-        Every data row has LOD at col -2 and LOQ at col -1.
-        Sample columns = indices 2 .. len(row)-2 (exclusive).
-        """
         if not table or len(table) < 2:
             return []
 
-        # Extract sample names from header row cols [2 .. -2)
-        h0 = [str(c or "").strip() for c in table[0]]
+        _HDR_SKIP = {
+            "compound name", "cas", "sample name", "sample name:", "",
+            "final conc.", "final conc", "[mg/kg]", "lod", "loq", "nan",
+        }
+        _DATA_SKIP = _HDR_SKIP
+
+        # Scan header rows 0-2 to locate LOD/LOQ columns and sample names.
+        # Layout varies: multi-sample has everything in row 0; single-sample
+        # has the sample name in row 0 and LOD/LOQ labels in row 1.
+        col_lod: int | None = None
+        col_loq: int | None = None
         sample_cols: list[tuple[int, str, str]] = []  # (col_idx, sample_id, depth)
-        for i in range(2, len(h0) - 2):
-            name = h0[i]
-            if name and name.lower() not in ("", "nan"):
-                sid, depth = self._normalize_sample(name)
-                sample_cols.append((i, sid, depth))
+
+        for ri in range(min(3, len(table))):
+            for ci, cell in enumerate(table[ri]):
+                cell = str(cell or "").strip()
+                cl = cell.lower()
+                if cl == "lod" and col_lod is None:
+                    col_lod = ci
+                elif cl == "loq" and col_loq is None:
+                    col_loq = ci
+                elif ci >= 2 and cell and cl not in _HDR_SKIP:
+                    if any(ch.isdigit() or ch == "ק" for ch in cell):
+                        if not any(sc[0] == ci for sc in sample_cols):
+                            sid, depth = self._normalize_sample(cell)
+                            sample_cols.append((ci, sid, depth))
 
         if not sample_cols:
             return []
 
-        _SKIP = {
-            "compound name", "", "[mg/kg]", "lod", "loq",
-            "sample name", "sample name:", "cas", "final conc.", "final conc",
-        }
+        # Fall back to last two columns if labels were not found
+        if col_lod is None:
+            col_lod = -2
+        if col_loq is None:
+            col_loq = -1
+
+        # Find data start: first row where col 0 is a compound name
+        data_start = 1
+        for ri, row in enumerate(table):
+            if ri == 0:
+                continue
+            cell0 = str(row[0] or "").strip().lower() if row else ""
+            if cell0 and cell0 not in _DATA_SKIP:
+                data_start = ri
+                break
+
         records = []
-        for row in table[1:]:  # table[0] is the header
+        for row in table[data_start:]:
             if not row or not row[0]:
                 continue
             compound = str(row[0] or "").strip().replace("\n", " ")
-            if not compound or compound.lower() in _SKIP:
+            if not compound or compound.lower() in _DATA_SKIP:
                 continue
 
             cas = str(row[1] or "").strip() if len(row) > 1 else ""
             if cas.lower() == "nan":
                 cas = ""
 
-            # LOD and LOQ are always the last two columns of each data row
             lod_val = 0.01
             loq_val = 0.02
-            if len(row) >= 2:
-                try: lod_val = float(str(row[-2] or "").strip())
-                except (ValueError, TypeError): pass
-                try: loq_val = float(str(row[-1] or "").strip())
-                except (ValueError, TypeError): pass
+            try:
+                lod_val = float(str(row[col_lod] or "").strip())
+            except (ValueError, TypeError, IndexError):
+                pass
+            try:
+                loq_val = float(str(row[col_loq] or "").strip())
+            except (ValueError, TypeError, IndexError):
+                pass
 
             for ci, sid, depth in sample_cols:
                 if ci >= len(row):
