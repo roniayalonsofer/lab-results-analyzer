@@ -580,6 +580,15 @@ class LabReportExcel:
                     "pid":      r.get("pid_reading", ""),
                 }
 
+        # Auto-downgrade lod_loq_mode: when every compound has lod = None (e.g. ALS
+        # reports that only provide LOR/LOQ with no separate LOD column), showing a
+        # blank LOD column adds noise. Downgrade "both" → "loq" so only LOQ appears.
+        cfg = dict(cfg)  # local copy — never mutate the global SHEET_CONFIG entry
+        if cfg.get("lod_loq_mode") == "both" and not any(
+            lod_map.get(c) is not None for c in compounds
+        ):
+            cfg["lod_loq_mode"] = "loq"
+
         # depth_map not needed when depth is embedded in the composite key,
         # but kept as a fallback for any callers that rely on it.
         depth_map: dict[str, str] = {}
