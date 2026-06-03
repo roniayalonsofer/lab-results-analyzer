@@ -9,7 +9,7 @@ Sheet format ("Client SOIL 1"):
   Rows 14+       : compound at idx 0, unit at idx 2, LOR at idx 3, values at idx 4+
 
   Values like "<0.050" = below LOR (flag <LOQ, value = numeric after <).
-  "ND" / "N.D." = not detected (flag ND, value = LOR when available).
+  "ND" / "N.D." / "----" / empty = not detected (flag <LOQ, value = LOR).
 
 ALSGrainSizeParser uses the same sheet format but recognises fraction parameters
 ("Fraction X-Y mm") and tags records as SOIL_GRAIN_SIZE.
@@ -106,10 +106,10 @@ def _parse_als_sheet(xl: pd.ExcelFile, sheet_name: str) -> tuple[list[str], dict
 def _parse_value(raw_val: str, loq: float | None) -> tuple[float | None, str | None]:
     """Parse a raw cell string into (value, flag)."""
     v = raw_val.strip()
-    if not v or v.lower() == "nan":
-        return None, None
+    if not v or v.lower() == "nan" or v == "----":
+        return loq, "<LOQ"
     if v.upper() in ("ND", "N.D.", "N/D", "<LOR", "< LOR", "NOT DETECTED"):
-        return loq, "ND"
+        return loq, "<LOQ"
     if v.startswith("<"):
         try:
             num = float(v[1:])
@@ -119,7 +119,7 @@ def _parse_value(raw_val: str, loq: float | None) -> tuple[float | None, str | N
     try:
         return float(v), None
     except ValueError:
-        return None, None
+        return loq, "<LOQ"
 
 
 # ---------------------------------------------------------------------------
