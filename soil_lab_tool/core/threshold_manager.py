@@ -489,6 +489,41 @@ class ThresholdManager:
             )
         return None
 
+    def get_cas_by_name(self, name: str) -> str | None:
+        """Return the CAS number for a compound looked up by name.
+
+        Searches _vsl_full first (800+ compounds), then _main.
+        Matching strategy mirrors _lookup_main_by_name:
+          1. Exact case-insensitive match on the name column.
+          2. Partial/contains match for names longer than 4 characters.
+        Returns None when no match is found.
+        """
+        name_lo = name.strip().lower()
+        if not name_lo:
+            return None
+        for df in ([self._vsl_full] if self._vsl_full is not None else []) + [self._main]:
+            if df is None or "CAS No." not in df.columns:
+                continue
+            name_col = next(
+                (c for c in df.columns
+                 if any(k in c.lower() for k in ("name", "compound", "chemical", "chimical"))),
+                None,
+            )
+            if name_col is None:
+                continue
+            mask = df[name_col].str.strip().str.lower() == name_lo
+            row  = df[mask]
+            if row.empty and len(name_lo) > 4:
+                mask = df[name_col].apply(
+                    lambda x: name_lo in str(x).strip().lower() if x is not None else False
+                )
+                row = df[mask]
+            if not row.empty:
+                cas = str(row.iloc[0]["CAS No."]).strip()
+                if cas and cas.lower() not in ("nan", ""):
+                    return cas
+        return None
+
     def get_thresholds_for_analysis(
         self, cas: str, analysis_type: str
     ) -> dict[str, float | None]:

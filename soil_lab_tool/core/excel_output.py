@@ -533,6 +533,14 @@ class LabReportExcel:
                 unit_map[cmp] = r.get("unit", cfg.get("unit", ""))
             pivot[cmp][sid] = (r.get("value"), r.get("flag", ""), r.get("lod"))
 
+        # Enrich cas_map: for compounds with no CAS from the parser, try a
+        # name-based lookup in the threshold manager's VSL tables.
+        for cmp in list(cas_map):
+            if not cas_map[cmp]:
+                looked_up = self.tm.get_cas_by_name(cmp)
+                if looked_up:
+                    cas_map[cmp] = looked_up
+
         # Get thresholds per compound
         thresh_vals: dict[str, dict[str, float | None]] = {}
         for cmp, cas in cas_map.items():
