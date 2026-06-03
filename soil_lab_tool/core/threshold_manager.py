@@ -239,7 +239,7 @@ class ThresholdManager:
                 # ── Scan header rows (0-7) for column positions ───────────────
                 sv_indoor_col:    int | None = None
                 sv_outdoor_col:   int | None = None
-                sv_ambient_col:   int | None = None
+                ambient_air_col:  int | None = None
                 soil_vh_col:      int | None = None
                 soil_hm_0_6_col:  int | None = None
                 soil_hm_6_col:    int | None = None
@@ -255,9 +255,9 @@ class ThresholdManager:
                             sv_indoor_col = ci
                         elif "soil vapor" in vs and "outdoor" in vs and sv_outdoor_col is None:
                             sv_outdoor_col = ci
-                        # Ambient air column (col 10 in V7; header contains "ambient")
-                        if "ambient" in vs and sv_ambient_col is None:
-                            sv_ambient_col = ci
+                        # Ambient Air column (col 10 in V7; row 2 header "Ambient Air")
+                        if "ambient air" in vs and "soil vapor" not in vs and ambient_air_col is None:
+                            ambient_air_col = ci
                         # Soil direct contact: sensitivity / depth keywords
                         if "very high" in vs and soil_vh_col is None:
                             soil_vh_col = ci
@@ -270,7 +270,7 @@ class ThresholdManager:
                             soil_low_col = ci
 
                 # Fallback to known V7 column positions when scanning finds nothing
-                sv_ambient_col  = sv_ambient_col  if sv_ambient_col  is not None else 10
+                ambient_air_col = ambient_air_col if ambient_air_col is not None else 10
                 soil_vh_col     = soil_vh_col     if soil_vh_col     is not None else 3
                 soil_hm_0_6_col = soil_hm_0_6_col if soil_hm_0_6_col is not None else 4
                 soil_hm_6_col   = soil_hm_6_col   if soil_hm_6_col   is not None else 6
@@ -291,8 +291,8 @@ class ThresholdManager:
                 # ── Build one DataFrame per column type ───────────────────────
                 col_specs = [
                     (sv_indoor_col,   "indoor"),
-                    (sv_outdoor_col,  "outdoor"),
-                    (sv_ambient_col,  "ambient"),
+                    (sv_outdoor_col,   "outdoor"),
+                    (ambient_air_col,  "ambient_air"),
                     (soil_vh_col,     "soil_vh"),
                     (soil_hm_0_6_col, "soil_hm_0_6"),
                     (soil_hm_6_col,   "soil_hm_6"),
@@ -411,9 +411,9 @@ class ThresholdManager:
             "GAS_OUTDOOR_RES":        "res_outdoor",
             "GAS_INDOOR_IND":         "ind_indoor",
             "GAS_OUTDOOR_IND":        "ind_outdoor",
-            # Ambient air (col 10 in Tier 1 Residential/Industrial RBTL)
-            "GAS_AMBIENT_RES":        "res_ambient",
-            "GAS_AMBIENT_IND":        "ind_ambient",
+            # Ambient Air (col 10 in Tier 1 Residential/Industrial RBTL)
+            "GAS_AMBIENT_RES":        "res_ambient_air",
+            "GAS_AMBIENT_IND":        "ind_ambient_air",
             # Soil direct contact — residential, with aquifer sensitivity & depth
             "TIER1_RES_SOIL_VH":      "res_soil_vh",
             "TIER1_RES_SOIL_HM_0_6":  "res_soil_hm_0_6",
@@ -456,7 +456,7 @@ class ThresholdManager:
         _rbtl_map = {
             "GAS_INDOOR_RES":  "res_indoor",  "GAS_OUTDOOR_RES": "res_outdoor",
             "GAS_INDOOR_IND":  "ind_indoor",  "GAS_OUTDOOR_IND": "ind_outdoor",
-            "GAS_AMBIENT_RES": "res_ambient", "GAS_AMBIENT_IND": "ind_ambient",
+            "GAS_AMBIENT_RES": "res_ambient_air", "GAS_AMBIENT_IND": "ind_ambient_air",
             "TIER1_RES_SOIL_VH": "res_soil_vh", "TIER1_RES_SOIL_HM_0_6": "res_soil_hm_0_6",
             "TIER1_RES_SOIL_HM_6": "res_soil_hm_6", "TIER1_RES_SOIL_LOW": "res_soil_low",
             "TIER1_IND_SOIL_VH": "ind_soil_vh", "TIER1_IND_SOIL_HM_0_6": "ind_soil_hm_0_6",
