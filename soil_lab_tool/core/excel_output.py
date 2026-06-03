@@ -948,10 +948,11 @@ class LabReportExcel:
                     # <DL / <MDL / <LOD in input → <actual_lod_number (no trailing .0)
                     display = f"<{_fmt_lod(lod)}" if lod is not None else "ND"
                 elif flag == "<LOQ":
-                    # <LOQ → show numeric LOQ when known, else literal "<LOQ"
+                    # Store the numeric LOQ value; Excel number format "<"0.### renders
+                    # it as "<0.05" while keeping the cell value as a true number.
+                    # Category header rows with no LOR in the source get None → blank.
                     loq_ref = loq_val or v
-                    display = (_round_sf(loq_ref) if isinstance(loq_ref, float)
-                               else ("<LOQ" if loq_ref is None else loq_ref))
+                    display = _round_sf(loq_ref) if isinstance(loq_ref, float) else None
                 elif flag == "<":
                     # Explicit <numeric in input → keep < prefix
                     display = f"<{v}" if isinstance(v, float) else f"<{v}"
@@ -990,6 +991,8 @@ class LabReportExcel:
                 elif ci > N_FIXED:
                     si = ci - N_FIXED - 1
                     display, num_v, flag, lod = sample_vals[si]
+                    if flag == "<LOQ" and isinstance(val, (int, float)):
+                        c.number_format = '"<"0.###'
                     vsl_lim      = self._vsl_limit(t_vals)
                     tier1_ind    = self._tier1_ind_limit(t_vals)
                     tier1_res    = self._tier1_res_limit(t_vals)
@@ -1173,10 +1176,10 @@ class LabReportExcel:
                     # <DL / <MDL / <LOD in input → <actual_lod_number (no trailing .0)
                     display = f"<{_fmt_lod(lod)}" if lod is not None else "ND"
                 elif flag == "<LOQ":
-                    # <LOQ → show numeric LOQ when known, else literal "<LOQ"
+                    # Store the numeric LOQ value; "<"0.### format renders as "<0.05".
+                    # Category header rows with no LOR in the source get None → blank.
                     loq_ref = loq_val or v
-                    display = (_round_sf(loq_ref) if isinstance(loq_ref, float)
-                               else ("<LOQ" if loq_ref is None else loq_ref))
+                    display = _round_sf(loq_ref) if isinstance(loq_ref, float) else None
                 elif flag == "<":
                     # Explicit <numeric in input → keep < prefix
                     loq_ref = loq_val or v
@@ -1191,9 +1194,14 @@ class LabReportExcel:
                 # CellRichText carries its own fonts; plain values use _font()
                 if not isinstance(val, CellRichText):
                     c.font = _font(val)
-                # Thousands-separator for numeric compound values
+                # Number format for numeric compound values
                 if ci >= cmp_col_start and isinstance(val, (int, float)):
-                    c.number_format = _num_fmt_data(val)
+                    comp_idx               = ci - cmp_col_start
+                    _, flag_nf, _          = row_meta[comp_idx]
+                    if flag_nf == "<LOQ":
+                        c.number_format = '"<"0.###'
+                    else:
+                        c.number_format = _num_fmt_data(val)
                 c.alignment = CENTER
                 c.border    = THIN
 
