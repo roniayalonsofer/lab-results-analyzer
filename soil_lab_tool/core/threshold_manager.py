@@ -79,10 +79,12 @@ THRESHOLD_LABELS: dict[str, str] = {
     "PFAS_TIER1_IND_6PLUS":    "PFAS TIER1 תעשייה - רגישות גבוהה/בינונית, >6מ'",
     "PFAS_TIER1_IND_NO_GW":    "PFAS TIER1 תעשייה - רגישות נמוכה",
     # Soil-vapor RBTL keys (full V7 Tier1 RBTL sheets)
-    "GAS_INDOOR_RES":  "ערך סף מגורים",
-    "GAS_OUTDOOR_RES": "ערך סף מגורים",
-    "GAS_INDOOR_IND":  "ערך סף תעשייה",
-    "GAS_OUTDOOR_IND": "ערך סף תעשייה",
+    "GAS_INDOOR_RES":  "גז קרקע — הגנה על אוויר פנים מבני (מגורים)",
+    "GAS_OUTDOOR_RES": "ערך סף מגורים — חוץ",
+    "GAS_INDOOR_IND":  "גז קרקע — הגנה על אוויר פנים מבני (תעשייה)",
+    "GAS_OUTDOOR_IND": "ערך סף תעשייה — חוץ",
+    "GAS_AMBIENT_RES": "אוויר תוך מבני — Ambient Air (מגורים)",
+    "GAS_AMBIENT_IND": "אוויר תוך מבני — Ambient Air (תעשייה)",
     # Soil direct-contact RBTL keys with aquifer sensitivity & depth
     "TIER1_RES_SOIL_VH":     "TIER1 קרקע מגורים - רגיש מאוד",
     "TIER1_RES_SOIL_HM_0_6": "TIER1 קרקע מגורים - רגיש/בינוני, 0-6מ'",
@@ -105,8 +107,9 @@ _SOIL_TIER1_KEYS: list[str] = [
 # Which threshold keys apply to which analysis type
 ANALYSIS_THRESHOLDS: dict[str, list[str]] = {
     # Soil gas: soil-vapor RBTL keys from full V7 Tier1 RBTL sheets
-    "SOIL_GAS_VOC": ["GAS_INDOOR_RES", "GAS_OUTDOOR_RES",
-                     "GAS_INDOOR_IND",  "GAS_OUTDOOR_IND"],
+    "SOIL_GAS_VOC": ["GAS_INDOOR_RES",  "GAS_OUTDOOR_RES",
+                     "GAS_INDOOR_IND",  "GAS_OUTDOOR_IND",
+                     "GAS_AMBIENT_RES", "GAS_AMBIENT_IND"],
     # Soil types: VSL direct-contact + all aquifer-sensitivity variants
     "SOIL_VOC":       ["VSL_SOIL"] + _SOIL_TIER1_KEYS,
     "SOIL_SVOC":      ["VSL_SOIL"] + _SOIL_TIER1_KEYS,
@@ -236,6 +239,7 @@ class ThresholdManager:
                 # ── Scan header rows (0-7) for column positions ───────────────
                 sv_indoor_col:    int | None = None
                 sv_outdoor_col:   int | None = None
+                sv_ambient_col:   int | None = None
                 soil_vh_col:      int | None = None
                 soil_hm_0_6_col:  int | None = None
                 soil_hm_6_col:    int | None = None
@@ -251,6 +255,9 @@ class ThresholdManager:
                             sv_indoor_col = ci
                         elif "soil vapor" in vs and "outdoor" in vs and sv_outdoor_col is None:
                             sv_outdoor_col = ci
+                        # Ambient air column (col 10 in V7; header contains "ambient")
+                        if "ambient" in vs and sv_ambient_col is None:
+                            sv_ambient_col = ci
                         # Soil direct contact: sensitivity / depth keywords
                         if "very high" in vs and soil_vh_col is None:
                             soil_vh_col = ci
@@ -263,6 +270,7 @@ class ThresholdManager:
                             soil_low_col = ci
 
                 # Fallback to known V7 column positions when scanning finds nothing
+                sv_ambient_col  = sv_ambient_col  if sv_ambient_col  is not None else 10
                 soil_vh_col     = soil_vh_col     if soil_vh_col     is not None else 3
                 soil_hm_0_6_col = soil_hm_0_6_col if soil_hm_0_6_col is not None else 4
                 soil_hm_6_col   = soil_hm_6_col   if soil_hm_6_col   is not None else 6
@@ -284,6 +292,7 @@ class ThresholdManager:
                 col_specs = [
                     (sv_indoor_col,   "indoor"),
                     (sv_outdoor_col,  "outdoor"),
+                    (sv_ambient_col,  "ambient"),
                     (soil_vh_col,     "soil_vh"),
                     (soil_hm_0_6_col, "soil_hm_0_6"),
                     (soil_hm_6_col,   "soil_hm_6"),
@@ -397,11 +406,14 @@ class ThresholdManager:
             return self._lookup_pfas_direct(_pfas_direct_map[threshold_key], cas)
         # RBTL keys — soil vapor + soil direct-contact (from full V7 Tier1 sheets)
         _rbtl_map = {
-            # Soil vapor inhalation
+            # Soil vapor inhalation — indoor (col 12) and outdoor
             "GAS_INDOOR_RES":         "res_indoor",
             "GAS_OUTDOOR_RES":        "res_outdoor",
             "GAS_INDOOR_IND":         "ind_indoor",
             "GAS_OUTDOOR_IND":        "ind_outdoor",
+            # Ambient air (col 10 in Tier 1 Residential/Industrial RBTL)
+            "GAS_AMBIENT_RES":        "res_ambient",
+            "GAS_AMBIENT_IND":        "ind_ambient",
             # Soil direct contact — residential, with aquifer sensitivity & depth
             "TIER1_RES_SOIL_VH":      "res_soil_vh",
             "TIER1_RES_SOIL_HM_0_6":  "res_soil_hm_0_6",
@@ -444,6 +456,7 @@ class ThresholdManager:
         _rbtl_map = {
             "GAS_INDOOR_RES":  "res_indoor",  "GAS_OUTDOOR_RES": "res_outdoor",
             "GAS_INDOOR_IND":  "ind_indoor",  "GAS_OUTDOOR_IND": "ind_outdoor",
+            "GAS_AMBIENT_RES": "res_ambient", "GAS_AMBIENT_IND": "ind_ambient",
             "TIER1_RES_SOIL_VH": "res_soil_vh", "TIER1_RES_SOIL_HM_0_6": "res_soil_hm_0_6",
             "TIER1_RES_SOIL_HM_6": "res_soil_hm_6", "TIER1_RES_SOIL_LOW": "res_soil_low",
             "TIER1_IND_SOIL_VH": "ind_soil_vh", "TIER1_IND_SOIL_HM_0_6": "ind_soil_hm_0_6",

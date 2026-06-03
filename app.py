@@ -1052,6 +1052,16 @@ with tab_excel:
     if has_soil_gas:
         any_shown = True
         st.markdown("##### 💨 גז קרקע VOC")
+        gas_indoor_type = st.radio(
+            "סוג ערך סף — אוויר פנים מבני:",
+            options=[
+                "גז קרקע — הגנה על אוויר פנים מבני",
+                "אוויר תוך מבני (Ambient Air)",
+            ],
+            index=0,
+            key="gas_indoor_type",
+            horizontal=True,
+        )
         sg_col_r, sg_col_i = st.columns(2)
         with sg_col_r:
             st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 מגורים</div>', unsafe_allow_html=True)
@@ -1061,9 +1071,10 @@ with tab_excel:
             st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 תעשייה</div>', unsafe_allow_html=True)
             sg_ind_in  = st.checkbox("Indoor — פנים",  value=False, key="sg_ind_in")
             sg_ind_out = st.checkbox("Outdoor — חוץ",  value=False, key="sg_ind_out")
-        if sg_res_in:  selected_thresholds.append("GAS_INDOOR_RES")
+        _use_ambient = gas_indoor_type == "אוויר תוך מבני (Ambient Air)"
+        if sg_res_in:  selected_thresholds.append("GAS_AMBIENT_RES" if _use_ambient else "GAS_INDOOR_RES")
         if sg_res_out: selected_thresholds.append("GAS_OUTDOOR_RES")
-        if sg_ind_in:  selected_thresholds.append("GAS_INDOOR_IND")
+        if sg_ind_in:  selected_thresholds.append("GAS_AMBIENT_IND" if _use_ambient else "GAS_INDOOR_IND")
         if sg_ind_out: selected_thresholds.append("GAS_OUTDOOR_IND")
 
     # ── Groundwater ───────────────────────────────────────────────
