@@ -187,11 +187,11 @@ class AlchemSoilParser(BaseParser):
 
                 # Map detection flags
                 if raw_val.upper() in ("N.D.", "ND", "N/D", "NOT DETECTED", ""):
-                    value = lod
-                    flag  = "ND"
+                    value = loq
+                    flag  = "<LOQ"
                 elif raw_val.lower() in ("<mdl", "<dl"):
-                    value = lod
-                    flag  = "ND"
+                    value = loq
+                    flag  = "<LOQ"
                 elif raw_val.lower() in ("<mrl", "<loq", "<rl"):
                     value = loq
                     flag  = "<LOQ"
@@ -265,8 +265,8 @@ class AlchemSoilParser(BaseParser):
                 loq = loq_per_col.get(ci)
 
                 if raw_val.upper() in ("N.D.", "ND", "N/D"):
-                    value = loq   # use LOQ when available; None otherwise
-                    flag  = "ND"
+                    value = loq
+                    flag  = "<LOQ"
                 elif raw_val.lower() in ("<loq", "<mrl", "<rl"):
                     value = None   # no numeric LOQ available in TPH sheet
                     flag  = "<LOQ"
@@ -347,9 +347,9 @@ class AlchemSoilParser(BaseParser):
                 sample_id = sample_ids[i] if i < len(sample_ids) else f"Sample-{i+1}"
 
                 if raw_val.upper() in ("N.D.", "ND", "N/D", "NOT DETECTED", ""):
-                    value, flag = lod, "ND"
+                    value, flag = loq, "<LOQ"
                 elif raw_val.lower() in ("<mdl", "<dl"):
-                    value, flag = lod, "ND"
+                    value, flag = loq, "<LOQ"
                 elif raw_val.lower() in ("<mrl", "<loq", "<rl"):
                     value, flag = loq, "<LOQ"
                 else:
@@ -624,7 +624,7 @@ class AlchemTPHPDFParser(BaseParser):
                 loq = loq_values.get(name)
 
                 if raw_val.upper() in ("N.D.", "ND", "N/D", "NOT DETECTED", ""):
-                    value, flag = lod, "ND"
+                    value, flag = loq, "<LOQ"
                 elif raw_val.upper() in ("<LOQ", "<MRL", "<RL"):
                     value, flag = loq, "<LOQ"
                 else:

@@ -801,18 +801,20 @@ class LabReportExcel:
         thresh_labels = [THRESHOLD_LABELS.get(k, k) for k in thresh_keys]
 
         if include_lod_loq:
-            # ── Rows 1-4: sample metadata rows (soil gas) ─────────────
+            # ── Rows 1-N: sample metadata rows (soil gas) ─────────────
+            pid_vals = [sample_meta.get(s, {}).get("pid", "") for s in samples]
             meta_rows = [
-                ("שם קידוח",                        [s for s in samples]),
-                ("תאריך ביצוע הדיגום",              [sample_meta.get(s, {}).get("date",     "") for s in samples]),
-                ("מספר קניסטר",                     [sample_meta.get(s, {}).get("canister", "") for s in samples]),
-                ('קריאת PID בסיום השאיבה [חל"מ]',  [sample_meta.get(s, {}).get("pid",      "") for s in samples]),
+                ("שם קידוח",           [s for s in samples]),
+                ("תאריך ביצוע הדיגום", [sample_meta.get(s, {}).get("date",     "") for s in samples]),
+                ("מספר קניסטר",        [sample_meta.get(s, {}).get("canister", "") for s in samples]),
             ]
+            if any(pid_vals):
+                meta_rows.append(('קריאת PID בסיום השאיבה [חל"מ]', pid_vals))
             for ri, (label, vals) in enumerate(meta_rows, 1):
                 # Merge label across all fixed columns (A → last fixed col)
                 ws.merge_cells(start_row=ri, start_column=1,
                                end_row=ri,   end_column=N_FIXED)
-                if ri == 4:
+                if "PID" in label:
                     # Rich text: Hebrew parts → David 9 bold; "PID" → Times New Roman 8 bold
                     he_if = InlineFont(rFont="David", sz=9, b=True)
                     en_if = InlineFont(rFont="Times New Roman", sz=8, b=True)
@@ -833,7 +835,7 @@ class LabReportExcel:
                 for ci in range(2, N_FIXED + 1):
                     ws.cell(row=ri, column=ci).border = THIN
                 # Sample value cells
-                is_date_row = (ri == 2)   # row 2 = תאריך ביצוע הדיגום
+                is_date_row = "תאריך" in label
                 for ci, v in enumerate(vals, N_FIXED + 1):
                     cell = ws.cell(row=ri, column=ci)
                     cell.border    = THIN
@@ -844,13 +846,13 @@ class LabReportExcel:
                     else:
                         cell.value = v
                         cell.font  = _font(v)
-            # ── Row 5: column headers (no fill; sample cols merged) ────
+            # ── Column headers row (no fill; sample cols merged) ────────
             lod_hdr = f"LOD [{unit}]"
             loq_hdr = f"LOQ [{unit}]"
             headers = (["תרכובת", "CAS Number", lod_hdr, loq_hdr]
                        + thresh_labels
                        + [""] * len(samples))
-            hdr_row = 5
+            hdr_row = len(meta_rows) + 1
         else:
             # ── Row 1: merged project info header ─────────────────────
             self._write_header_row(ws, 1, total_cols, hinfo)
@@ -865,11 +867,13 @@ class LabReportExcel:
                                               float(split_p[sid][1]) if split_p[sid][1] else 0.0))
             boreholes = [_dup_rich_text(split_p[sid][0]) for sid in samples]
             depths    = [split_p[sid][1]                 for sid in samples]
+            pid_vals = [sample_meta.get(s, {}).get("pid", "") for s in samples]
             meta_rows = [
-                ("שם קידוח",        boreholes),
-                ("עומק [מ']",       depths),
-                ("קריאת PID [ppm]", [""] * len(samples)),
+                ("שם קידוח",  boreholes),
+                ("עומק [מ']", depths),
             ]
+            if any(pid_vals):
+                meta_rows.append(("קריאת PID [ppm]", pid_vals))
             if cfg.get("include_lod_row"):
                 # Minimum LOD across all compounds for each sample column
                 def _min_sample_lod(sid):
@@ -1098,24 +1102,27 @@ class LabReportExcel:
                 return (*_borehole_sort_key(bh), float(dep) if dep else 0.0)
             samples = sorted(samples, key=_sort_key)
 
-        # Column count: borehole + depth (when present) + PID + compounds
+        # Column count: borehole + depth (when present) + PID (when non-empty) + compounds
+        has_pid       = any(sample_meta.get(sid, {}).get("pid", "") for sid in samples)
         depth_offset  = 1 if has_depth else 0
-        PID_COL       = 1 + depth_offset + 1          # 1-based index of PID column
-        total_cols    = 1 + depth_offset + 1 + len(compounds)   # +1 for PID
-        cmp_col_start = 2 + depth_offset + 1          # 1-based col of first compound
+        pid_offset    = 1 if has_pid   else 0
+        total_cols    = 1 + depth_offset + pid_offset + len(compounds)
+        cmp_col_start = 2 + depth_offset + pid_offset  # 1-based col of first compound
 
         # ── Row 1: merged project header ────────────────────────────────
         self._write_header_row(ws, 1, total_cols, hinfo)
 
         # ── Rows 2-4: compound names / CAS / unit ───────────────────────
+        _pid_hdr = ["PID [ppm]"] if has_pid else []
+        _pid_pad = [""]         if has_pid else []
         if has_depth:
-            row2_data = ["שם קידוח", "עומק [מ']", "PID [ppm]"] + compounds
-            row3_data = ["CAS Number", "", ""]  + [cas_map.get(c, "") for c in compounds]
-            row4_data = ["יחידות", "", ""]      + [unit_map.get(c, hinfo["unit"]) for c in compounds]
+            row2_data = ["שם קידוח", "עומק [מ']"] + _pid_hdr + compounds
+            row3_data = ["CAS Number", ""]          + _pid_pad + [cas_map.get(c, "") for c in compounds]
+            row4_data = ["יחידות", ""]              + _pid_pad + [unit_map.get(c, hinfo["unit"]) for c in compounds]
         else:
-            row2_data = ["שם קידוח", "PID [ppm]"] + compounds
-            row3_data = ["CAS Number", ""]  + [cas_map.get(c, "") for c in compounds]
-            row4_data = ["יחידות", ""]      + [unit_map.get(c, hinfo["unit"]) for c in compounds]
+            row2_data = ["שם קידוח"] + _pid_hdr + compounds
+            row3_data = ["CAS Number"] + _pid_pad + [cas_map.get(c, "") for c in compounds]
+            row4_data = ["יחידות"]     + _pid_pad + [unit_map.get(c, hinfo["unit"]) for c in compounds]
 
         for ri, row_vals in enumerate([row2_data, row3_data, row4_data], 2):
             for ci, v in enumerate(row_vals, 1):
@@ -1189,9 +1196,9 @@ class LabReportExcel:
             bh_cell_val = _dup_rich_text(borehole)  # rich text if DUP, else plain
 
             if has_depth:
-                col_vals = [bh_cell_val, depth_str if depth_str else "", ""]  # empty PID
+                col_vals = [bh_cell_val, depth_str if depth_str else ""] + ([""] if has_pid else [])
             else:
-                col_vals = [bh_cell_val, ""]  # borehole + empty PID
+                col_vals = [bh_cell_val] + ([""] if has_pid else [])
 
             for cmp in compounds:
                 v, flag, lod = pivot.get(cmp, {}).get(sid, (None, "ND", None))
