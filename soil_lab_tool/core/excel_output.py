@@ -557,6 +557,18 @@ class LabReportExcel:
                 return False
             compounds = [c for c in compounds if _should_keep(c)]
 
+        # Remove category-header rows: no LOQ value AND no numeric sample values.
+        # These are section labels (e.g. "Alcohols / Esters") emitted by some labs
+        # that carry no analytical data and should not appear in the output sheet.
+        def _is_header_row(cmp: str) -> bool:
+            if loq_map.get(cmp) is not None:
+                return False
+            return not any(
+                isinstance(v, (int, float))
+                for v, _flag, _lod in pivot.get(cmp, {}).values()
+            )
+        compounds = [c for c in compounds if not _is_header_row(c)]
+
         # Per-sample metadata (soil gas: canister, sampling date, PID reading)
         sample_meta: dict[str, dict] = {}
         for r in records:
