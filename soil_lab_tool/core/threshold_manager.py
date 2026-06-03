@@ -489,39 +489,30 @@ class ThresholdManager:
             )
         return None
 
-    def get_cas_by_name(self, name: str) -> str | None:
+    def get_cas_by_name(self, compound_name: str) -> str | None:
         """Return the CAS number for a compound looked up by name.
 
         Searches _vsl_full first (800+ compounds), then _main.
-        Matching strategy mirrors _lookup_main_by_name:
-          1. Exact case-insensitive match on the name column.
-          2. Partial/contains match for names longer than 4 characters.
+        Tries each variant produced by _name_variants for an exact
+        case-insensitive match on the name column.
         Returns None when no match is found.
         """
-        name_lo = name.strip().lower()
-        if not name_lo:
-            return None
+        candidates = self._name_variants(compound_name)
         for df in ([self._vsl_full] if self._vsl_full is not None else []) + [self._main]:
-            if df is None or "CAS No." not in df.columns:
+            if df is None:
                 continue
-            name_col = next(
-                (c for c in df.columns
-                 if any(k in c.lower() for k in ("name", "compound", "chemical", "chimical"))),
-                None,
-            )
-            if name_col is None:
+            name_col = next((c for c in df.columns if any(k in c.lower() for k in ("name", "compound", "chemical"))), None)
+            cas_col  = next((c for c in df.columns if "cas" in c.lower()), None)
+            if name_col is None or cas_col is None:
                 continue
-            mask = df[name_col].str.strip().str.lower() == name_lo
-            row  = df[mask]
-            if row.empty and len(name_lo) > 4:
-                mask = df[name_col].apply(
-                    lambda x: name_lo in str(x).strip().lower() if x is not None else False
-                )
-                row = df[mask]
-            if not row.empty:
-                cas = str(row.iloc[0]["CAS No."]).strip()
-                if cas and cas.lower() not in ("nan", ""):
-                    return cas
+            col_lower = df[name_col].str.strip().str.lower()
+            for variant in candidates:
+                mask = col_lower == variant.lower()
+                row  = df[mask]
+                if not row.empty:
+                    val = str(row.iloc[0][cas_col]).strip()
+                    if val and val.lower() != "nan":
+                        return val
         return None
 
     def get_thresholds_for_analysis(
@@ -754,6 +745,21 @@ class ThresholdManager:
             if val is not None:
                 return val * 1000
         return None
+
+    @staticmethod
+    def _name_variants(name: str) -> list[str]:
+        """Return name variants to try when matching compound names.
+
+        Always includes the original name. Also strips trailing parenthetical
+        notes (e.g. "Benzene (total)" → "Benzene") as a second candidate.
+        """
+        s = name.strip()
+        variants = [s]
+        # Strip trailing parenthetical notes
+        base = re.sub(r'\s*\([^)]*\)\s*$', '', s).strip()
+        if base and base != s:
+            variants.append(base)
+        return variants
 
     @staticmethod
     def _to_float(val) -> float | None:
