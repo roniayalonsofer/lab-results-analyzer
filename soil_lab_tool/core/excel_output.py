@@ -36,6 +36,7 @@ Sheet config:
 
 from __future__ import annotations
 
+import copy
 import io
 import math
 import os
@@ -555,9 +556,9 @@ class LabReportExcel:
             def _should_keep(cmp: str) -> bool:
                 t_limit = self._strictest(thresh_vals.get(cmp, {}))
                 for sid in samples:
-                    v, flag, lod = pivot.get(cmp, {}).get(sid, (None, "ND", None))
+                    v, flag, lod = pivot.get(cmp, {}).get(sid, (None, "<LOQ", None))
                     # At least one detected value → keep
-                    if flag not in ("ND", "<LOQ") and v is not None:
+                    if flag not in ("<LOQ",) and v is not None:
                         return True
                     # ND but LOD exceeds threshold → grey → keep
                     if lod is not None and t_limit is not None and lod > t_limit:
@@ -591,7 +592,7 @@ class LabReportExcel:
         # Auto-downgrade lod_loq_mode: when every compound has lod = None (e.g. ALS
         # reports that only provide LOR/LOQ with no separate LOD column), showing a
         # blank LOD column adds noise. Downgrade "both" → "loq" so only LOQ appears.
-        cfg = dict(cfg)  # local copy — never mutate the global SHEET_CONFIG entry
+        cfg = copy.deepcopy(cfg)  # fresh copy each call — never mutate global SHEET_CONFIG
         if cfg.get("lod_loq_mode") == "both" and not any(
             lod_map.get(c) is not None for c in compounds
         ):
@@ -687,8 +688,8 @@ class LabReportExcel:
         for param in params:
             row_data = [param, unit_map.get(param, "")]
             for sid in samples:
-                v, flag, _ = pivot.get(param, {}).get(sid, (None, "ND", None))
-                row_data.append(v if v is not None else "N.D.")
+                v, flag, _ = pivot.get(param, {}).get(sid, (None, "<LOQ", None))
+                row_data.append(v if v is not None else "")
             for ci, val in enumerate(row_data, 1):
                 c = ws.cell(row=row_num, column=ci, value=val)
                 c.font      = _font(val)
@@ -737,8 +738,8 @@ class LabReportExcel:
             v     = r.get("value")
             flag  = r.get("flag", "")
 
-            if flag == "ND" or v is None:
-                display = "N.D."
+            if v is None:
+                display = ""
             elif isinstance(v, float):
                 display = round(v, 3)
             else:
@@ -969,25 +970,14 @@ class LabReportExcel:
             # Sample values — build display strings + keep raw for colouring
             sample_vals: list = []
             for sid in samples:
-                v, flag, lod = pivot.get(cmp, {}).get(sid, (None, "ND", None))
-                if flag == "ND" or (v is None and flag not in ("<LOD", "<LOQ")):
-                    if v is None:
-                        display = "ND"
-                    elif cfg.get("nd_shows_loq") and loq_val is not None:
-                        display = _round_sf(loq_val)
-                    else:
-                        display = _round_sf(lod) if lod is not None else "ND"
-                elif flag == "<LOD":
-                    # <DL / <MDL / <LOD in input → <actual_lod_number (no trailing .0)
-                    display = f"<{_fmt_lod(lod)}" if lod is not None else "ND"
-                elif flag == "<LOQ":
-                    # Store the numeric LOQ value; Excel number format "<"0.### renders
-                    # it as "<0.05" while keeping the cell value as a true number.
-                    # Category header rows with no LOR in the source get None → blank.
+                v, flag, lod = pivot.get(cmp, {}).get(sid, (None, "<LOQ", None))
+                if flag == "<LOQ":
+                    # Store numeric LOQ; "<"0.### format makes Excel display "<0.05".
                     loq_ref = loq_val or v
                     display = _round_sf(loq_ref) if isinstance(loq_ref, float) else None
+                elif flag == "<LOD":
+                    display = f"<{_fmt_lod(lod)}" if lod is not None else None
                 elif flag == "<":
-                    # Explicit <numeric in input → keep < prefix
                     display = f"<{v}" if isinstance(v, float) else f"<{v}"
                 else:
                     display = v
@@ -1031,7 +1021,7 @@ class LabReportExcel:
                     tier1_res    = self._tier1_res_limit(t_vals)
                     any_lim      = self._strictest(t_vals)
                     if any_lim is not None:
-                        if (flag not in ("ND", "<LOQ", "<")
+                        if (flag not in ("<LOQ", "<")
                                 and isinstance(num_v, (int, float))):
                             if tier1_ind is not None and num_v > tier1_ind:
                                 c.fill = PINK      # exceeds Tier 1 Industrial
@@ -1043,7 +1033,7 @@ class LabReportExcel:
                                 c.fill = YELLOW    # exceeds VSL only
                                 c.font = Font(**FHE, bold=True)
                         # GREY + BOLD: threshold < LOD/LOQ → uncertain exclusion
-                        elif flag in ("ND", "<LOD", "<LOQ", "<"):
+                        elif flag in ("<LOD", "<LOQ", "<"):
                             lod_num = (
                                 lod     if lod     is not None else
                                 lod_val if lod_val is not None else
@@ -1201,23 +1191,15 @@ class LabReportExcel:
                 col_vals = [bh_cell_val] + ([""] if has_pid else [])
 
             for cmp in compounds:
-                v, flag, lod = pivot.get(cmp, {}).get(sid, (None, "ND", None))
+                v, flag, lod = pivot.get(cmp, {}).get(sid, (None, "<LOQ", None))
                 loq_val = loq_map.get(cmp)
-                if flag == "ND" or (v is None and flag not in ("<LOD", "<LOQ")):
-                    if cfg.get("nd_shows_loq") and loq_val is not None:
-                        display = _round_sf(loq_val)
-                    else:
-                        display = _round_sf(lod) if lod is not None else "ND"
-                elif flag == "<LOD":
-                    # <DL / <MDL / <LOD in input → <actual_lod_number (no trailing .0)
-                    display = f"<{_fmt_lod(lod)}" if lod is not None else "ND"
-                elif flag == "<LOQ":
-                    # Store the numeric LOQ value; "<"0.### format renders as "<0.05".
-                    # Category header rows with no LOR in the source get None → blank.
+                if flag == "<LOQ":
+                    # Store numeric LOQ; "<"0.### format makes Excel display "<0.05".
                     loq_ref = loq_val or v
                     display = _round_sf(loq_ref) if isinstance(loq_ref, float) else None
+                elif flag == "<LOD":
+                    display = f"<{_fmt_lod(lod)}" if lod is not None else None
                 elif flag == "<":
-                    # Explicit <numeric in input → keep < prefix
                     loq_ref = loq_val or v
                     display = f"<{loq_ref}" if isinstance(loq_ref, float) else f"<{loq_ref}"
                 else:
@@ -1251,7 +1233,7 @@ class LabReportExcel:
                     tier1_res = self._tier1_res_limit(t_vals)
                     any_lim   = self._strictest(t_vals)
                     if any_lim is not None:
-                        if (flag_cell not in ("ND", "<LOQ", "<")
+                        if (flag_cell not in ("<LOQ", "<")
                                 and isinstance(num_v, (int, float))):
                             if tier1_ind is not None and num_v > tier1_ind:
                                 c.fill = PINK      # exceeds Tier 1 Industrial
@@ -1263,7 +1245,7 @@ class LabReportExcel:
                                 c.fill = YELLOW    # exceeds VSL only
                                 c.font = Font(**FHE, bold=True)
                         # GREY + BOLD: threshold < LOD/LOQ → uncertain exclusion
-                        elif flag_cell in ("ND", "<LOD", "<LOQ", "<"):
+                        elif flag_cell in ("<LOD", "<LOQ", "<"):
                             lod_num = (
                                 lod_cell              if lod_cell              is not None else
                                 lod_map.get(cmp_name) if lod_map.get(cmp_name) is not None else
