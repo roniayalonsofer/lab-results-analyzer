@@ -308,7 +308,7 @@ class ThresholdManager:
                         "name":    name_series,
                         "value":   data.iloc[:, col_idx],
                     })
-                    df = df[df["CAS No."].str.match(_CAS_BROAD_RE, na=False)].copy()
+                    df = df[df["CAS No."].apply(lambda x: bool(_CAS_BROAD_RE.match(str(x))) if x else False)].copy()
                     result[full_key] = df
 
             except Exception:
