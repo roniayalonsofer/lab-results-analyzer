@@ -389,7 +389,7 @@ class AlchemSoilParser(BaseParser):
             for col_name in raw.columns[1:]:
                 raw_val = str(row[col_name]).strip()
                 if raw_val.lower() in ("nan", "", "n.d.", "nd"):
-                    value, flag = None, "ND"
+                    value, flag = None, "<LOQ"
                 else:
                     try:
                         value = float(raw_val)

@@ -112,10 +112,10 @@ class AlchemParser(BaseParser):
                 raw_val   = str(values[col_idx]).strip() if col_idx < len(values) else ""
                 sample_id = get_sample_id(col_idx, i)
 
-                # N.D. → use LOD as value with '<' flag
+                # N.D. → use LOD as value with '<LOQ' flag
                 if raw_val.upper() in ("N.D.", "ND", "N/D", "<DL", "NOT DETECTED", ""):
                     value = lod
-                    flag  = "<"
+                    flag  = "<LOQ"
                 else:
                     value, flag = self._vp.parse(raw_val)
 
@@ -218,9 +218,9 @@ class AlchemParser(BaseParser):
                     sample = "ק" + sample[1:]
                 for compound, val in zip(["DRO", "ORO", "TPH"], lines[i + 1: i + 4]):
                     if val in ("N.D.", "ND"):
-                        value, flag = loq[compound], "<"
+                        value, flag = loq[compound], "<LOQ"
                     elif val == "<LOQ":
-                        value, flag = loq[compound], "<"
+                        value, flag = loq[compound], "<LOQ"
                     else:
                         try:
                             value, flag = float(val.replace(",", "")), ""
@@ -445,13 +445,13 @@ class AlchemParser(BaseParser):
     def _parse_readable_value(self, v, lod_val=0.01, loq_val=0.02):
         v = str(v or "").strip()
         if v in ("<MDL", "<MRL", "N.D.", "ND", "N.D", "n.d."):
-            return lod_val, "<"
+            return loq_val, "<LOQ"
         if v == "<LOQ":
-            return loq_val, "<"
+            return loq_val, "<LOQ"
         try:
             return float(v.replace(",", "")), ""
         except:
-            return lod_val, "<"
+            return loq_val, "<LOQ"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
