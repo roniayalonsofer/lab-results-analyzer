@@ -353,15 +353,6 @@ with st.sidebar:
                                 label_visibility="collapsed")
     category_raw = category_display[cat_label]
 
-    st.markdown('<div class="sidebar-label">📊 נתוני PID</div>', unsafe_allow_html=True)
-    pid_file = st.file_uploader(
-        "העלאת נתוני PID",
-        type=["xlsx"],
-        key="pid_upload",
-        label_visibility="collapsed",
-        help="עמודה 0 = שם קידוח, עמודה 7 = PID [ppm]",
-    )
-
     st.markdown('<hr style="margin:1rem 0 0.5rem;">', unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════
@@ -752,6 +743,23 @@ if True:
         </div>
         """, unsafe_allow_html=True)
 
+    pid_upload_file = st.file_uploader(
+        "העלאת ממצאי שדה (PID) — אופציונלי",
+        type=["xlsx"],
+        key="pid_upload",
+        help="עמודה 0 = שם קידוח (מולא רק בשורה הראשונה), עמודה 7 = PID [ppm]",
+    )
+    if pid_upload_file is not None:
+        try:
+            _pm = _parse_pid_file(pid_upload_file)
+            st.session_state["pid_map"] = _pm
+            st.caption(f"✅ נתוני PID נטענו — {len(_pm)} קידוחים")
+        except Exception as _pid_err:
+            st.warning(f"⚠️ שגיאת קריאת קובץ PID: {_pid_err}")
+            st.session_state["pid_map"] = {}
+    else:
+        st.session_state["pid_map"] = {}
+
     st.markdown('</div>', unsafe_allow_html=True)
 
     if not uploaded_files:
@@ -1094,12 +1102,7 @@ if True:
         (b"<?xml" in _sniff or b"<Workbook" in _sniff)
     )
 
-    pid_map: dict = {}
-    if pid_file is not None:
-        try:
-            pid_map = _parse_pid_file(pid_file)
-        except Exception as _pid_err:
-            st.warning(f"⚠️ שגיאת קריאת קובץ PID: {_pid_err}")
+    pid_map = st.session_state.get("pid_map", {})
 
     excel_buf = io.BytesIO()
     excel_ok  = False
