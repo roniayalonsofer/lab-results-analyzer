@@ -54,309 +54,228 @@ APP_URL = f"http://{LAN_IP}:8501"
 # ══════════════════════════════════════════════════════════════════
 # CSS — full design system
 # ══════════════════════════════════════════════════════════════════
-st.markdown(f"""
+st.markdown("""
 <style>
-/* ── base layout ── */
-/* Apply RTL only to content, not to root — prevents RTL from fighting
-   Streamlit's LTR CSS grid and causing the sidebar/main overlap.       */
-html, body {{ direction: ltr; }}
-[data-testid="stMain"] {{ direction: rtl; }}
-[data-testid="stMain"] .block-container {{
+/* ── fonts + base ── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+html, body { direction: ltr; font-family: Inter, system-ui, -apple-system, sans-serif; }
+[data-testid="stMain"] { direction: rtl; background: #f8fafc; }
+[data-testid="stMain"] .block-container {
     direction: rtl;
-    padding-top: 1rem;
+    padding-top: 0.5rem;
     max-width: 1200px;
     padding-left: 2rem;
     padding-right: 2rem;
-    /* do not use margin: 0 auto here — let Streamlit control horizontal
-       positioning so the block never drifts under the sidebar           */
-}}
+}
 
-/* ── sidebar — RTL position (right side) + always expanded ── */
-[data-testid="stSidebar"] {{
+/* ── sidebar ── */
+[data-testid="stSidebar"] {
     direction: rtl;
-    background: #1a2d38;
+    background: #1e293b;
     min-width: 15rem !important;
     max-width: 16rem !important;
     width: 15.5rem !important;
     flex-shrink: 0 !important;
-    /* move sidebar to right side for Hebrew/RTL layout */
-    right: 0;
-    left: auto;
-    /* override any JS-driven collapse transform */
+    right: 0; left: auto;
     transform: none !important;
     transition: none !important;
     visibility: visible !important;
     display: block !important;
     margin-left: 0 !important;
-}}
-[data-testid="stSidebarContent"] {{
-    direction: rtl;
-}}
-/* also override the collapsed-state that Streamlit applies via aria */
-[data-testid="stSidebar"][aria-expanded="false"] {{
+}
+[data-testid="stSidebarContent"] { direction: rtl; }
+[data-testid="stSidebar"][aria-expanded="false"] {
     transform: none !important;
     width: 15.5rem !important;
     min-width: 15rem !important;
     overflow: visible !important;
-}}
-/* hide ALL collapse/expand controls — cover every known selector variant
-   so neither the in-sidebar button nor the floating re-open button shows */
+}
 [data-testid="stSidebarCollapseButton"],
 [data-testid="stSidebarNavCollapseButton"],
 [data-testid="collapsedControl"],
 button[aria-label="Close sidebar"],
 button[aria-label="Open sidebar"],
 button[aria-label="פתח סרגל צד"],
-button[aria-label="סגור סרגל צד"] {{
-    display: none !important;
-}}
+button[aria-label="סגור סרגל צד"] { display: none !important; }
 
-[data-testid="stSidebar"] * {{ color: #e2e8f0 !important; }}
-/* input / select text — black so it shows on white background */
-[data-testid="stSidebar"] input {{ color: #111827 !important; }}
-[data-testid="stSidebar"] input::placeholder {{ color: #6b7280 !important; }}
+[data-testid="stSidebar"] * { color: #e2e8f0 !important; }
+[data-testid="stSidebar"] input { color: #111827 !important; }
+[data-testid="stSidebar"] input::placeholder { color: #6b7280 !important; }
 [data-testid="stSidebar"] [data-baseweb="select"] span,
-[data-testid="stSidebar"] [data-baseweb="select"] div {{ color: #111827 !important; }}
+[data-testid="stSidebar"] [data-baseweb="select"] div { color: #111827 !important; }
 [data-testid="stSidebar"] .stSelectbox label,
 [data-testid="stSidebar"] .stTextInput label,
-[data-testid="stSidebar"] .stCheckbox label {{ color: #cbd5e1 !important; }}
+[data-testid="stSidebar"] .stCheckbox label { color: #94a3b8 !important; }
 [data-testid="stSidebar"] .stMarkdown h2,
-[data-testid="stSidebar"] .stMarkdown h3 {{ color: #f1f5f9 !important; }}
-[data-testid="stSidebar"] hr {{ border-color: #2a4050; }}
+[data-testid="stSidebar"] .stMarkdown h3 { color: #f1f5f9 !important; }
+[data-testid="stSidebar"] hr { border-color: #334155; }
 
-/* hide footer / menu / header toolbar
-   use display:none (not visibility:hidden) so these elements are fully
-   removed from layout and cannot intercept sidebar-related clicks       */
-#MainMenu {{ display: none !important; }}
-footer {{ display: none !important; }}
-header {{ display: none !important; }}
+/* ── hide Streamlit chrome ── */
+#MainMenu { display: none !important; }
+footer { display: none !important; }
+header { display: none !important; }
 
-/* ── typography — explicit RTL for all text elements ── */
+/* ── RTL typography ── */
 .stMarkdown p, .stMarkdown li,
-.stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 {{
+.stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 {
     direction: rtl; text-align: right;
-}}
+}
 .stTextInput label, .stSelectbox label,
 .stMultiSelect label, .stFileUploader label,
 .stCheckbox label, .stRadio label,
 .stMetric label, .stMetric div,
 [data-testid="stMetricLabel"], [data-testid="stMetricValue"],
-[data-testid="stCaptionContainer"] {{
+[data-testid="stCaptionContainer"] {
     direction: rtl; text-align: right;
-}}
+}
 
-/* ── hero header ── */
-.hero {{
-    background: linear-gradient(135deg, #2d4a5a 0%, #4a7a8a 60%, #6a9aaa 100%);
-    color: white;
-    padding: 1.5rem 2rem;
-    border-radius: 2px;
-    margin-bottom: 1.5rem;
-    box-shadow: 0 2px 12px rgba(45,74,90,0.2);
+/* ── top navbar ── */
+.app-navbar {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 0.85rem 1.5rem;
+    margin-bottom: 1.25rem;
     display: flex;
     align-items: center;
     direction: rtl;
-}}
-.hero-title {{
-    font-size: 1.6rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.app-navbar-brand {
+    font-size: 1.05rem;
     font-weight: 700;
-    margin: 0 0 0.25rem;
-    letter-spacing: -0.5px;
-}}
-.hero-sub {{
-    font-size: 0.9rem;
-    opacity: 0.85;
+    color: #0f172a;
+    letter-spacing: -0.3px;
     margin: 0;
-}}
+}
+.app-navbar-sub {
+    font-size: 0.78rem;
+    color: #64748b;
+    margin-top: 2px;
+}
 
 /* ── section cards ── */
-.section-card {{
-    background: white;
-    border-radius: 2px;
+.section-card {
+    background: #ffffff;
     border: 1px solid #e2e8f0;
-    padding: 1.25rem 1.5rem;
-    margin-bottom: 1.25rem;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-}}
-.section-title {{
-    font-size: 0.85rem;
-    font-weight: 700;
-    color: #2d4a5a;
-    letter-spacing: 0.4px;
-    text-transform: uppercase;
-    margin: 0 0 0.75rem;
-    padding-bottom: 0.5rem;
-    border-bottom: 2px solid #4a7a8a;
-    direction: rtl;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-}}
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
 
-/* ── step indicators ── */
-.step-row {{
-    display: flex;
-    gap: 0.75rem;
-    margin-bottom: 1.25rem;
-    direction: rtl;
-}}
-.step-pill {{
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    background: #f1f5f9;
-    border: 1.5px solid #cbd5e1;
-    border-radius: 2px;
-    padding: 0.3rem 0.9rem;
-    font-size: 0.8rem;
-    color: #64748b;
-    font-weight: 500;
-    flex: 1;
-    justify-content: center;
-}}
-.step-pill.active {{
-    background: #eef3f5;
-    border-color: #4a7a8a;
-    color: #2d4a5a;
-    font-weight: 700;
-}}
-.step-pill.done {{
-    background: #f0fdf4;
-    border-color: #22c55e;
-    color: #15803d;
-    border-radius: 2px;
-}}
-
-/* ── stat cards ── */
-.stats-row {{
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 0.75rem;
-    margin: 0.75rem 0;
-}}
-.stat-card {{
-    background: white;
-    border: 1px solid #e2e8f0;
-    border-radius: 2px;
-    padding: 0.9rem 1rem;
-    text-align: center;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-}}
-.stat-num {{
-    font-size: 1.75rem;
-    font-weight: 800;
-    color: #2d4a5a;
-    line-height: 1;
-    margin-bottom: 0.2rem;
-}}
-.stat-label {{
-    font-size: 0.75rem;
-    color: #64748b;
-    font-weight: 500;
-}}
-
-/* ── upload zone ── */
-[data-testid="stFileUploader"] {{
-    border: 2.5px dashed #a8c8d2;
-    border-radius: 12px;
-    padding: 0.5rem;
-    background: #eef3f5;
-    border-radius: 2px;
-    transition: border-color 0.2s;
-}}
-[data-testid="stFileUploader"]:hover {{
-    border-color: #4a7a8a;
-    background: #d5e8ec;
-}}
-[data-testid="stFileUploader"] label {{
-    font-size: 0.95rem !important;
-    font-weight: 600 !important;
-    color: #2d4a5a !important;
-}}
-
-/* ── download button ── */
-.stDownloadButton button {{
-    width: 100%;
-    background: linear-gradient(135deg, #16a34a, #15803d);
-    color: white;
-    font-weight: 700;
-    font-size: 1rem;
-    border-radius: 2px;
-    border: none;
-    padding: 0.75rem;
-    letter-spacing: 0.5px;
-    box-shadow: 0 2px 6px rgba(22,163,74,0.25);
-}}
-.stDownloadButton button:hover {{
-    background: linear-gradient(135deg, #15803d, #166534);
-    box-shadow: 0 4px 12px rgba(22,163,74,0.4);
-}}
-
-/* ── type badge ── */
-.type-badge {{
+/* ── analysis-type pill badges ── */
+.type-badge {
     display: inline-block;
     padding: 3px 10px;
-    border-radius: 2px;
-    font-size: 0.75rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
     font-weight: 600;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.2px;
     margin: 2px 3px;
     color: white;
-}}
+}
 
-/* ── info banner ── */
-.info-banner {{
-    background: #eef3f5;
-    border: 1px solid #b8d4da;
-    border-radius: 2px;
+/* ── banners ── */
+.info-banner {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
     padding: 0.75rem 1rem;
     direction: rtl;
     font-size: 0.875rem;
-    color: #2d4a5a;
+    color: #1e40af;
     margin-bottom: 0.75rem;
-    border-right: 3px solid #4a7a8a;
-}}
-.success-banner {{
+    border-right: 3px solid #3b82f6;
+}
+.success-banner {
     background: #f0fdf4;
     border: 1px solid #86efac;
-    border-radius: 2px;
+    border-radius: 8px;
     padding: 0.75rem 1rem;
     direction: rtl;
     font-size: 0.875rem;
     color: #15803d;
     margin-bottom: 0.75rem;
     border-right: 3px solid #16a34a;
-}}
+}
 
-/* ── sidebar label ── */
-.sidebar-label {{
-    font-size: 0.7rem;
+/* ── sidebar section label ── */
+.sidebar-label {
+    font-size: 0.65rem;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 1px;
-    color: #94a3b8;
-    margin: 1rem 0 0.25rem;
+    color: #64748b;
+    margin: 1rem 0 0.3rem;
     padding-bottom: 0.2rem;
-    border-bottom: 1px solid #2a4050;
-}}
+    border-bottom: 1px solid #334155;
+}
 
-/* ── metric overrides ── */
-[data-testid="metric-container"] {{
-    background: white;
+/* ── upload zone ── */
+[data-testid="stFileUploader"] {
+    border: 2px dashed #cbd5e1;
+    border-radius: 8px;
+    padding: 0.5rem;
+    background: #f8fafc;
+    transition: border-color 0.2s;
+}
+[data-testid="stFileUploader"]:hover {
+    border-color: #3b82f6;
+    background: #eff6ff;
+}
+[data-testid="stFileUploader"] label {
+    font-size: 0.95rem !important;
+    font-weight: 600 !important;
+    color: #334155 !important;
+}
+
+/* ── download button ── */
+.stDownloadButton button {
+    width: 100%;
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    color: white;
+    font-weight: 700;
+    font-size: 0.95rem;
+    border-radius: 8px;
+    border: none;
+    padding: 0.65rem;
+    letter-spacing: 0.3px;
+    box-shadow: 0 1px 3px rgba(59,130,246,0.3);
+}
+.stDownloadButton button:hover {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    box-shadow: 0 4px 12px rgba(59,130,246,0.4);
+}
+
+/* ── metric cards ── */
+[data-testid="metric-container"] {
+    background: #ffffff;
     border: 1px solid #e2e8f0;
-    border-radius: 2px;
+    border-radius: 8px;
     padding: 0.75rem 1rem;
     box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-}}
-[data-testid="stMetricValue"] {{
+}
+[data-testid="stMetricValue"] {
     font-size: 1.6rem !important;
-    color: #2d4a5a !important;
-    font-weight: 800 !important;
-}}
-[data-testid="stMetricLabel"] {{
+    color: #0f172a !important;
+    font-weight: 700 !important;
+}
+[data-testid="stMetricLabel"] {
     font-size: 0.8rem !important;
     color: #64748b !important;
-}}
+}
+
+/* ── step indicators (kept for compat) ── */
+.step-row { display: flex; gap: 0.75rem; margin-bottom: 1.25rem; direction: rtl; }
+.step-pill {
+    display: flex; align-items: center; gap: 0.4rem;
+    background: #f1f5f9; border: 1.5px solid #cbd5e1; border-radius: 8px;
+    padding: 0.3rem 0.9rem; font-size: 0.8rem; color: #64748b;
+    font-weight: 500; flex: 1; justify-content: center;
+}
+.step-pill.active { background: #eff6ff; border-color: #3b82f6; color: #1d4ed8; font-weight: 700; }
+.step-pill.done { background: #f0fdf4; border-color: #22c55e; color: #15803d; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -418,20 +337,21 @@ with st.sidebar:
 # ══════════════════════════════════════════════════════════════════
 # HERO HEADER — defined before module imports so it always renders
 # ══════════════════════════════════════════════════════════════════
-_hero_logo = (
-    f'<div style="background:white;border-radius:2px;padding:0.4rem 0.7rem;margin-left:1rem;">'
-    f'<img src="data:image/png;base64,{LOGO_B64}" style="height:56px;display:block;"></div>'
-    if LOGO_B64 else ''
+_nav_logo = (
+    f'<img src="data:image/png;base64,{LOGO_B64}" style="height:34px;display:block;">'
+    if LOGO_B64 else '<span style="font-size:1.3rem;line-height:1;">🧪</span>'
 )
 st.html(f"""
-<div class="hero">
-  <div style="display:flex;align-items:center;gap:1rem;">
+<div class="app-navbar">
+  <div style="display:flex;align-items:center;gap:0.75rem;">
+    <div style="background:#f1f5f9;border-radius:6px;padding:0.3rem 0.55rem;line-height:0;">
+      {_nav_logo}
+    </div>
     <div>
-      <div class="hero-title">מערכת לניתוח ועיבוד תוצאות מעבדה — אדמה</div>
-      <div class="hero-sub">העלה קובץ דוח מעבדה · בחר ערכי סף · הורד Excel מסודר</div>
+      <div class="app-navbar-brand">מערכת ניתוח תוצאות מעבדה — אדמה</div>
+      <div class="app-navbar-sub">העלה קובץ · בחר ערכי סף · הורד דוח</div>
     </div>
   </div>
-  {_hero_logo}
 </div>
 """)
 
@@ -793,7 +713,7 @@ if True:
 
         cat_clean = cat_label.split(" ", 1)[-1] if " " in cat_label else cat_label
         st.markdown(f"""
-        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:2px;
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;
                     padding:0.9rem 1rem;margin-top:1.75rem;text-align:center;">
           <div style="font-size:0.65rem;color:#94a3b8;font-weight:700;letter-spacing:0.8px;
                       text-transform:uppercase;margin-bottom:4px;">מעבדה</div>
@@ -1146,6 +1066,8 @@ if True:
 
     excel_buf = io.BytesIO()
     excel_ok  = False
+    word_buf  = io.BytesIO()
+    word_ok   = False
 
     if _is_kte_gw:
         try:
@@ -1189,6 +1111,22 @@ if True:
             builder.build()
             excel_buf.seek(0)
             excel_ok = True
+            try:
+                LabReportWord(
+                    records             = records,
+                    threshold_manager   = tm,
+                    output_path         = word_buf,
+                    project_name        = project_name,
+                    client              = client_name,
+                    report_date         = date.today().strftime('%d.%m.%Y'),
+                    selected_thresholds = selected_thresholds,
+                    combine_tph_voc     = combine_tph_voc,
+                    combine_tph_mbtex   = combine_tph_mbtex,
+                ).build()
+                word_buf.seek(0)
+                word_ok = True
+            except Exception as e:
+                st.warning(f"⚠️ שגיאת בניית Word: {e}")
         except Exception as e:
             st.error(f"שגיאת בניית Excel: {e}")
             st.exception(e)
@@ -1222,6 +1160,17 @@ if True:
               <div>📅 {date.today().strftime('%d.%m.%Y')}</div>
             </div>
             """, unsafe_allow_html=True)
+
+        if word_ok:
+            word_out = out_filename.replace(".xlsx", ".docx")
+            st.download_button(
+                label     = "⬇️ הורד דוח Word",
+                data      = word_buf.getvalue(),
+                file_name = word_out,
+                mime      = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=False,
+                key       = "word_dl_btn",
+            )
 
         if st.session_state.get("xl_show_preview", False):
             with st.expander("📊 תצוגה מקדימה — נתונים מורחבת", expanded=True):
