@@ -586,16 +586,9 @@ def _steps(step: int):
     st.markdown(f'<div class="step-row">{pills}</div>', unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════
-# TABS
-# tab_word must be rendered BEFORE tab_excel so that st.stop() calls
-# inside tab_excel don't prevent the Word tab from appearing.
+# EXCEL EXPORT FLOW
 # ══════════════════════════════════════════════════════════════════
-tab_excel, tab_word = st.tabs(["📊 יצוא Excel", "📄 יצוא Word"])
-
-# ══════════════════════════════════════════════════════════════════
-# WORD TAB
-# ══════════════════════════════════════════════════════════════════
-with tab_word:
+if False:
     st.markdown("#### 📄 יצוא דוח Word מקובץ ALS")
     st.caption("העלה קבצי ALS מהמעבדה, בחר ערכי סף והורד דוח Word מעוצב")
     st.markdown("---")
@@ -769,17 +762,10 @@ with tab_word:
         )
 
 # ══════════════════════════════════════════════════════════════════
-# EXCEL TAB  (existing flow — unchanged)
+# UPLOAD
 # ══════════════════════════════════════════════════════════════════
-with tab_excel:
-    _steps(1)
-
-    # ══════════════════════════════════════════════════════════════
-    # UPLOAD
-    # ══════════════════════════════════════════════════════════════
+if True:
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">📤 שלב 1 — העלאת קובץ דוח מעבדה</div>',
-                unsafe_allow_html=True)
 
     col_up, col_meta = st.columns([3, 1])
 
@@ -931,14 +917,22 @@ with tab_excel:
         "GW_VOC":       "#4a7a8a", "GW_PFAS":     "#9333ea",
         "LOWFLOW":      "#6b7280",
     }
+    _TYPE_LABELS = {
+        "SOIL_VOC":     "VOC",
+        "SOIL_SVOC":    "SVOC",
+        "SOIL_TPH":     "TPH",
+        "SOIL_PFAS":    "PFAS",
+        "SOIL_METALS":  "מתכות",
+        "GW_VOC":       "מי תהום VOC",
+        "SOIL_GAS_VOC": "גז קרקע",
+        "GAS_VOC":      "גז קרקע",
+    }
     badges = " ".join(
         f'<span class="type-badge" style="background:{BADGE_COLORS.get(t,"#94a3b8")};">'
-        f'{t}: {cnt}</span>'
-        for t, cnt in by_type.most_common()
+        f'{_TYPE_LABELS.get(t, t)}</span>'
+        for t in by_type
     )
     st.markdown(f'<div style="margin:0.5rem 0;">{badges}</div>', unsafe_allow_html=True)
-
-    _steps(2)
 
     # ══════════════════════════════════════════════════════════════
     # THRESHOLD SELECTION
@@ -980,8 +974,6 @@ with tab_excel:
     any_shown = False
 
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">📋 שלב 2 — בחירת ערכי סף להשוואה</div>',
-                unsafe_allow_html=True)
 
     # ── Soil ─────────────────────────────────────────────────────
     if has_soil:
@@ -1111,37 +1103,40 @@ with tab_excel:
     # PREVIEW TABLE
     # ══════════════════════════════════════════════════════════════
     with st.expander("📊 תצוגה מקדימה של הנתונים", expanded=False):
+        _PREV_LABELS = {
+            "SOIL_VOC":     "VOC",
+            "SOIL_SVOC":    "SVOC",
+            "SOIL_TPH":     "TPH",
+            "SOIL_PFAS":    "PFAS",
+            "SOIL_METALS":  "מתכות",
+            "GW_VOC":       "מי תהום VOC",
+            "SOIL_GAS_VOC": "גז קרקע",
+            "GAS_VOC":      "גז קרקע",
+        }
+
         def build_preview(recs):
             rows = []
-            for r in recs:
+            for r in recs[:50]:
                 val = r.get('value')
                 rows.append({
-                    'דגימה':   r.get('sample_id', ''),
-                    'תרכובת':  r.get('compound', ''),
-                    'CAS':      r.get('cas', ''),
-                    'ערך':      f"{val:.4g}" if isinstance(val, float) else (str(val) if val is not None else ''),
-                    'יחידות':  r.get('unit', ''),
-                    'flag':     r.get('flag', ''),
+                    'תרכובת': r.get('compound', ''),
+                    'דגימה':  r.get('sample_id', ''),
+                    'ערך':    f"{val:.4g}" if isinstance(val, float) else (str(val) if val is not None else ''),
                 })
             return pd.DataFrame(rows)
 
-        analysis_types = list(by_type.keys())
-        if len(analysis_types) > 1:
-            tabs = st.tabs([f"{t} ({by_type[t]})" for t in analysis_types])
-            for tab, atype in zip(tabs, analysis_types):
-                with tab:
-                    subset = [r for r in records if r.get('analysis_type') == atype]
-                    st.dataframe(build_preview(subset), use_container_width=True, height=280)
-        else:
-            st.dataframe(build_preview(records), use_container_width=True, height=320)
+        _prev_atypes = list(by_type.keys())
+        _prev_tab_labels = [_PREV_LABELS.get(t, t) for t in _prev_atypes]
+        _prev_tabs = st.tabs(_prev_tab_labels)
+        for _ptab, _patype in zip(_prev_tabs, _prev_atypes):
+            with _ptab:
+                _psubset = [r for r in records if r.get('analysis_type') == _patype][:50]
+                st.dataframe(build_preview(_psubset), use_container_width=True, height=280)
 
     # ══════════════════════════════════════════════════════════════
     # BUILD EXCEL + DOWNLOAD
     # ══════════════════════════════════════════════════════════════
-    _steps(3)
-
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">📥 שלב 3 — הורדת דוח Excel</div>', unsafe_allow_html=True)
 
     _sniff   = raw_bytes.lstrip()[:200]
     _is_kte_gw = (
@@ -1151,8 +1146,6 @@ with tab_excel:
 
     excel_buf = io.BytesIO()
     excel_ok  = False
-    word_buf  = io.BytesIO()
-    word_ok   = False
 
     if _is_kte_gw:
         try:
@@ -1196,22 +1189,6 @@ with tab_excel:
             builder.build()
             excel_buf.seek(0)
             excel_ok = True
-            try:
-                LabReportWord(
-                    records             = records,
-                    threshold_manager   = tm,
-                    output_path         = word_buf,
-                    project_name        = project_name,
-                    client              = client_name,
-                    report_date         = date.today().strftime('%d.%m.%Y'),
-                    selected_thresholds = selected_thresholds,
-                    combine_tph_voc     = combine_tph_voc,
-                    combine_tph_mbtex   = combine_tph_mbtex,
-                ).build()
-                word_buf.seek(0)
-                word_ok = True
-            except Exception as e:
-                st.warning(f"⚠️ שגיאת בניית Word: {e}")
         except Exception as e:
             st.error(f"שגיאת בניית Excel: {e}")
             st.exception(e)
@@ -1226,7 +1203,7 @@ with tab_excel:
         out_filename = f"{'_'.join(_parts)}.xlsx"
         size_kb = len(excel_buf.getvalue()) / 1024
 
-        dl_col, wd_col, prev_col, info_col = st.columns([2, 2, 1.5, 1])
+        dl_col, prev_col, info_col = st.columns([2, 1.5, 1])
         with dl_col:
             st.download_button(
                 label     = "⬇️ הורד דוח Excel",
@@ -1234,14 +1211,6 @@ with tab_excel:
                 file_name = out_filename,
                 mime      = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
-        with wd_col:
-            if word_ok:
-                st.download_button(
-                    label     = "⬇️ הורד דוח Word",
-                    data      = word_buf.getvalue(),
-                    file_name = out_filename.replace(".xlsx", ".docx"),
-                    mime      = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                )
         with prev_col:
             if st.button("👁️ תצוגה מקדימה", use_container_width=True, key="xl_preview_btn"):
                 st.session_state["xl_show_preview"] = not st.session_state.get("xl_show_preview", False)
