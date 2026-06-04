@@ -58,18 +58,19 @@ def _pid_norm(name: str) -> str:
 
 
 def _parse_pid_file(uploaded_file) -> dict:
-    """Parse a PID Excel file and return {normalized_borehole: max_pid_value}.
+    """Parse a PID field-data file.
 
-    Expected layout:
-      col 0 — borehole name (filled only on first row of each borehole; forward-filled)
-      col 2 — depth (unused here)
+    Returns {normalized_borehole: [(depth_to, pid_value), ...]} — one tuple per
+    data row (rows where PID is N/A / None / empty are skipped; 0 is kept).
+
+    Expected column layout (0-based):
+      col 0 — borehole name (forward-filled from first row of each borehole)
+      col 2 — depth_to [m]
       col 7 — PID [ppm]
-
-    Keys are normalized with _pid_norm so lookup is dash/space-insensitive.
     """
     df = pd.read_excel(uploaded_file, header=None)
     df.iloc[:, 0] = df.iloc[:, 0].ffill()
-    pid_map: dict = {}
+    pid_data: dict = {}
     for bh_raw, grp in df.groupby(df.columns[0], sort=False):
         bh = str(bh_raw).strip()
         if not bh or bh.lower() in ("nan", "none"):
@@ -77,10 +78,30 @@ def _parse_pid_file(uploaded_file) -> dict:
         key = _pid_norm(bh)
         if not key:
             continue
-        raw_vals = grp.iloc[:, 7] if grp.shape[1] > 7 else pd.Series([], dtype=object)
-        nums = pd.to_numeric(raw_vals, errors="coerce").dropna()
-        pid_map[key] = float(nums.max()) if not nums.empty else "-"
-    return pid_map
+        entries: list = []
+        for _, row in grp.iterrows():
+            # depth_to — column 2
+            try:
+                depth_to = float(row.iloc[2])
+            except (ValueError, TypeError, IndexError):
+                continue
+            # PID — column 7; skip N/A / None / empty, keep 0
+            pid_raw = row.iloc[7] if row.shape[0] > 7 else None
+            if pid_raw is None:
+                continue
+            if isinstance(pid_raw, float) and pd.isna(pid_raw):
+                continue
+            pid_str = str(pid_raw).strip().upper()
+            if pid_str in ("N/A", "NA", ""):
+                continue
+            try:
+                pid_val = float(pid_raw)
+            except (ValueError, TypeError):
+                continue
+            entries.append((depth_to, pid_val))
+        if entries:
+            pid_data[key] = entries
+    return pid_data
 
 # ══════════════════════════════════════════════════════════════════
 # CSS — full design system
@@ -544,22 +565,98 @@ _PREV_LABELS = {
 
 
 @st.dialog("📊 תצוגה מקדימה", width="large")
-def _preview_dialog(records, by_type):
-    atypes = list(by_type.keys())
-    labels = [_PREV_LABELS.get(t, t) for t in atypes]
-    tabs = st.tabs(labels)
-    for tab, atype in zip(tabs, atypes):
+def _preview_dialog(records, tm, project_name, client_name, rep_date,
+                    selected_thresholds, combine_tph_voc, combine_tph_mbtex, pid_map):
+    import openpyxl as _oxl
+
+    buf = io.BytesIO()
+    with st.spinner("בונה תצוגה מקדימה..."):
+        try:
+            LabReportExcel(
+                records             = records,
+                threshold_manager   = tm,
+                output_path         = buf,
+                project_name        = project_name,
+                client              = client_name,
+                report_date         = rep_date,
+                selected_thresholds = selected_thresholds,
+                combine_tph_voc     = combine_tph_voc,
+                combine_tph_mbtex   = combine_tph_mbtex,
+                pid_map             = pid_map,
+            ).build()
+        except Exception as _e:
+            st.error(f"שגיאה בבניית תצוגה מקדימה: {_e}")
+            return
+
+    buf.seek(0)
+    wb = _oxl.load_workbook(buf, data_only=True)
+    if not wb.sheetnames:
+        st.info("אין נתונים להצגה")
+        return
+
+    tabs = st.tabs(wb.sheetnames)
+    for tab, sname in zip(tabs, wb.sheetnames):
         with tab:
-            subset = [r for r in records if r.get('analysis_type') == atype][:200]
-            rows = []
-            for r in subset:
-                val = r.get('value')
-                rows.append({
-                    'תרכובת': r.get('compound', ''),
-                    'דגימה':  r.get('sample_id', ''),
-                    'ערך':    f"{val:.4g}" if isinstance(val, float) else (str(val) if val is not None else ''),
-                })
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, height=420)
+            ws = wb[sname]
+
+            # Propagate merged-cell values so every cell has a value
+            for mr in list(ws.merged_cells.ranges):
+                top_val  = ws.cell(mr.min_row, mr.min_col).value
+                ws.unmerge_cells(str(mr))
+                for r in range(mr.min_row, mr.max_row + 1):
+                    for c in range(mr.min_col, mr.max_col + 1):
+                        ws.cell(r, c).value = top_val
+
+            all_rows = list(ws.iter_rows())
+            if not all_rows:
+                st.info("גיליון ריק")
+                continue
+
+            n_cols = max(len(row) for row in all_rows)
+            data_list, css_list = [], []
+            for row in all_rows:
+                row_vals, row_css = [], []
+                for cell in row:
+                    v = cell.value
+                    row_vals.append("" if v is None else
+                                    (v if isinstance(v, (int, float)) else str(v)))
+                    # Extract solid fill colour → CSS background
+                    css_bg = ""
+                    try:
+                        f = cell.fill
+                        if getattr(f, 'fill_type', None) == "solid":
+                            fc = getattr(f, 'fgColor', None)
+                            if fc and getattr(fc, 'type', None) == 'rgb':
+                                rgb = fc.rgb          # 8-char ARGB
+                                hx = rgb[2:] if len(rgb) == 8 else rgb
+                                if hx.upper() not in ("FFFFFF", "000000", "00000000"):
+                                    css_bg = f"background-color: #{hx}; color: #000;"
+                    except Exception:
+                        pass
+                    row_css.append(css_bg)
+                # pad to uniform width
+                pad = n_cols - len(row_vals)
+                row_vals += [""] * pad
+                row_css  += [""] * pad
+                data_list.append(row_vals)
+                css_list.append(row_css)
+
+            # Build DataFrame (all rows as data; integer column labels)
+            df = pd.DataFrame(data_list, columns=list(range(n_cols)))
+
+            # Build matching style DataFrame
+            n_dr, n_dc = len(df), len(df.columns)
+            padded = []
+            for ri in range(n_dr):
+                row = css_list[ri] if ri < len(css_list) else []
+                padded.append([row[ci] if ci < len(row) else "" for ci in range(n_dc)])
+            style_df = pd.DataFrame(padded, index=df.index, columns=df.columns)
+
+            styled = (df.style
+                      .apply(lambda _: style_df, axis=None)
+                      .hide(axis='columns')
+                      .hide(axis='index'))
+            st.dataframe(styled, use_container_width=True, height=480)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1194,7 +1291,10 @@ if True:
             )
         with prev_col:
             if st.button("👁️ תצוגה מקדימה", use_container_width=True, key="xl_preview_btn"):
-                _preview_dialog(records, by_type)
+                _preview_dialog(records, tm, project_name, client_name,
+                                date.today().strftime('%d.%m.%Y'),
+                                selected_thresholds, combine_tph_voc,
+                                combine_tph_mbtex, pid_map)
         with info_col:
             st.markdown(f"""
             <div style="padding:0.5rem 0;font-size:0.82rem;color:#64748b;direction:rtl;">

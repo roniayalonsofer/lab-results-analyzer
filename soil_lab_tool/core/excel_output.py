@@ -195,18 +195,42 @@ def _pid_key(borehole: str) -> str:
     return re.sub(r'[-\s]', '', borehole).strip()
 
 
-def _pid_sample_key(sid: str) -> str:
-    """Extract pid_map lookup key from a raw sample ID.
+def _pid_lookup(pid_data: dict, sid: str):
+    """Depth-aware PID lookup for a sample ID.
 
-    Sample IDs follow ק-{depth}-{borehole_num} (e.g. 'ק-3.0-5').
-    The borehole number is the last integer after the final hyphen.
-    Key = 'ק' + that number  →  'ק5'.
-    Falls back to _pid_key(sid) for non-matching formats.
+    Sample ID format: ק-{depth}-{borehole_num}  e.g. 'ק-3.0-5'
+      → borehole key = 'ק5',  sample depth = 3.0
+
+    Finds the pid_data[bh_key] entry whose depth_to is the smallest value
+    that is still >= the sample depth (i.e. the shallowest interval that
+    covers the sample).  Returns the associated PID float (0 is a valid
+    value), or '-' when nothing matches.
     """
-    m = re.search(r'-(\d+)$', sid.strip())
+    if not pid_data:
+        return '-'
+    # Parse ק-{depth}-{borehole} format
+    m = re.search(r'-(\d+(?:\.\d+)?)-(\d+)$', sid.strip())
     if m:
-        return f'ק{m.group(1)}'
-    return _pid_key(sid)
+        try:
+            depth = float(m.group(1))
+        except ValueError:
+            depth = 0.0
+        bh_key = f'ק{m.group(2)}'
+    else:
+        # Fallback: last integer segment → borehole key
+        m2 = re.search(r'-(\d+)$', sid.strip())
+        bh_key = f'ק{m2.group(1)}' if m2 else _pid_key(sid)
+        depth = 0.0
+
+    entries = pid_data.get(bh_key, [])
+    if not entries:
+        return '-'
+
+    # Entries where depth_to >= sample depth; take the smallest (closest cover)
+    candidates = [(d, p) for d, p in entries if d >= depth]
+    if candidates:
+        return min(candidates, key=lambda x: x[0])[1]
+    return '-'
 
 
 def _borehole_sort_key(bh: str) -> tuple:
@@ -830,7 +854,7 @@ class LabReportExcel:
                 ("מספר קניסטר",        [sample_meta.get(s, {}).get("canister", "") for s in samples]),
             ]
             if pid_map:
-                _gas_pids = [pid_map.get(_pid_sample_key(s), '-') for s in samples]
+                _gas_pids = [_pid_lookup(pid_map, s) for s in samples]
                 meta_rows.append(('קריאת PID [ppm]', _gas_pids))
             for ri, (label, vals) in enumerate(meta_rows, 1):
                 # Merge label across all fixed columns (A → last fixed col)
@@ -894,7 +918,7 @@ class LabReportExcel:
                 ("עומק [מ']", depths),
             ]
             if pid_map:
-                pid_vals_pm = [pid_map.get(_pid_sample_key(sid), '-') for sid in samples]
+                pid_vals_pm = [_pid_lookup(pid_map, sid) for sid in samples]
                 meta_rows.append(("קריאת PID [ppm]", pid_vals_pm))
             if cfg.get("include_lod_row"):
                 def _min_sample_lod(sid):
@@ -1206,7 +1230,7 @@ class LabReportExcel:
             col_vals: list = []
             bh_cell_val = _dup_rich_text(borehole)  # rich text if DUP, else plain
 
-            pid_cell = pid_map.get(_pid_sample_key(sid), '-') if has_pid else None
+            pid_cell = _pid_lookup(pid_map, sid) if has_pid else None
             if has_depth:
                 col_vals = [bh_cell_val, depth_str if depth_str else ""] + ([pid_cell] if has_pid else [])
             else:
