@@ -439,6 +439,7 @@ class LabReportExcel:
         selected_thresholds: list[str] | None = None,
         combine_tph_voc: bool = False,
         combine_tph_mbtex: bool = False,
+        pid_map: dict | None = None,
     ):
         self.records           = records
         self.tm                = threshold_manager
@@ -449,6 +450,7 @@ class LabReportExcel:
         self.sel_thresh        = selected_thresholds  # None → auto per analysis_type
         self.combine_tph_voc   = combine_tph_voc
         self.combine_tph_mbtex = combine_tph_mbtex
+        self.pid_map           = pid_map or {}
 
     # ------------------------------------------------------------------
     def build(self) -> str:
@@ -617,13 +619,13 @@ class LabReportExcel:
                                  lod_map, loq_map,
                                  thresh_keys, thresh_vals, header_info, cfg,
                                  sample_meta=sample_meta, unit_map=unit_map,
-                                 depth_map=depth_map)
+                                 depth_map=depth_map, pid_map=self.pid_map)
         else:
             self._write_landscape(ws, compounds, samples, pivot, cas_map,
                                   lod_map, loq_map,
                                   thresh_keys, thresh_vals, header_info, cfg,
                                   sample_meta=sample_meta, unit_map=unit_map,
-                                  depth_map=depth_map)
+                                  depth_map=depth_map, pid_map=self.pid_map)
 
     def _write_lowflow_sheet(self, ws, records, cfg):
         """LOWFLOW/pH: field parameters as rows, samples as columns, no thresholds.
@@ -652,15 +654,16 @@ class LabReportExcel:
         N_FIXED = 2   # פרמטר | יחידות
         total_cols = N_FIXED + len(samples)
 
-        # Row 1: merged project header
-        self._write_header_row(ws, 1, total_cols)
+        # Row 1: merged project header (skipped when project+client both empty)
+        header_written = self._write_header_row(ws, 1, total_cols)
+        meta_start = 2 if header_written else 1
 
-        # Rows 2-3: metadata (שם קידוח, עומק [מ'])
+        # Rows meta_start…: metadata (שם קידוח, עומק [מ'])
         meta_rows = [
             ("שם קידוח",  boreholes),
             ("עומק [מ']", depths),
         ]
-        for ri, (label, vals) in enumerate(meta_rows, 2):
+        for ri, (label, vals) in enumerate(meta_rows, meta_start):
             ws.merge_cells(start_row=ri, start_column=1,
                            end_row=ri,   end_column=N_FIXED)
             c = ws.cell(row=ri, column=1, value=label)
@@ -674,8 +677,8 @@ class LabReportExcel:
                 cell.alignment = CENTER
                 cell.font      = _font(v)
 
-        # Row 4: column headers (no fill — rows 1-4 are fill-free)
-        hdr_row = 4
+        # Column headers row (after all meta rows)
+        hdr_row = meta_start + len(meta_rows)
         headers = ["פרמטר", "יחידות"] + samples
         for ci, h in enumerate(headers, 1):
             c = ws.cell(row=hdr_row, column=ci, value=h)
@@ -714,11 +717,9 @@ class LabReportExcel:
         """
         total_cols = 3
 
-        # Row 1: merged project/date/client header
-        self._write_header_row(ws, 1, total_cols)
-
-        # Row 2: column headers
-        hdr_row = 2
+        # Row 1: merged project/date/client header (skipped when project+client both empty)
+        header_written = self._write_header_row(ws, 1, total_cols)
+        hdr_row = 2 if header_written else 1
         for ci, h in enumerate(["פרמטר", "יחידות", "תוצאה"], 1):
             c = ws.cell(row=hdr_row, column=ci, value=h)
             c.font      = Font(**FHE, bold=True)
@@ -763,7 +764,8 @@ class LabReportExcel:
         ws.column_dimensions["A"].width = 42
         ws.column_dimensions["B"].width = 12
         ws.column_dimensions["C"].width = 12
-        ws.row_dimensions[1].height     = 20
+        if header_written:
+            ws.row_dimensions[1].height = 20
         ws.row_dimensions[hdr_row].height = 22
 
     # ------------------------------------------------------------------
@@ -779,7 +781,7 @@ class LabReportExcel:
     def _write_portrait(self, ws, compounds, samples, pivot, cas_map,
                         lod_map, loq_map,
                         thresh_keys, thresh_vals, hinfo, cfg=None, sample_meta=None,
-                        unit_map=None, depth_map=None):
+                        unit_map=None, depth_map=None, pid_map=None):
         cfg         = cfg or {}
         sample_meta = sample_meta or {}
         unit            = hinfo["unit"]
@@ -803,14 +805,15 @@ class LabReportExcel:
 
         if include_lod_loq:
             # ── Rows 1-N: sample metadata rows (soil gas) ─────────────
-            pid_vals = [sample_meta.get(s, {}).get("pid", "") for s in samples]
             meta_rows = [
                 ("שם קידוח",           [s for s in samples]),
                 ("תאריך ביצוע הדיגום", [sample_meta.get(s, {}).get("date",     "") for s in samples]),
                 ("מספר קניסטר",        [sample_meta.get(s, {}).get("canister", "") for s in samples]),
             ]
-            if any(pid_vals):
-                meta_rows.append(('קריאת PID בסיום השאיבה [חל"מ]', pid_vals))
+            if pid_map:
+                _gas_bhs = [_split_sample_depth(s)[0] for s in samples]
+                _gas_pids = [pid_map.get(bh.strip(), '-') for bh in _gas_bhs]
+                meta_rows.append(('קריאת PID [ppm]', _gas_pids))
             for ri, (label, vals) in enumerate(meta_rows, 1):
                 # Merge label across all fixed columns (A → last fixed col)
                 ws.merge_cells(start_row=ri, start_column=1,
@@ -855,10 +858,10 @@ class LabReportExcel:
                        + [""] * len(samples))
             hdr_row = len(meta_rows) + 1
         else:
-            # ── Row 1: merged project info header ─────────────────────
-            self._write_header_row(ws, 1, total_cols, hinfo)
-            # ── Rows 2-N: sample metadata ──────────────────────────────
-            # Sort samples: ק first, נ second, others; within group by number then depth
+            # ── Row 1: merged project info header (skipped when project+client empty) ──
+            header_written = self._write_header_row(ws, 1, total_cols, hinfo)
+            meta_start = 2 if header_written else 1
+            # ── Sort samples and build metadata ────────────────────────
             split_p = {sid: _split_sample_depth(sid) for sid in samples}
             if depth_map:
                 split_p = {sid: (split_p[sid][0], depth_map.get(sid, split_p[sid][1]))
@@ -868,21 +871,21 @@ class LabReportExcel:
                                               float(split_p[sid][1]) if split_p[sid][1] else 0.0))
             boreholes = [_dup_rich_text(split_p[sid][0]) for sid in samples]
             depths    = [split_p[sid][1]                 for sid in samples]
-            pid_vals = [sample_meta.get(s, {}).get("pid", "") for s in samples]
             meta_rows = [
                 ("שם קידוח",  boreholes),
                 ("עומק [מ']", depths),
             ]
-            if any(pid_vals):
-                meta_rows.append(("קריאת PID [ppm]", pid_vals))
+            if pid_map:
+                boreholes_raw = [split_p[sid][0] for sid in samples]
+                pid_vals_pm = [pid_map.get(bh.strip(), '-') for bh in boreholes_raw]
+                meta_rows.append(("קריאת PID [ppm]", pid_vals_pm))
             if cfg.get("include_lod_row"):
-                # Minimum LOD across all compounds for each sample column
                 def _min_sample_lod(sid):
                     vals = [pivot[c][sid][2] for c in compounds if sid in pivot.get(c, {})]
                     vals = [v for v in vals if v is not None]
                     return _round_sf(min(vals)) if vals else ""
                 meta_rows.append((f"LOD [{unit}]", [_min_sample_lod(sid) for sid in samples]))
-            for ri, (label, vals) in enumerate(meta_rows, 2):
+            for ri, (label, vals) in enumerate(meta_rows, meta_start):
                 ws.merge_cells(start_row=ri, start_column=1,
                                end_row=ri,   end_column=N_FIXED)
                 c = ws.cell(row=ri, column=1, value=label)
@@ -895,12 +898,12 @@ class LabReportExcel:
                     cell = ws.cell(row=ri, column=ci)
                     cell.border    = THIN
                     cell.alignment = CENTER
-                    if v != "":
+                    if v != "" and v is not None:
                         cell.value = v
                         if not isinstance(v, CellRichText):
                             cell.font = _font(v)
             # ── Column headers row (after all meta rows) ───────────────
-            hdr_row = 2 + len(meta_rows)
+            hdr_row = meta_start + len(meta_rows)
             if lod_loq_mode == "both":
                 lod_loq_hdrs = [f"LOD [{unit}]", f"LOQ [{unit}]"]
             elif lod_loq_mode == "loq":
@@ -1072,7 +1075,7 @@ class LabReportExcel:
     def _write_landscape(self, ws, compounds, samples, pivot, cas_map,
                          lod_map, loq_map,
                          thresh_keys, thresh_vals, hinfo, cfg=None, sample_meta=None,
-                         unit_map=None, depth_map=None):
+                         unit_map=None, depth_map=None, pid_map=None):
         cfg      = cfg or {}
         unit_map = unit_map or {}
 
@@ -1092,17 +1095,18 @@ class LabReportExcel:
                 return (*_borehole_sort_key(bh), float(dep) if dep else 0.0)
             samples = sorted(samples, key=_sort_key)
 
-        # Column count: borehole + depth (when present) + PID (when non-empty) + compounds
-        has_pid       = any(sample_meta.get(sid, {}).get("pid", "") for sid in samples)
+        # Column count: borehole + depth (when present) + PID (from pid_map) + compounds
+        has_pid       = bool(pid_map)
         depth_offset  = 1 if has_depth else 0
         pid_offset    = 1 if has_pid   else 0
         total_cols    = 1 + depth_offset + pid_offset + len(compounds)
         cmp_col_start = 2 + depth_offset + pid_offset  # 1-based col of first compound
 
-        # ── Row 1: merged project header ────────────────────────────────
-        self._write_header_row(ws, 1, total_cols, hinfo)
+        # ── Row 1: merged project header (skipped when project+client both empty) ──
+        header_written = self._write_header_row(ws, 1, total_cols, hinfo)
+        hdr_base = 2 if header_written else 1
 
-        # ── Rows 2-4: compound names / CAS / unit ───────────────────────
+        # ── Rows hdr_base to hdr_base+2: compound names / CAS / unit ───
         _pid_hdr = ["PID [ppm]"] if has_pid else []
         _pid_pad = [""]         if has_pid else []
         if has_depth:
@@ -1114,7 +1118,7 @@ class LabReportExcel:
             row3_data = ["CAS Number"] + _pid_pad + [cas_map.get(c, "") for c in compounds]
             row4_data = ["יחידות"]     + _pid_pad + [unit_map.get(c, hinfo["unit"]) for c in compounds]
 
-        for ri, row_vals in enumerate([row2_data, row3_data, row4_data], 2):
+        for ri, row_vals in enumerate([row2_data, row3_data, row4_data], hdr_base):
             for ci, v in enumerate(row_vals, 1):
                 rv = _mixed_rich_text(v, bold=True) if isinstance(v, str) else v
                 c = ws.cell(row=ri, column=ci, value=rv)
@@ -1125,7 +1129,7 @@ class LabReportExcel:
 
         # ── Optional LOQ header row (per-compound, before thresholds) ──
         lod_loq_mode = (cfg or {}).get("lod_loq_mode", False)
-        data_row = 5
+        data_row = hdr_base + 3
         if lod_loq_mode:
             unit     = hinfo["unit"]
             loq_lbl  = f"LOQ [{unit}]"
@@ -1185,10 +1189,11 @@ class LabReportExcel:
             col_vals: list = []
             bh_cell_val = _dup_rich_text(borehole)  # rich text if DUP, else plain
 
+            pid_cell = pid_map.get(borehole.strip(), '-') if has_pid else None
             if has_depth:
-                col_vals = [bh_cell_val, depth_str if depth_str else ""] + ([""] if has_pid else [])
+                col_vals = [bh_cell_val, depth_str if depth_str else ""] + ([pid_cell] if has_pid else [])
             else:
-                col_vals = [bh_cell_val] + ([""] if has_pid else [])
+                col_vals = [bh_cell_val] + ([pid_cell] if has_pid else [])
 
             for cmp in compounds:
                 v, flag, lod = pivot.get(cmp, {}).get(sid, (None, "<LOQ", None))
@@ -1338,7 +1343,11 @@ class LabReportExcel:
         vals = [v for k, v in t_vals.items() if v is not None and _is_res_key(k)]
         return min(vals) if vals else None
 
-    def _write_header_row(self, ws, row_num: int, total_cols: int, hinfo: dict | None = None):
+    def _write_header_row(self, ws, row_num: int, total_cols: int, hinfo: dict | None = None) -> bool:
+        project = (hinfo.get("project", "") if hinfo else self.project) or ""
+        client  = (hinfo.get("client",  "") if hinfo else self.client)  or ""
+        if not project.strip() and not client.strip():
+            return False
         if hinfo:
             parts = [
                 ("שם פרויקט:", hinfo.get("project", "")),
@@ -1353,7 +1362,7 @@ class LabReportExcel:
                                end_row=row_num, end_column=col_end)
                 c = ws.cell(row=row_num, column=col_start,
                             value=f"{label}  {val}")
-                c.font      = Font(**FHE, bold=True)   # dark text, no fill
+                c.font      = Font(**FHE, bold=True)
                 c.alignment = WRAP_C
                 c.border    = THIN
         else:
@@ -1361,9 +1370,10 @@ class LabReportExcel:
                            end_row=row_num, end_column=total_cols)
             c = ws.cell(row=row_num, column=1,
                         value=f"{self.project}  |  {self.rep_date}  |  {self.client}")
-            c.font      = Font(**FHE, bold=True)   # dark text, no fill
+            c.font      = Font(**FHE, bold=True)
             c.alignment = WRAP_C
             c.border    = THIN
+        return True
 
     @staticmethod
     def _threshold_source_notes(thresh_keys: list[str]) -> list[str]:

@@ -51,6 +51,27 @@ def _local_ip() -> str:
 LAN_IP  = _local_ip()
 APP_URL = f"http://{LAN_IP}:8501"
 
+
+def _parse_pid_file(uploaded_file) -> dict:
+    """Parse a PID Excel file and return {borehole_name: max_pid_value}.
+
+    Expected layout:
+      col 0 — borehole name (filled only on first row of each borehole; forward-filled)
+      col 2 — depth
+      col 7 — PID [ppm]
+    """
+    df = pd.read_excel(uploaded_file, header=None)
+    df.iloc[:, 0] = df.iloc[:, 0].ffill()
+    pid_map: dict = {}
+    for bh_raw, grp in df.groupby(df.columns[0], sort=False):
+        bh = str(bh_raw).strip()
+        if not bh or bh.lower() in ("nan", "none"):
+            continue
+        raw_vals = grp.iloc[:, 7] if grp.shape[1] > 7 else pd.Series([], dtype=object)
+        nums = pd.to_numeric(raw_vals, errors="coerce").dropna()
+        pid_map[bh] = float(nums.max()) if not nums.empty else "-"
+    return pid_map
+
 # ══════════════════════════════════════════════════════════════════
 # CSS — full design system
 # ══════════════════════════════════════════════════════════════════
@@ -331,6 +352,15 @@ with st.sidebar:
     cat_label    = st.selectbox("קטגוריה", list(category_display.keys()),
                                 label_visibility="collapsed")
     category_raw = category_display[cat_label]
+
+    st.markdown('<div class="sidebar-label">📊 נתוני PID</div>', unsafe_allow_html=True)
+    pid_file = st.file_uploader(
+        "העלאת נתוני PID",
+        type=["xlsx"],
+        key="pid_upload",
+        label_visibility="collapsed",
+        help="עמודה 0 = שם קידוח, עמודה 7 = PID [ppm]",
+    )
 
     st.markdown('<hr style="margin:1rem 0 0.5rem;">', unsafe_allow_html=True)
 
@@ -1064,6 +1094,13 @@ if True:
         (b"<?xml" in _sniff or b"<Workbook" in _sniff)
     )
 
+    pid_map: dict = {}
+    if pid_file is not None:
+        try:
+            pid_map = _parse_pid_file(pid_file)
+        except Exception as _pid_err:
+            st.warning(f"⚠️ שגיאת קריאת קובץ PID: {_pid_err}")
+
     excel_buf = io.BytesIO()
     excel_ok  = False
     word_buf  = io.BytesIO()
@@ -1107,6 +1144,7 @@ if True:
                 selected_thresholds = selected_thresholds,
                 combine_tph_voc     = combine_tph_voc,
                 combine_tph_mbtex   = combine_tph_mbtex,
+                pid_map             = pid_map,
             )
             builder.build()
             excel_buf.seek(0)
