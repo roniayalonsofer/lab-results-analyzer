@@ -191,10 +191,22 @@ def _norm_borehole(s: str) -> str:
 
 
 def _pid_key(borehole: str) -> str:
-    """Normalize borehole name for pid_map lookup (matches _pid_norm in app.py):
-    strip depth suffix, then remove all dashes and spaces.
-    e.g. 'ק-1' → 'ק1', 'ק 1' → 'ק1' — makes lookup dash/space-insensitive."""
+    """Normalize borehole name for pid_map lookup: remove dashes and spaces."""
     return re.sub(r'[-\s]', '', borehole).strip()
+
+
+def _pid_sample_key(sid: str) -> str:
+    """Extract pid_map lookup key from a raw sample ID.
+
+    Sample IDs follow ק-{depth}-{borehole_num} (e.g. 'ק-3.0-5').
+    The borehole number is the last integer after the final hyphen.
+    Key = 'ק' + that number  →  'ק5'.
+    Falls back to _pid_key(sid) for non-matching formats.
+    """
+    m = re.search(r'-(\d+)$', sid.strip())
+    if m:
+        return f'ק{m.group(1)}'
+    return _pid_key(sid)
 
 
 def _borehole_sort_key(bh: str) -> tuple:
@@ -818,8 +830,7 @@ class LabReportExcel:
                 ("מספר קניסטר",        [sample_meta.get(s, {}).get("canister", "") for s in samples]),
             ]
             if pid_map:
-                _gas_bhs = [_split_sample_depth(s)[0] for s in samples]
-                _gas_pids = [pid_map.get(_pid_key(bh), '-') for bh in _gas_bhs]
+                _gas_pids = [pid_map.get(_pid_sample_key(s), '-') for s in samples]
                 meta_rows.append(('קריאת PID [ppm]', _gas_pids))
             for ri, (label, vals) in enumerate(meta_rows, 1):
                 # Merge label across all fixed columns (A → last fixed col)
@@ -883,8 +894,7 @@ class LabReportExcel:
                 ("עומק [מ']", depths),
             ]
             if pid_map:
-                boreholes_raw = [split_p[sid][0] for sid in samples]
-                pid_vals_pm = [pid_map.get(_pid_key(bh), '-') for bh in boreholes_raw]
+                pid_vals_pm = [pid_map.get(_pid_sample_key(sid), '-') for sid in samples]
                 meta_rows.append(("קריאת PID [ppm]", pid_vals_pm))
             if cfg.get("include_lod_row"):
                 def _min_sample_lod(sid):
@@ -1196,7 +1206,7 @@ class LabReportExcel:
             col_vals: list = []
             bh_cell_val = _dup_rich_text(borehole)  # rich text if DUP, else plain
 
-            pid_cell = pid_map.get(_pid_key(borehole), '-') if has_pid else None
+            pid_cell = pid_map.get(_pid_sample_key(sid), '-') if has_pid else None
             if has_depth:
                 col_vals = [bh_cell_val, depth_str if depth_str else ""] + ([pid_cell] if has_pid else [])
             else:
