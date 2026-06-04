@@ -1,6 +1,6 @@
 # app.py  --  Streamlit UI for the Lab Results Analyzer
 # Run: py -3 -m streamlit run app.py
-import sys, os, io, collections, socket, base64
+import sys, os, io, re, collections, socket, base64
 from datetime import date
 
 # ── add soil_lab_tool to path ─────────────────────────────────────
@@ -52,13 +52,20 @@ LAN_IP  = _local_ip()
 APP_URL = f"http://{LAN_IP}:8501"
 
 
+def _pid_norm(name: str) -> str:
+    """Normalize a borehole name for PID matching: remove dashes and spaces."""
+    return re.sub(r'[-\s]', '', name).strip()
+
+
 def _parse_pid_file(uploaded_file) -> dict:
-    """Parse a PID Excel file and return {borehole_name: max_pid_value}.
+    """Parse a PID Excel file and return {normalized_borehole: max_pid_value}.
 
     Expected layout:
       col 0 — borehole name (filled only on first row of each borehole; forward-filled)
-      col 2 — depth
+      col 2 — depth (unused here)
       col 7 — PID [ppm]
+
+    Keys are normalized with _pid_norm so lookup is dash/space-insensitive.
     """
     df = pd.read_excel(uploaded_file, header=None)
     df.iloc[:, 0] = df.iloc[:, 0].ffill()
@@ -67,9 +74,12 @@ def _parse_pid_file(uploaded_file) -> dict:
         bh = str(bh_raw).strip()
         if not bh or bh.lower() in ("nan", "none"):
             continue
+        key = _pid_norm(bh)
+        if not key:
+            continue
         raw_vals = grp.iloc[:, 7] if grp.shape[1] > 7 else pd.Series([], dtype=object)
         nums = pd.to_numeric(raw_vals, errors="coerce").dropna()
-        pid_map[bh] = float(nums.max()) if not nums.empty else "-"
+        pid_map[key] = float(nums.max()) if not nums.empty else "-"
     return pid_map
 
 # ══════════════════════════════════════════════════════════════════
@@ -525,6 +535,32 @@ def _steps(step: int):
         icon = "✅ " if i < step else ""
         pills += f'<div class="step-pill {cls}">{icon}{lbl}</div>'
     st.markdown(f'<div class="step-row">{pills}</div>', unsafe_allow_html=True)
+
+_PREV_LABELS = {
+    "SOIL_VOC": "VOC", "SOIL_SVOC": "SVOC", "SOIL_TPH": "TPH",
+    "SOIL_PFAS": "PFAS", "SOIL_METALS": "מתכות",
+    "GW_VOC": "מי תהום VOC", "SOIL_GAS_VOC": "גז קרקע", "GAS_VOC": "גז קרקע",
+}
+
+
+@st.dialog("📊 תצוגה מקדימה", width="large")
+def _preview_dialog(records, by_type):
+    atypes = list(by_type.keys())
+    labels = [_PREV_LABELS.get(t, t) for t in atypes]
+    tabs = st.tabs(labels)
+    for tab, atype in zip(tabs, atypes):
+        with tab:
+            subset = [r for r in records if r.get('analysis_type') == atype][:200]
+            rows = []
+            for r in subset:
+                val = r.get('value')
+                rows.append({
+                    'תרכובת': r.get('compound', ''),
+                    'דגימה':  r.get('sample_id', ''),
+                    'ערך':    f"{val:.4g}" if isinstance(val, float) else (str(val) if val is not None else ''),
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, height=420)
+
 
 # ══════════════════════════════════════════════════════════════════
 # EXCEL EXPORT FLOW
@@ -1058,40 +1094,6 @@ if True:
     st.markdown('</div>', unsafe_allow_html=True)  # end section-card
 
     # ══════════════════════════════════════════════════════════════
-    # PREVIEW TABLE
-    # ══════════════════════════════════════════════════════════════
-    with st.expander("📊 תצוגה מקדימה של הנתונים", expanded=False):
-        _PREV_LABELS = {
-            "SOIL_VOC":     "VOC",
-            "SOIL_SVOC":    "SVOC",
-            "SOIL_TPH":     "TPH",
-            "SOIL_PFAS":    "PFAS",
-            "SOIL_METALS":  "מתכות",
-            "GW_VOC":       "מי תהום VOC",
-            "SOIL_GAS_VOC": "גז קרקע",
-            "GAS_VOC":      "גז קרקע",
-        }
-
-        def build_preview(recs):
-            rows = []
-            for r in recs[:50]:
-                val = r.get('value')
-                rows.append({
-                    'תרכובת': r.get('compound', ''),
-                    'דגימה':  r.get('sample_id', ''),
-                    'ערך':    f"{val:.4g}" if isinstance(val, float) else (str(val) if val is not None else ''),
-                })
-            return pd.DataFrame(rows)
-
-        _prev_atypes = list(by_type.keys())
-        _prev_tab_labels = [_PREV_LABELS.get(t, t) for t in _prev_atypes]
-        _prev_tabs = st.tabs(_prev_tab_labels)
-        for _ptab, _patype in zip(_prev_tabs, _prev_atypes):
-            with _ptab:
-                _psubset = [r for r in records if r.get('analysis_type') == _patype][:50]
-                st.dataframe(build_preview(_psubset), use_container_width=True, height=280)
-
-    # ══════════════════════════════════════════════════════════════
     # BUILD EXCEL + DOWNLOAD
     # ══════════════════════════════════════════════════════════════
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
@@ -1192,7 +1194,7 @@ if True:
             )
         with prev_col:
             if st.button("👁️ תצוגה מקדימה", use_container_width=True, key="xl_preview_btn"):
-                st.session_state["xl_show_preview"] = not st.session_state.get("xl_show_preview", False)
+                _preview_dialog(records, by_type)
         with info_col:
             st.markdown(f"""
             <div style="padding:0.5rem 0;font-size:0.82rem;color:#64748b;direction:rtl;">
@@ -1212,26 +1214,6 @@ if True:
                 use_container_width=False,
                 key       = "word_dl_btn",
             )
-
-        if st.session_state.get("xl_show_preview", False):
-            with st.expander("📊 תצוגה מקדימה — נתונים מורחבת", expanded=True):
-                _preview_atypes = list(by_type.keys())
-                if len(_preview_atypes) > 1:
-                    _preview_tabs = st.tabs([f"{t} ({by_type[t]})" for t in _preview_atypes])
-                    for _ptab, _patype in zip(_preview_tabs, _preview_atypes):
-                        with _ptab:
-                            _subset = [r for r in records if r.get('analysis_type') == _patype]
-                            _styled, _has_clr = _build_styled_pivot(
-                                _subset, tm, selected_thresholds)
-                            st.dataframe(_styled, use_container_width=True)
-                            if _has_clr:
-                                st.markdown(_PREVIEW_LEGEND, unsafe_allow_html=True)
-                else:
-                    _styled, _has_clr = _build_styled_pivot(
-                        records, tm, selected_thresholds)
-                    st.dataframe(_styled, use_container_width=True)
-                    if _has_clr:
-                        st.markdown(_PREVIEW_LEGEND, unsafe_allow_html=True)
 
     st.markdown('</div>', unsafe_allow_html=True)  # end section-card
 
