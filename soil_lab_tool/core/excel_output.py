@@ -191,42 +191,69 @@ def _norm_borehole(s: str) -> str:
 
 
 def _pid_key(borehole: str) -> str:
-    """Normalize borehole name for pid_map lookup: remove dashes and spaces."""
-    return re.sub(r'[-\s]', '', borehole).strip()
+    """Normalize borehole name for pid_map lookup.
+    Maps Latin K/k prefix to Hebrew ק (K-2 → ק2), then removes dashes/spaces."""
+    name = re.sub(r'^[Kk]-?', 'ק', borehole.strip())
+    return re.sub(r'[-\s]', '', name).strip()
 
 
 def _pid_lookup(pid_data: dict, sid: str):
-    """Depth-aware PID lookup for a sample ID.
+    """Depth-aware PID lookup from a raw sample ID string.
 
-    Sample ID format: ק-{depth}-{borehole_num}  e.g. 'ק-3.0-5'
-      → borehole key = 'ק5',  sample depth = 3.0
+    Handles three formats:
+      Format 1 (AlChem): ק-{depth}-{borehole}  e.g. 'ק-3.0-5' → bh=ק5, depth=3.0
+      Format 2 (ALS):    {borehole} {depth}     e.g. 'K-2 5.0' → bh=ק2, depth=5.0
+      Fallback:          last integer segment as borehole, depth=0
 
-    Finds the pid_data[bh_key] entry whose depth_to is the smallest value
-    that is still >= the sample depth (i.e. the shallowest interval that
-    covers the sample).  Returns the associated PID float (0 is a valid
-    value), or '-' when nothing matches.
+    Finds the shallowest pid_data[bh_key] interval where depth_to >= sample depth.
+    Returns PID float (0 is valid) or '-' when nothing matches.
     """
     if not pid_data:
         return '-'
-    # Parse ק-{depth}-{borehole} format
-    m = re.search(r'-(\d+(?:\.\d+)?)-(\d+)$', sid.strip())
-    if m:
-        try:
-            depth = float(m.group(1))
-        except ValueError:
-            depth = 0.0
-        bh_key = f'ק{m.group(2)}'
+    s = sid.strip()
+    # Format 1: ק-{depth}-{borehole}
+    m1 = re.search(r'-(\d+(?:\.\d+)?)-(\d+)$', s)
+    if m1:
+        depth  = float(m1.group(1))
+        bh_key = f'ק{m1.group(2)}'
     else:
-        # Fallback: last integer segment → borehole key
-        m2 = re.search(r'-(\d+)$', sid.strip())
-        bh_key = f'ק{m2.group(1)}' if m2 else _pid_key(sid)
-        depth = 0.0
+        # Format 2: {borehole} {depth}  (depth is the last space-separated token)
+        m2 = re.search(r'^(.+)\s+([\d.]+)$', s)
+        if m2:
+            bh_key = _pid_key(m2.group(1))
+            depth  = float(m2.group(2))
+        else:
+            # Fallback: last hyphen-integer → borehole, no depth info
+            m3 = re.search(r'-(\d+)$', s)
+            bh_key = f'ק{m3.group(1)}' if m3 else _pid_key(s)
+            depth  = 0.0
 
     entries = pid_data.get(bh_key, [])
     if not entries:
         return '-'
+    candidates = [(d, p) for d, p in entries if d >= depth]
+    if candidates:
+        return min(candidates, key=lambda x: x[0])[1]
+    return '-'
 
-    # Entries where depth_to >= sample depth; take the smallest (closest cover)
+
+def _pid_lookup_split(pid_data: dict, borehole: str, depth_str: str):
+    """PID lookup using pre-extracted borehole name and depth string.
+
+    Used by portrait/landscape writers that already have split_map values,
+    avoiding any ambiguity in re-parsing the composite sample-ID string.
+    Covers Format 3 (TPH landscape) and all other _write_landscape rows.
+    """
+    if not pid_data:
+        return '-'
+    bh_key = _pid_key(borehole)
+    try:
+        depth = float(depth_str) if depth_str else 0.0
+    except (ValueError, TypeError):
+        depth = 0.0
+    entries = pid_data.get(bh_key, [])
+    if not entries:
+        return '-'
     candidates = [(d, p) for d, p in entries if d >= depth]
     if candidates:
         return min(candidates, key=lambda x: x[0])[1]
@@ -918,7 +945,8 @@ class LabReportExcel:
                 ("עומק [מ']", depths),
             ]
             if pid_map:
-                pid_vals_pm = [_pid_lookup(pid_map, sid) for sid in samples]
+                pid_vals_pm = [_pid_lookup_split(pid_map, split_p[sid][0], split_p[sid][1])
+                               for sid in samples]
                 meta_rows.append(("קריאת PID [ppm]", pid_vals_pm))
             if cfg.get("include_lod_row"):
                 def _min_sample_lod(sid):
@@ -1230,7 +1258,7 @@ class LabReportExcel:
             col_vals: list = []
             bh_cell_val = _dup_rich_text(borehole)  # rich text if DUP, else plain
 
-            pid_cell = _pid_lookup(pid_map, sid) if has_pid else None
+            pid_cell = _pid_lookup_split(pid_map, borehole, depth_str) if has_pid else None
             if has_depth:
                 col_vals = [bh_cell_val, depth_str if depth_str else ""] + ([pid_cell] if has_pid else [])
             else:
