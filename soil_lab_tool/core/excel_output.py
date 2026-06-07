@@ -1096,23 +1096,19 @@ class LabReportExcel:
                     tier1_res    = self._tier1_res_limit(t_vals)
                     any_lim      = self._strictest(t_vals)
                     if any_lim is not None:
-                        is_real_detection = not (
-                            flag in ("<LOQ", "<") or
-                            (flag == "ND" and loq_val is not None
-                             and isinstance(num_v, (int, float))
-                             and abs(num_v - loq_val) < 1e-9)
+                        _nd_at_loq = (
+                            flag == "ND" and loq_val is not None
+                            and isinstance(num_v, (int, float))
+                            and abs(num_v - loq_val) < 1e-9
                         )
-                        if is_real_detection and isinstance(num_v, (int, float)):
-                            if tier1_ind is not None and num_v > tier1_ind:
-                                c.fill = PINK      # exceeds Tier 1 Industrial
-                                c.font = Font(**FHE, bold=True)
-                            elif tier1_res is not None and num_v > tier1_res:
-                                c.fill = L_BLUE    # exceeds Tier 1 Residential
-                                c.font = Font(**FHE, bold=True)
-                            elif vsl_lim is not None and num_v > vsl_lim:
-                                c.fill = YELLOW    # exceeds VSL only
-                                c.font = Font(**FHE, bold=True)
-                        # GREY + BOLD: threshold < LOD/LOQ → uncertain exclusion
+                        # GREY first: gas ND-at-LOQ (non-detection stored as LOQ)
+                        if _nd_at_loq:
+                            if num_v > any_lim:
+                                c.fill = GRAY
+                                c.font = _font(display, bold=True)
+                                c.number_format = '"<"0.###'
+                                has_gray = True
+                        # GREY: threshold < LOD/LOQ → uncertain exclusion
                         elif flag in ("<LOD", "<LOQ", "<"):
                             lod_num = (
                                 lod     if lod     is not None else
@@ -1124,15 +1120,17 @@ class LabReportExcel:
                                 c.fill = GRAY
                                 c.font = _font(display, bold=True)
                                 has_gray = True
-                        # GREY + BOLD: gas ND-at-LOQ where LOQ exceeds threshold
-                        elif (flag == "ND" and loq_val is not None
-                              and isinstance(num_v, (int, float))
-                              and abs(num_v - loq_val) < 1e-9
-                              and num_v > any_lim):
-                            c.fill = GRAY
-                            c.font = _font(display, bold=True)
-                            c.number_format = '"<"0.###'
-                            has_gray = True
+                        # COLOUR: real detection vs threshold
+                        elif isinstance(num_v, (int, float)):
+                            if tier1_ind is not None and num_v > tier1_ind:
+                                c.fill = PINK      # exceeds Tier 1 Industrial
+                                c.font = Font(**FHE, bold=True)
+                            elif tier1_res is not None and num_v > tier1_res:
+                                c.fill = L_BLUE    # exceeds Tier 1 Residential
+                                c.font = Font(**FHE, bold=True)
+                            elif vsl_lim is not None and num_v > vsl_lim:
+                                c.fill = YELLOW    # exceeds VSL only
+                                c.font = Font(**FHE, bold=True)
 
             data_row += 1
 
@@ -1325,23 +1323,19 @@ class LabReportExcel:
                     any_lim   = self._strictest(t_vals)
                     if any_lim is not None:
                         _loq_cmp = loq_map.get(cmp_name)
-                        is_real_detection = not (
-                            flag_cell in ("<LOQ", "<") or
-                            (flag_cell == "ND" and _loq_cmp is not None
-                             and isinstance(num_v, (int, float))
-                             and abs(num_v - _loq_cmp) < 1e-9)
+                        _nd_at_loq = (
+                            flag_cell == "ND" and _loq_cmp is not None
+                            and isinstance(num_v, (int, float))
+                            and abs(num_v - _loq_cmp) < 1e-9
                         )
-                        if is_real_detection and isinstance(num_v, (int, float)):
-                            if tier1_ind is not None and num_v > tier1_ind:
-                                c.fill = PINK      # exceeds Tier 1 Industrial
-                                c.font = Font(**FHE, bold=True)
-                            elif tier1_res is not None and num_v > tier1_res:
-                                c.fill = L_BLUE    # exceeds Tier 1 Residential
-                                c.font = Font(**FHE, bold=True)
-                            elif vsl_lim is not None and num_v > vsl_lim:
-                                c.fill = YELLOW    # exceeds VSL only
-                                c.font = Font(**FHE, bold=True)
-                        # GREY + BOLD: threshold < LOD/LOQ → uncertain exclusion
+                        # GREY first: gas ND-at-LOQ (non-detection stored as LOQ)
+                        if _nd_at_loq:
+                            if num_v > any_lim:
+                                c.fill = GRAY
+                                c.font = _font(val, bold=True)
+                                c.number_format = '"<"0.###'
+                                has_gray = True
+                        # GREY: threshold < LOD/LOQ → uncertain exclusion
                         elif flag_cell in ("<LOD", "<LOQ", "<"):
                             lod_num = (
                                 lod_cell              if lod_cell              is not None else
@@ -1353,15 +1347,17 @@ class LabReportExcel:
                                 c.fill = GRAY
                                 c.font = _font(val, bold=True)
                                 has_gray = True
-                        # GREY + BOLD: gas ND-at-LOQ where LOQ exceeds threshold
-                        elif (flag_cell == "ND" and _loq_cmp is not None
-                              and isinstance(num_v, (int, float))
-                              and abs(num_v - _loq_cmp) < 1e-9
-                              and num_v > any_lim):
-                            c.fill = GRAY
-                            c.font = _font(val, bold=True)
-                            c.number_format = '"<"0.###'
-                            has_gray = True
+                        # COLOUR: real detection vs threshold
+                        elif isinstance(num_v, (int, float)):
+                            if tier1_ind is not None and num_v > tier1_ind:
+                                c.fill = PINK      # exceeds Tier 1 Industrial
+                                c.font = Font(**FHE, bold=True)
+                            elif tier1_res is not None and num_v > tier1_res:
+                                c.fill = L_BLUE    # exceeds Tier 1 Residential
+                                c.font = Font(**FHE, bold=True)
+                            elif vsl_lim is not None and num_v > vsl_lim:
+                                c.fill = YELLOW    # exceeds VSL only
+                                c.font = Font(**FHE, bold=True)
             data_row += 1
 
         # ── Merge borehole column cells vertically ───────────────────────
