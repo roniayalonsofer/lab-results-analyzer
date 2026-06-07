@@ -16,7 +16,7 @@ from parsers.soil.kte           import KTESoilParser
 from parsers.soil.kte_pr        import KTEPRParser
 from parsers.soil.machon_haneft import MachonHaneftSoilParser
 from parsers.soil.machon_energy import MachonEnergyParser, is_machon_energy_excel, is_machon_energy_pdf
-from parsers.soil.als           import ALSSoilParser, ALSGrainSizeParser
+from parsers.soil.als           import ALSSoilParser, ALSGrainSizeParser, ALSSoilPDFParser
 from parsers.soil.bactochem     import BactochemSoilParser
 from parsers.soil.xrf           import XRFSoilParser
 from parsers.groundwater.kte        import KTEGroundwaterParser
@@ -49,6 +49,7 @@ _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
     ("בקטוכם",       "soil"):        BactochemSoilParser,
     ("bactochem",     "soil"):        BactochemSoilParser,
     ("als",           "soil"):        ALSSoilParser,
+    ("als",           "soil_pdf"):   ALSSoilPDFParser,
     ("als",           "grain_size"):  ALSGrainSizeParser,
     ("aminolab",      "groundwater"): AminolabGroundwaterParser,
     ("אמינולאב",     "groundwater"): AminolabGroundwaterParser,
@@ -415,8 +416,11 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
                 _cat_text = ""
                 for _pg in _pdf_cat.pages[:3]:
                     _cat_text += (_pg.extract_text() or "")
+            _cat_lo = _cat_text.lower()
+            if "als czech republic" in _cat_lo or "alsglobal.com" in _cat_lo:
+                return "soil_pdf"
             if "sub-matrix: soil" in _cat_text and "S-SMVGMS03" in _cat_text:
-                return "soil"
+                return "soil_pdf"
         except Exception:
             pass
         if file_bytes and filename.lower().endswith('.pdf'):

@@ -211,6 +211,162 @@ class ALSSoilParser(BaseParser):
 # ALSGrainSizeParser
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# ALSSoilPDFParser
+# ---------------------------------------------------------------------------
+
+class ALSSoilPDFParser(BaseParser):
+    """ALS Czech Republic soil report — PDF 'Certificate of Analysis' format.
+
+    Table layout per page:
+      • "Client sample ID" row: sample names in columns 4+
+      • Data rows: Parameter | Method | LOR | Unit | Result × N samples
+      • Category header rows (Method/LOR/Unit cells all empty): section label
+      • Values: <N.NN → flag=<LOQ value=N.NN;  ---- or * → skip (not analysed)
+    """
+
+    LAB_NAME = "ALS"
+
+    _SECTION_MAP: list[tuple[tuple[str, ...], str]] = [
+        (("polycyclic", "aromatic", "pah"),         "SOIL_SVOC"),
+        (("semi-volatile", "svoc", "extractable"),   "SOIL_SVOC"),
+        (("volatile", "voc"),                        "SOIL_VOC"),
+        (("metal", "heavy metal", "inorganic"),      "SOIL_METALS"),
+        (("petroleum", "tph", "dro", "gro", "oro"),  "SOIL_TPH"),
+        (("pfas", "perfluoro", "fluorotelomer"),     "SOIL_PFAS"),
+    ]
+
+    def parse(self, file_obj: io.BytesIO) -> list[dict]:
+        try:
+            import pdfplumber
+        except ImportError as exc:
+            raise ImportError("pdfplumber is required: pip install pdfplumber") from exc
+
+        file_obj.seek(0)
+        records: list[dict] = []
+        sample_cols: list[str] = []
+        current_atype = "SOIL_SVOC"
+
+        with pdfplumber.open(file_obj) as pdf:
+            for page in pdf.pages:
+                page_recs, sample_cols, current_atype = self._parse_page(
+                    page, sample_cols, current_atype
+                )
+                records.extend(page_recs)
+
+        return records
+
+    def _parse_page(
+        self,
+        page,
+        carry_sample_cols: list[str],
+        carry_atype: str,
+    ) -> tuple[list[dict], list[str], str]:
+        sample_cols  = carry_sample_cols[:]
+        current_atype = carry_atype
+        records: list[dict] = []
+
+        tables = page.extract_tables()
+        if not tables:
+            return records, sample_cols, current_atype
+
+        for table in tables:
+            for row in table:
+                if not row:
+                    continue
+                cells = [str(c or "").strip() for c in row]
+                if not any(cells):
+                    continue
+
+                first    = cells[0]
+                first_lo = first.lower()
+
+                # Sample ID header row
+                if "client sample id" in first_lo:
+                    new = [c for c in cells[4:] if c and c.lower() not in ("nan", "")]
+                    if new:
+                        sample_cols = new
+                    continue
+
+                # Standard column header row — skip
+                if first_lo in ("parameter", "analyte", "compound"):
+                    continue
+
+                # Empty first cell — skip
+                if not first:
+                    continue
+
+                # Section header: Method, LOR, Unit columns are all empty
+                if not any(len(cells) > i and cells[i] for i in (1, 2, 3)):
+                    current_atype = self._section_to_atype(first)
+                    continue
+
+                # Data row
+                lor_raw = cells[2] if len(cells) > 2 else ""
+                unit    = cells[3] if len(cells) > 3 else "mg/kg"
+                if not unit or unit.lower() == "nan":
+                    unit = "mg/kg"
+
+                loq: float | None = None
+                try:
+                    loq = float(lor_raw.lstrip("<"))
+                except (ValueError, TypeError):
+                    pass
+
+                cas = name_to_cas(first) or ""
+
+                for i, raw_val in enumerate(cells[4:]):
+                    if i >= len(sample_cols):
+                        break
+                    sample_id = sample_cols[i]
+                    if not sample_id:
+                        continue
+                    value, flag = self._parse_pdf_value(raw_val, loq)
+                    if value is None and flag is None:
+                        continue
+                    records.append({
+                        "compound":      first,
+                        "cas":           cas,
+                        "value":         value,
+                        "flag":          flag or "",
+                        "unit":          unit,
+                        "sample_id":     sample_id,
+                        "lod":           None,
+                        "loq":           loq,
+                        "analysis_type": current_atype,
+                    })
+
+        return records, sample_cols, current_atype
+
+    @staticmethod
+    def _parse_pdf_value(raw: str, loq: float | None) -> tuple[float | None, str | None]:
+        v = raw.strip()
+        if not v or v in ("----", "*", "-", "n/a", "n.a.", "N/A"):
+            return None, None  # not analysed — skip record
+        if v.upper() in ("ND", "N.D.", "N/D", "<LOR", "< LOR", "NOT DETECTED"):
+            return loq, "<LOQ"
+        if v.startswith("<"):
+            try:
+                return float(v[1:]), "<LOQ"
+            except ValueError:
+                return loq, "<LOQ"
+        try:
+            return float(v), None
+        except ValueError:
+            return loq, "<LOQ"
+
+    def _section_to_atype(self, header: str) -> str:
+        lo = header.lower()
+        for keywords, atype in self._SECTION_MAP:
+            if any(kw in lo for kw in keywords):
+                return atype
+        return "SOIL_SVOC"
+
+
+# ---------------------------------------------------------------------------
+# ALSGrainSizeParser
+# ---------------------------------------------------------------------------
+
 class ALSGrainSizeParser(BaseParser):
     """ALS grain-size (sieve analysis) — sheet 'Client SOIL 1' with Fraction parameters."""
 
