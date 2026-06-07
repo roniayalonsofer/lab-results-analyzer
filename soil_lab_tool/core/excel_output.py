@@ -1054,6 +1054,9 @@ class LabReportExcel:
                     display = f"<{_fmt_lod(lod)}" if lod is not None else None
                 elif flag == "<":
                     display = f"<{v}" if isinstance(v, float) else f"<{v}"
+                elif flag == "ND":
+                    loq_ref = loq_val or v
+                    display = float(loq_ref) if isinstance(loq_ref, (int, float)) else loq_ref
                 else:
                     display = v
                 sample_vals.append((display, v, flag, lod))
@@ -1289,6 +1292,9 @@ class LabReportExcel:
                 elif flag == "<":
                     loq_ref = loq_val or v
                     display = f"<{loq_ref}" if isinstance(loq_ref, float) else f"<{loq_ref}"
+                elif flag == "ND":
+                    loq_ref = loq_val or v
+                    display = float(loq_ref) if isinstance(loq_ref, (int, float)) else loq_ref
                 else:
                     display = v
                 col_vals.append(display)
