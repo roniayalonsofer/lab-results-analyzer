@@ -54,6 +54,8 @@ _SECTION_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"ICP\s+SOIL",                    re.I), "ICP_SOIL"),
     (re.compile(r"Explosives?\s+and\s+propellant", re.I), "EXPLOSIVES"),
     (re.compile(r"TPH[-\s]*DRO",                  re.I), "TPH"),
+    (re.compile(r'\bBTEX\b',                        re.I), "VOC"),
+    (re.compile(r'\bMTBE\b',                        re.I), "MBTEX"),
     (re.compile(r"SVOC",                           re.I), "SVOC"),
     (re.compile(r"\bVOC\b",                        re.I), "VOC"),
     (re.compile(r"\bICP\b",                        re.I), "ICP"),
@@ -128,6 +130,8 @@ def _analysis_type(section: str | None, unit: str) -> str:
         return "SOIL_METALS"
     if section == "SVOC":
         return "SOIL_SVOC"
+    if section == "MBTEX":
+        return "SOIL_MBTEX"
     if section == "VOC":
         return "SOIL_VOC"
     if section == "TPH":
@@ -169,7 +173,7 @@ class BactochemSoilParser(BaseParser):
 
     LAB_NAME = "בקטוכם"
     ANALYSIS_TYPES = [
-        "SOIL_METALS", "SOIL_SVOC", "SOIL_VOC", "SOIL_TPH", "SOIL_EXPLOSIVES",
+        "SOIL_METALS", "SOIL_SVOC", "SOIL_VOC", "SOIL_MBTEX", "SOIL_TPH", "SOIL_EXPLOSIVES",
         "SOIL_PFAS", "GW_METALS", "GW_TPH", "GW_PFAS", "GW_MICROBIOLOGY",
     ]
 
@@ -214,7 +218,10 @@ def _parse_lines(lines: list[str]) -> list[dict]:
         m = _SAMPLE_RE.search(line)
         if m:
             sample_id   = m.group("sid").strip()
-            sample_name = _fix_rtl(m.group("sname").strip())
+            sname = _fix_rtl(m.group("sname").strip())
+            _bh = re.search(r'(P-\d+)', sname)
+            _dp = re.search(r'([\d.]+)', sname)
+            sample_name = f"{_bh.group(1)} {_dp.group(1)}" if _bh and _dp else sname
             section     = None
             continue
 
