@@ -18,6 +18,7 @@ ALSGrainSizeParser uses the same sheet format but recognises fraction parameters
 from __future__ import annotations
 
 import io
+import re
 
 import pandas as pd
 
@@ -256,13 +257,21 @@ class ALSSoilPDFParser(BaseParser):
 
         return records
 
+    # Regex for concatenated single-cell data rows:
+    # e.g. "Dinoseb S-SMVGMS03 0.50 mg/kg DW <0.50 <0.50 <0.50"
+    _CONCAT_ROW_RE = re.compile(
+        r'^(.+?)\s+S-\w+\s+([\d.]+)\s+mg/kg\s+DW\s+(.+)$'
+    )
+    # Sample ID pattern: letter followed by digits (e.g. P10, K3)
+    _SAMPLE_ID_RE = re.compile(r'^[A-Z]\d+$')
+
     def _parse_page(
         self,
         page,
         carry_sample_cols: list[str],
         carry_atype: str,
     ) -> tuple[list[dict], list[str], str]:
-        sample_cols  = carry_sample_cols[:]
+        sample_cols   = carry_sample_cols[:]
         current_atype = carry_atype
         records: list[dict] = []
 
@@ -281,33 +290,78 @@ class ALSSoilPDFParser(BaseParser):
                 first    = cells[0]
                 first_lo = first.lower()
 
-                # Sample ID header row
+                # ── Sample ID header row ──────────────────────────────────
+                # Format: cells[0] empty, sample names start at cells[3]
+                if (not first and
+                        len(cells) > 3 and
+                        self._SAMPLE_ID_RE.match(cells[3])):
+                    new = [c for c in cells[3:] if c and self._SAMPLE_ID_RE.match(c)]
+                    if new:
+                        sample_cols = new
+                    continue
+                # Fallback: explicit "Client sample ID" label
                 if "client sample id" in first_lo:
                     new = [c for c in cells[4:] if c and c.lower() not in ("nan", "")]
                     if new:
                         sample_cols = new
                     continue
 
-                # Standard column header row — skip
+                # ── Standard column header row — skip ─────────────────────
                 if first_lo in ("parameter", "analyte", "compound"):
                     continue
 
-                # Empty first cell — skip
+                # ── Single-cell concatenated row ──────────────────────────
+                # All content landed in cells[0]; parse with regex.
+                if len([c for c in cells if c]) == 1 and first:
+                    for line in first.splitlines():
+                        line = line.strip()
+                        m = self._CONCAT_ROW_RE.match(line)
+                        if not m:
+                            continue
+                        compound  = m.group(1).strip()
+                        loq_str   = m.group(2)
+                        results   = m.group(3).split()
+                        loq: float | None = None
+                        try:
+                            loq = float(loq_str)
+                        except ValueError:
+                            pass
+                        cas = name_to_cas(compound) or ""
+                        for i, raw_val in enumerate(results):
+                            if i >= len(sample_cols):
+                                break
+                            value, flag = self._parse_pdf_value(raw_val, loq)
+                            if value is None and flag is None:
+                                continue
+                            records.append({
+                                "compound":      compound,
+                                "cas":           cas,
+                                "value":         value,
+                                "flag":          flag or "",
+                                "unit":          "mg/kg",
+                                "sample_id":     sample_cols[i],
+                                "lod":           None,
+                                "loq":           loq,
+                                "analysis_type": current_atype,
+                            })
+                    continue
+
+                # ── Empty first cell (not sample-ID row) — skip ───────────
                 if not first:
                     continue
 
-                # Section header: Method, LOR, Unit columns are all empty
+                # ── Section header: Method/LOR/Unit all empty ─────────────
                 if not any(len(cells) > i and cells[i] for i in (1, 2, 3)):
                     current_atype = self._section_to_atype(first)
                     continue
 
-                # Data row
+                # ── Normal multi-cell data row ────────────────────────────
                 lor_raw = cells[2] if len(cells) > 2 else ""
                 unit    = cells[3] if len(cells) > 3 else "mg/kg"
                 if not unit or unit.lower() == "nan":
                     unit = "mg/kg"
 
-                loq: float | None = None
+                loq = None
                 try:
                     loq = float(lor_raw.lstrip("<"))
                 except (ValueError, TypeError):
