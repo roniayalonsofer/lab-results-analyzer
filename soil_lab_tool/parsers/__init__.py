@@ -286,6 +286,14 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
     import logging
     logging.warning(f"DEBUG auto_detect_lab: filename={filename}, n={n}")
     if file_bytes is not None and n.endswith(".pdf"):
+        try:
+            import io as _io, pdfplumber as _plumber
+            with _plumber.open(_io.BytesIO(file_bytes)) as _pdf:
+                first_text = (_pdf.pages[0].extract_text() or "").lower()
+            if "bactochem" in first_text:
+                return "בקטוכם"
+        except Exception:
+            pass
         if _is_aminolab_pdf(file_bytes):
             return "aminolab"
         if is_machon_energy_pdf(file_bytes):
@@ -303,14 +311,6 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
             pass
         if _is_alchem_tph_pdf(file_bytes):
             return "alchem"
-        try:
-            import io as _io, pdfplumber as _plumber
-            with _plumber.open(_io.BytesIO(file_bytes)) as _pdf:
-                first_text = (_pdf.pages[0].extract_text() or "").lower()
-            if "bactochem" in first_text:
-                return "בקטוכם"
-        except Exception:
-            pass
 
     # Content-based detection (runs BEFORE "kte" filename fallback so that
     # ALS files whose filenames happen to match "kte" patterns are caught here)
@@ -379,19 +379,6 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
 
     # ── PDF content-based detection ──────────────────────────────────────────────
     if file_bytes is not None and n.endswith(".pdf"):
-        if _is_aminolab_pdf(file_bytes):
-            return "groundwater"
-        if file_bytes and filename.lower().endswith('.pdf'):
-            try:
-                import pdfplumber as _pl, io as _io2
-                with _pl.open(_io2.BytesIO(file_bytes)) as _p:
-                    _t = _p.pages[0].extract_text() or ''
-                    if 'םכ-לא' in _t:
-                        return "soil_tph_pdf"
-            except Exception:
-                pass
-        if _is_alchem_tph_pdf(file_bytes):
-            return "soil_tph_pdf"
         try:
             import io as _io, pdfplumber as _plumber
             with _plumber.open(_io.BytesIO(file_bytes)) as _pdf:
@@ -406,6 +393,19 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
                 return "groundwater"
         except Exception:
             pass
+        if _is_aminolab_pdf(file_bytes):
+            return "groundwater"
+        if file_bytes and filename.lower().endswith('.pdf'):
+            try:
+                import pdfplumber as _pl, io as _io2
+                with _pl.open(_io2.BytesIO(file_bytes)) as _p:
+                    _t = _p.pages[0].extract_text() or ''
+                    if 'םכ-לא' in _t:
+                        return "soil_tph_pdf"
+            except Exception:
+                pass
+        if _is_alchem_tph_pdf(file_bytes):
+            return "soil_tph_pdf"
 
     # ── Content-based detection for Excel (runs BEFORE any filename logic) ──────
     if file_bytes is not None and (n.endswith(".xlsx") or n.endswith(".xls")):
