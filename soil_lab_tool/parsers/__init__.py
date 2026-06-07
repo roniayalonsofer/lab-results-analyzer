@@ -296,6 +296,20 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
             pass
         if _is_aminolab_pdf(file_bytes):
             return "aminolab"
+        try:
+            import io as _io_als, pdfplumber as _pl_als
+            with _pl_als.open(_io_als.BytesIO(file_bytes)) as _pdf_als:
+                _als_text = ""
+                for _pg in _pdf_als.pages[:3]:
+                    _als_text += (_pg.extract_text() or "")
+            _als_lower = _als_text.lower()
+            if ("als czech republic" in _als_lower or
+                    "alsglobal" in _als_lower or
+                    ("certificate of analysis" in _als_lower and
+                     "sub-matrix: soil" in _als_text)):
+                return "als"
+        except Exception:
+            pass
         if is_machon_energy_pdf(file_bytes):
             return "מכון האנרגיה"
         try:
@@ -395,6 +409,16 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
             pass
         if _is_aminolab_pdf(file_bytes):
             return "groundwater"
+        try:
+            import io as _io_cat, pdfplumber as _pl_cat
+            with _pl_cat.open(_io_cat.BytesIO(file_bytes)) as _pdf_cat:
+                _cat_text = ""
+                for _pg in _pdf_cat.pages[:3]:
+                    _cat_text += (_pg.extract_text() or "")
+            if "sub-matrix: soil" in _cat_text and "S-SMVGMS03" in _cat_text:
+                return "soil"
+        except Exception:
+            pass
         if file_bytes and filename.lower().endswith('.pdf'):
             try:
                 import pdfplumber as _pl, io as _io2
