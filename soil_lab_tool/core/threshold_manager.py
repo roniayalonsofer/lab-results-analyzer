@@ -86,14 +86,14 @@ THRESHOLD_LABELS: dict[str, str] = {
     "GAS_AMBIENT_RES": "אוויר תוך מבני — Ambient Air (מגורים)",
     "GAS_AMBIENT_IND": "אוויר תוך מבני — Ambient Air (תעשייה)",
     # Soil direct-contact RBTL keys with aquifer sensitivity & depth
-    "TIER1_RES_SOIL_VH":     "TIER1 קרקע מגורים - רגיש מאוד",
-    "TIER1_RES_SOIL_HM_0_6": "TIER1 קרקע מגורים - רגיש/בינוני, 0-6מ'",
-    "TIER1_RES_SOIL_HM_6":   "TIER1 קרקע מגורים - רגיש/בינוני, >6מ'",
-    "TIER1_RES_SOIL_LOW":    "TIER1 קרקע מגורים - לא רגיש",
-    "TIER1_IND_SOIL_VH":     "TIER1 קרקע תעשייה - רגיש מאוד",
-    "TIER1_IND_SOIL_HM_0_6": "TIER1 קרקע תעשייה - רגיש/בינוני, 0-6מ'",
-    "TIER1_IND_SOIL_HM_6":   "TIER1 קרקע תעשייה - רגיש/בינוני, >6מ'",
-    "TIER1_IND_SOIL_LOW":    "TIER1 קרקע תעשייה - לא רגיש",
+    "TIER1_RES_SOIL_VH":     "TIER1 מגורים - רגיש מאוד",
+    "TIER1_RES_SOIL_HM_0_6": "TIER1 מגורים - רגיש/בינוני, 0-6מ'",
+    "TIER1_RES_SOIL_HM_6":   "TIER1 מגורים - רגיש/בינוני, >6מ'",
+    "TIER1_RES_SOIL_LOW":    "TIER1 מגורים - לא רגיש",
+    "TIER1_IND_SOIL_VH":     "TIER1 תעשייה - רגיש מאוד",
+    "TIER1_IND_SOIL_HM_0_6": "TIER1 תעשייה - רגיש/בינוני, 0-6מ'",
+    "TIER1_IND_SOIL_HM_6":   "TIER1 תעשייה - רגיש/בינוני, >6מ'",
+    "TIER1_IND_SOIL_LOW":    "TIER1 תעשייה - לא רגיש",
 }
 
 # All Tier-1 soil direct-contact keys (used to declare valid keys per atype)

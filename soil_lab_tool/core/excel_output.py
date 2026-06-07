@@ -1082,7 +1082,7 @@ class LabReportExcel:
                 # ── Threshold columns: no fill ─────────────────────────
                 elif (N_COMPOUND + N_LOD_LOQ) < ci <= (N_COMPOUND + N_LOD_LOQ + N_THRESH):
                     if val == "לא קיים":
-                        c.font = Font(**FHE, color="808080", italic=True)
+                        c.font = Font(**FHE, color="000000", italic=False)
                     else:
                         c.font          = Font(**FHE)   # David 9, no bold
                         c.number_format = _num_fmt_thresh(val)
@@ -1235,7 +1235,7 @@ class LabReportExcel:
             data_row += 1
 
         # ── Threshold rows (BEFORE sample data) ─────────────────────────
-        UNDEF_FONT  = Font(**FHE, color="808080", italic=True)
+        UNDEF_FONT  = Font(**FHE, color="000000", italic=False)
         for tk in thresh_keys:
             label    = THRESHOLD_LABELS.get(tk, tk)
             # Use plain string with readingOrder=2 so Excel treats the paragraph as RTL
