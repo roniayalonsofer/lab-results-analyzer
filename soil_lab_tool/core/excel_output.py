@@ -1096,14 +1096,10 @@ class LabReportExcel:
                     tier1_res    = self._tier1_res_limit(t_vals)
                     any_lim      = self._strictest(t_vals)
                     if any_lim is not None:
-                        _nd_at_loq = (
-                            flag == "ND" and loq_val is not None
-                            and isinstance(num_v, (int, float))
-                            and abs(num_v - loq_val) < 1e-9
-                        )
-                        # GREY first: gas ND-at-LOQ (non-detection stored as LOQ)
+                        _nd_at_loq = flag == "ND"
+                        # GREY first: ND is a non-detection regardless of stored value
                         if _nd_at_loq:
-                            if num_v > any_lim:
+                            if loq_val is not None and loq_val > any_lim:
                                 c.fill = GRAY
                                 c.font = _font(display, bold=True)
                                 c.number_format = '"<"0.###'
@@ -1323,14 +1319,10 @@ class LabReportExcel:
                     any_lim   = self._strictest(t_vals)
                     if any_lim is not None:
                         _loq_cmp = loq_map.get(cmp_name)
-                        _nd_at_loq = (
-                            flag_cell == "ND" and _loq_cmp is not None
-                            and isinstance(num_v, (int, float))
-                            and abs(num_v - _loq_cmp) < 1e-9
-                        )
-                        # GREY first: gas ND-at-LOQ (non-detection stored as LOQ)
+                        _nd_at_loq = flag_cell == "ND"
+                        # GREY first: ND is a non-detection regardless of stored value
                         if _nd_at_loq:
-                            if num_v > any_lim:
+                            if _loq_cmp is not None and _loq_cmp > any_lim:
                                 c.fill = GRAY
                                 c.font = _font(val, bold=True)
                                 c.number_format = '"<"0.###'
