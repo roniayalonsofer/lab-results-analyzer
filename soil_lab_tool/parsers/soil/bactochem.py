@@ -93,6 +93,14 @@ _SUMMARY_RE = re.compile(
     re.IGNORECASE,
 )
 
+# MTBE bare line — no CAS prefix, format: "{loq} {unit} {result} MTBE"
+# e.g. "0.025 mg/kg 1.470 MTBE"
+_MTBE_RE = re.compile(
+    r"^\s*(?P<loq>[\d.]+)\s+(?P<unit>mg/kg)\s+(?P<result>[\d.]+)\s+(?P<compound>MTBE)\s*$",
+    re.IGNORECASE,
+)
+_MTBE_CAS = "1634-04-4"
+
 # Page footer — skip these lines
 _PAGE_FOOTER_RE = re.compile(r"Page\s+\d+\s+of\s+\d+", re.I)
 
@@ -288,6 +296,29 @@ def _parse_lines(lines: list[str]) -> list[dict]:
                         "analysis_type": "SOIL_PFAS" if is_soil else "GW_PFAS",
                     })
                 continue
+
+            # ── MTBE bare line (loq-first, no CAS prefix) ──────────────
+            # e.g. "0.025 mg/kg 1.470 MTBE"
+            if section in ("VOC", "MBTEX"):
+                m_mtbe = _MTBE_RE.match(line)
+                if m_mtbe:
+                    loq_v  = float(m_mtbe.group("loq"))
+                    unit   = m_mtbe.group("unit").strip()
+                    res_raw = m_mtbe.group("result").strip()
+                    value, flag = _parse_result(res_raw, loq_v)
+                    if value is not None or flag:
+                        records.append({
+                            "sample_id":     sample_name,
+                            "compound":      "MTBE",
+                            "cas":           _MTBE_CAS,
+                            "value":         value,
+                            "flag":          flag,
+                            "unit":          unit,
+                            "lod":           None,
+                            "loq":           loq_v,
+                            "analysis_type": "SOIL_VOC",
+                        })
+                    continue
 
             # ── Summary line (unit-first RTL layout, no CAS number) ────
             # e.g. "mg/kg 1086.840 Total BTEX"
