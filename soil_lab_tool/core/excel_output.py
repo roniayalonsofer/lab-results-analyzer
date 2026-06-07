@@ -1124,6 +1124,15 @@ class LabReportExcel:
                                 c.fill = GRAY
                                 c.font = _font(display, bold=True)
                                 has_gray = True
+                        # GREY + BOLD: gas ND-at-LOQ where LOQ exceeds threshold
+                        elif (flag == "ND" and loq_val is not None
+                              and isinstance(num_v, (int, float))
+                              and abs(num_v - loq_val) < 1e-9
+                              and num_v > any_lim):
+                            c.fill = GRAY
+                            c.font = _font(display, bold=True)
+                            c.number_format = '"<"0.###'
+                            has_gray = True
 
             data_row += 1
 
@@ -1344,6 +1353,15 @@ class LabReportExcel:
                                 c.fill = GRAY
                                 c.font = _font(val, bold=True)
                                 has_gray = True
+                        # GREY + BOLD: gas ND-at-LOQ where LOQ exceeds threshold
+                        elif (flag_cell == "ND" and _loq_cmp is not None
+                              and isinstance(num_v, (int, float))
+                              and abs(num_v - _loq_cmp) < 1e-9
+                              and num_v > any_lim):
+                            c.fill = GRAY
+                            c.font = _font(val, bold=True)
+                            c.number_format = '"<"0.###'
+                            has_gray = True
             data_row += 1
 
         # ── Merge borehole column cells vertically ───────────────────────
