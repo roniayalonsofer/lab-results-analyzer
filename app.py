@@ -1029,7 +1029,8 @@ if True:
     # THRESHOLD SELECTION
     # ══════════════════════════════════════════════════════════════
     found_atypes  = list(by_type.keys())
-    has_soil      = any(t in found_atypes for t in ("SOIL_VOC","SOIL_TPH","SOIL_METALS","SOIL_MBTEX","XRF"))
+    has_soil      = (any(t in found_atypes for t in ("SOIL_VOC","SOIL_TPH","SOIL_METALS","SOIL_MBTEX","SOIL_SVOC","XRF"))
+                     or category in ("soil", "soil_pdf"))
     has_soil_pfas = "SOIL_PFAS" in found_atypes
     has_soil_gas  = "SOIL_GAS_VOC" in found_atypes
     has_gw        = any(t.startswith("GW_") for t in found_atypes)
