@@ -58,13 +58,16 @@ from core.threshold_manager import ThresholdManager, ANALYSIS_THRESHOLDS, THRESH
 
 def _is_ind_key(k: str) -> bool:
     """True for Tier1 Industrial threshold keys (e.g. TIER1_IND_*, TIER1_INDOOR_IND, PFAS_TIER1_IND*).
-    Uses word-boundary matching so TIER1_INDOOR_RES is NOT classified as industrial."""
-    return "TIER1" in k and ("_IND_" in k or k.endswith("_IND"))
+    Also covers gas thresholds (GAS_AMBIENT_IND, GAS_INDOOR_IND, GAS_OUTDOOR_IND) which lack TIER1 in their name."""
+    return ("TIER1" in k and ("_IND_" in k or k.endswith("_IND"))) or \
+           k in ("GAS_AMBIENT_IND", "GAS_INDOOR_IND", "GAS_OUTDOOR_IND")
 
 
 def _is_res_key(k: str) -> bool:
-    """True for Tier1 Residential threshold keys (e.g. TIER1_RES_*, TIER1_INDOOR_RES, PFAS_TIER1_RES*)."""
-    return "TIER1" in k and ("_RES_" in k or k.endswith("_RES"))
+    """True for Tier1 Residential threshold keys (e.g. TIER1_RES_*, TIER1_INDOOR_RES, PFAS_TIER1_RES*).
+    Also covers gas thresholds (GAS_AMBIENT_RES, GAS_INDOOR_RES, GAS_OUTDOOR_RES) which lack TIER1 in their name."""
+    return ("TIER1" in k and ("_RES_" in k or k.endswith("_RES"))) or \
+           k in ("GAS_AMBIENT_RES", "GAS_INDOOR_RES", "GAS_OUTDOOR_RES")
 
 
 def _is_vsl_key(k: str) -> bool:
