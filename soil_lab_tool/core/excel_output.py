@@ -1091,6 +1091,8 @@ class LabReportExcel:
                     display, num_v, flag, lod = sample_vals[si]
                     if flag == "<LOQ" and isinstance(val, (int, float)):
                         c.number_format = '"<"0.###'
+                    elif flag == "ND":
+                        c.number_format = '"<"0.###'
                     vsl_lim      = self._vsl_limit(t_vals)
                     tier1_ind    = self._tier1_ind_limit(t_vals)
                     tier1_res    = self._tier1_res_limit(t_vals)
@@ -1301,7 +1303,7 @@ class LabReportExcel:
                 if ci >= cmp_col_start and isinstance(val, (int, float)):
                     comp_idx               = ci - cmp_col_start
                     _, flag_nf, _          = row_meta[comp_idx]
-                    if flag_nf == "<LOQ":
+                    if flag_nf in ("<LOQ", "ND"):
                         c.number_format = '"<"0.###'
                     else:
                         c.number_format = _num_fmt_data(val)
