@@ -1096,8 +1096,13 @@ class LabReportExcel:
                     tier1_res    = self._tier1_res_limit(t_vals)
                     any_lim      = self._strictest(t_vals)
                     if any_lim is not None:
-                        if (flag not in ("<LOQ", "<", "ND")
-                                and isinstance(num_v, (int, float))):
+                        is_real_detection = not (
+                            flag in ("<LOQ", "<") or
+                            (flag == "ND" and loq_val is not None
+                             and isinstance(num_v, (int, float))
+                             and abs(num_v - loq_val) < 1e-9)
+                        )
+                        if is_real_detection and isinstance(num_v, (int, float)):
                             if tier1_ind is not None and num_v > tier1_ind:
                                 c.fill = PINK      # exceeds Tier 1 Industrial
                                 c.font = Font(**FHE, bold=True)
@@ -1310,8 +1315,14 @@ class LabReportExcel:
                     tier1_res = self._tier1_res_limit(t_vals)
                     any_lim   = self._strictest(t_vals)
                     if any_lim is not None:
-                        if (flag_cell not in ("<LOQ", "<", "ND")
-                                and isinstance(num_v, (int, float))):
+                        _loq_cmp = loq_map.get(cmp_name)
+                        is_real_detection = not (
+                            flag_cell in ("<LOQ", "<") or
+                            (flag_cell == "ND" and _loq_cmp is not None
+                             and isinstance(num_v, (int, float))
+                             and abs(num_v - _loq_cmp) < 1e-9)
+                        )
+                        if is_real_detection and isinstance(num_v, (int, float)):
                             if tier1_ind is not None and num_v > tier1_ind:
                                 c.fill = PINK      # exceeds Tier 1 Industrial
                                 c.font = Font(**FHE, bold=True)
