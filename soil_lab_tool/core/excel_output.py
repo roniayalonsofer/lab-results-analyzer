@@ -1096,7 +1096,7 @@ class LabReportExcel:
                     tier1_res    = self._tier1_res_limit(t_vals)
                     any_lim      = self._strictest(t_vals)
                     if any_lim is not None:
-                        if (flag not in ("<LOQ", "<")
+                        if (flag not in ("<LOQ", "<", "ND")
                                 and isinstance(num_v, (int, float))):
                             if tier1_ind is not None and num_v > tier1_ind:
                                 c.fill = PINK      # exceeds Tier 1 Industrial
@@ -1310,7 +1310,7 @@ class LabReportExcel:
                     tier1_res = self._tier1_res_limit(t_vals)
                     any_lim   = self._strictest(t_vals)
                     if any_lim is not None:
-                        if (flag_cell not in ("<LOQ", "<")
+                        if (flag_cell not in ("<LOQ", "<", "ND")
                                 and isinstance(num_v, (int, float))):
                             if tier1_ind is not None and num_v > tier1_ind:
                                 c.fill = PINK      # exceeds Tier 1 Industrial
