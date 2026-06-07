@@ -55,7 +55,7 @@ _SECTION_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"Explosives?\s+and\s+propellant", re.I), "EXPLOSIVES"),
     (re.compile(r"TPH[-\s]*DRO",                  re.I), "TPH"),
     (re.compile(r'\bBTEX\b',                        re.I), "VOC"),
-    (re.compile(r'\bMTBE\b',                        re.I), "MBTEX"),
+    (re.compile(r'\bMTBE\b',                        re.I), "VOC"),
     (re.compile(r"SVOC",                           re.I), "SVOC"),
     (re.compile(r"\bVOC\b",                        re.I), "VOC"),
     (re.compile(r"\bICP\b",                        re.I), "ICP"),
@@ -82,6 +82,15 @@ _MICRO_LINE_RE = re.compile(
     r"\s+"
     r"(?P<unit>CFU/(?:100\s*)?m[Ll]|MPN/(?:100\s*)?m[Ll]|m[Ll]/(?:100\s*)?CFU)",
     re.IGNORECASE | re.UNICODE,
+)
+
+# Summary lines with no CAS number — RTL visual order: "{unit} {result} {compound}"
+# e.g. "mg/kg 1086.840 Total BTEX"
+_SUMMARY_RE = re.compile(
+    r"^(?P<unit>mg/(?:kg(?:\s+dry(?:\s+substance)?)?|L)|ng/(?:kg|L)|%)"
+    r"\s+(?P<result>[\d.]+(?:[Ee][+\-]?\d+)?)"
+    r"\s+(?P<compound>.+)$",
+    re.IGNORECASE,
 )
 
 # Page footer — skip these lines
@@ -130,8 +139,6 @@ def _analysis_type(section: str | None, unit: str) -> str:
         return "SOIL_METALS"
     if section == "SVOC":
         return "SOIL_SVOC"
-    if section == "MBTEX":
-        return "SOIL_MBTEX"
     if section == "VOC":
         return "SOIL_VOC"
     if section == "TPH":
@@ -173,7 +180,7 @@ class BactochemSoilParser(BaseParser):
 
     LAB_NAME = "בקטוכם"
     ANALYSIS_TYPES = [
-        "SOIL_METALS", "SOIL_SVOC", "SOIL_VOC", "SOIL_MBTEX", "SOIL_TPH", "SOIL_EXPLOSIVES",
+        "SOIL_METALS", "SOIL_SVOC", "SOIL_VOC", "SOIL_TPH", "SOIL_EXPLOSIVES",
         "SOIL_PFAS", "GW_METALS", "GW_TPH", "GW_PFAS", "GW_MICROBIOLOGY",
     ]
 
@@ -279,6 +286,28 @@ def _parse_lines(lines: list[str]) -> list[dict]:
                         "lod":           None,
                         "loq":           None,
                         "analysis_type": "SOIL_PFAS" if is_soil else "GW_PFAS",
+                    })
+                continue
+
+            # ── Summary line (unit-first RTL layout, no CAS number) ────
+            # e.g. "mg/kg 1086.840 Total BTEX"
+            m_sum = _SUMMARY_RE.match(line)
+            if m_sum:
+                compound = _fix_rtl(m_sum.group("compound").strip())
+                res_raw  = m_sum.group("result").strip()
+                unit     = m_sum.group("unit").strip()
+                value, flag = _parse_result(res_raw, None)
+                if compound and (value is not None or flag):
+                    records.append({
+                        "sample_id":     sample_name,
+                        "compound":      compound,
+                        "cas":           "",
+                        "value":         value,
+                        "flag":          flag,
+                        "unit":          unit,
+                        "lod":           None,
+                        "loq":           None,
+                        "analysis_type": _analysis_type(section, unit),
                     })
                 continue
 
