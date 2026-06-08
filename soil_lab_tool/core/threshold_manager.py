@@ -493,26 +493,66 @@ class ThresholdManager:
         """Return the CAS number for a compound looked up by name.
 
         Searches _vsl_full first (800+ compounds), then _main.
-        Tries each variant produced by _name_variants for an exact
-        case-insensitive match on the name column.
-        Returns None when no match is found.
+        Normalizations applied before matching:
+          - backticks → apostrophes
+          - parens → brackets (PAH notation: Benz(a)anthracene → Benz[a]anthracene)
+          - dot-as-comma between digits (2.6-Dinitrotoluene → also tries 2,6- variant)
+        Falls back to a partial/contains match as a last resort.
         """
-        candidates = self._name_variants(compound_name)
+        # ── Normalize ────────────────────────────────────────────────────────
+        norm = compound_name.replace('`', "'")
+        norm = re.sub(r'\(([a-zA-Z0-9,]+)\)', r'[\1]', norm)
+
+        # Build deduplicated candidate list across all input variants
+        raw_names = [norm]
+        dot_comma = re.sub(r'(\d)\.(\d)', r'\1,\2', norm)
+        if dot_comma != norm:
+            raw_names.append(dot_comma)
+        if compound_name != norm:
+            raw_names.append(compound_name)
+
+        seen: set[str] = set()
+        candidates: list[str] = []
+        for name in raw_names:
+            for v in self._name_variants(name):
+                key = v.lower()
+                if key not in seen:
+                    seen.add(key)
+                    candidates.append(v)
+
+        # ── Prepare df info ───────────────────────────────────────────────────
+        df_info = []
         for df in ([self._vsl_full] if self._vsl_full is not None else []) + [self._main]:
             if df is None:
                 continue
             name_col = next((c for c in df.columns if any(k in c.lower() for k in ("name", "compound", "chemical"))), None)
             cas_col  = next((c for c in df.columns if "cas" in c.lower()), None)
-            if name_col is None or cas_col is None:
-                continue
-            col_lower = df[name_col].str.strip().str.lower()
+            if name_col and cas_col:
+                df_info.append((df, cas_col, df[name_col].str.strip().str.lower()))
+
+        # ── Pass 1: exact (case-insensitive) match ────────────────────────────
+        for df, cas_col, col_lower in df_info:
             for variant in candidates:
-                mask = col_lower == variant.lower()
-                row  = df[mask]
+                row = df[col_lower == variant.lower()]
                 if not row.empty:
                     val = str(row.iloc[0][cas_col]).strip()
                     if val and val.lower() != "nan":
                         return val
+
+        # ── Pass 2: partial / contains match ─────────────────────────────────
+        for df, cas_col, col_lower in df_info:
+            for variant in candidates:
+                if len(variant) < 4:
+                    continue
+                try:
+                    row = df[col_lower.str.contains(re.escape(variant.lower()), na=False)]
+                except Exception:
+                    continue
+                if not row.empty:
+                    val = str(row.iloc[0][cas_col]).strip()
+                    if val and val.lower() != "nan":
+                        return val
+
         return None
 
     def get_thresholds_for_analysis(
