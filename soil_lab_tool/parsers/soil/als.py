@@ -19,11 +19,89 @@ from __future__ import annotations
 
 import io
 import re
+import xml.etree.ElementTree as _ET
 
 import pandas as pd
 
 from parsers.base import BaseParser
 from core.cas_lookup import name_to_cas
+
+
+# ---------------------------------------------------------------------------
+# SpreadsheetML helpers
+# ---------------------------------------------------------------------------
+
+_SML_NS = "urn:schemas-microsoft-com:office:spreadsheet"
+
+
+def _parse_spreadsheetml(data: bytes) -> dict[str, pd.DataFrame]:
+    """Parse a SpreadsheetML XML file into {sheet_name: DataFrame}.
+
+    Handles sparse rows (ss:Index), merged cells (ss:MergeAcross), and both
+    String and Number cell types.  Each DataFrame has all-string dtype and
+    empty strings in place of missing values — identical to what
+    pd.ExcelFile.parse(..., header=None, dtype=str).fillna("") produces.
+    """
+    root = _ET.fromstring(data)
+    # Detect the actual namespace URI from the root tag (may differ slightly)
+    ns_uri = _SML_NS
+    if root.tag.startswith("{"):
+        ns_uri = root.tag[1:root.tag.index("}")]
+    ns = {"ss": ns_uri}
+
+    sheets: dict[str, pd.DataFrame] = {}
+
+    for ws in root.findall(".//ss:Worksheet", ns):
+        name = ws.get(f"{{{ns_uri}}}Name", "")
+        table = ws.find("ss:Table", ns)
+        if table is None:
+            sheets[name] = pd.DataFrame()
+            continue
+
+        rows_data: list[list[str]] = []
+        for row_el in table.findall("ss:Row", ns):
+            cells: list[str] = []
+            for cell_el in row_el.findall("ss:Cell", ns):
+                # Sparse index — pad to target column
+                idx_attr = cell_el.get(f"{{{ns_uri}}}Index")
+                if idx_attr:
+                    target = int(idx_attr) - 1
+                    while len(cells) < target:
+                        cells.append("")
+
+                data_el = cell_el.find("ss:Data", ns)
+                cells.append(data_el.text or "" if data_el is not None else "")
+
+                # MergeAcross — fill merged columns with empty strings
+                merge = cell_el.get(f"{{{ns_uri}}}MergeAcross")
+                if merge:
+                    cells.extend("" for _ in range(int(merge)))
+
+            rows_data.append(cells)
+
+        if not rows_data:
+            sheets[name] = pd.DataFrame()
+            continue
+
+        max_cols = max(len(r) for r in rows_data)
+        for r in rows_data:
+            while len(r) < max_cols:
+                r.append("")
+
+        sheets[name] = pd.DataFrame(rows_data, dtype=str).fillna("")
+
+    return sheets
+
+
+class _FakeExcelFile:
+    """Minimal pd.ExcelFile-compatible wrapper for pre-parsed DataFrames."""
+
+    def __init__(self, sheets: dict[str, pd.DataFrame]) -> None:
+        self.sheet_names = list(sheets.keys())
+        self._sheets = sheets
+
+    def parse(self, sheet_name: str, **_kwargs) -> pd.DataFrame:
+        return self._sheets[sheet_name]
 
 
 # ---------------------------------------------------------------------------
@@ -144,13 +222,25 @@ class ALSSoilParser(BaseParser):
     })
 
     def parse(self, file_obj: io.BytesIO) -> list[dict]:
-        # Check if PDF — route to PDF parser
-        raw_bytes = file_obj.read(4)
+        # Sniff file type
+        head = file_obj.read(512)
         file_obj.seek(0)
-        if raw_bytes == b"%PDF":
+
+        if head[:4] == b"%PDF":
             return self._parse_pdf(file_obj)
 
-        xl = pd.ExcelFile(file_obj)
+        # SpreadsheetML: <?xml … urn:schemas-microsoft-com:office:spreadsheet
+        if head.lstrip().startswith(b"<?xml"):
+            all_bytes = file_obj.read()
+            if b"urn:schemas-microsoft-com:office:spreadsheet" in all_bytes:
+                xl: pd.ExcelFile | _FakeExcelFile = _FakeExcelFile(
+                    _parse_spreadsheetml(all_bytes)
+                )
+            else:
+                file_obj.seek(0)
+                xl = pd.ExcelFile(file_obj)
+        else:
+            xl = pd.ExcelFile(file_obj)
 
         # Collect all "Client *" sheets (SOIL, PFAS, VOC …) so PFAS-only
         # sheets named "Client PFAS 1" are not silently dropped.
