@@ -259,9 +259,12 @@ class ALSSoilPDFParser(BaseParser):
 
     # Regex for concatenated single-cell data rows:
     # e.g. "Dinoseb S-SMVGMS03 0.50 mg/kg DW <0.50 <0.50 <0.50"
+    # Group 1: compound, 2: LOR, 3: unit (mg/kg DW or %), 4: space-separated results
     _CONCAT_ROW_RE = re.compile(
-        r'^(.+?)\s+S-\w+\s+([\d.]+)\s+mg/kg\s+DW\s+(.+)$'
+        r'^(.+?)\s+S-\w+\d*\s+([\d.]+)\s+(mg/kg\s*DW|%)\s+(.+)$'
     )
+    # Regex to strip trailing method code from compound names (e.g. "Naphthalene S-SMVGMS03")
+    _METHOD_SUFFIX_RE = re.compile(r'\s+S-[A-Z0-9]+$')
     # Sample ID pattern: letter followed by digits (e.g. P10, K3)
     _SAMPLE_ID_RE = re.compile(r'^[A-Z]\d+$')
 
@@ -318,9 +321,10 @@ class ALSSoilPDFParser(BaseParser):
                         m = self._CONCAT_ROW_RE.match(line)
                         if not m:
                             continue
-                        compound  = m.group(1).strip()
+                        compound  = self._METHOD_SUFFIX_RE.sub('', m.group(1)).strip()
                         loq_str   = m.group(2)
-                        results   = m.group(3).split()
+                        row_unit  = m.group(3).strip()
+                        results   = m.group(4).split()
                         loq: float | None = None
                         try:
                             loq = float(loq_str)
@@ -338,7 +342,7 @@ class ALSSoilPDFParser(BaseParser):
                                 "cas":           cas,
                                 "value":         value,
                                 "flag":          flag or "",
-                                "unit":          "mg/kg",
+                                "unit":          row_unit,
                                 "sample_id":     sample_cols[i],
                                 "lod":           None,
                                 "loq":           loq,
@@ -356,10 +360,11 @@ class ALSSoilPDFParser(BaseParser):
                     continue
 
                 # ── Normal multi-cell data row ────────────────────────────
-                lor_raw = cells[2] if len(cells) > 2 else ""
-                unit    = cells[3] if len(cells) > 3 else "mg/kg"
+                lor_raw  = cells[2] if len(cells) > 2 else ""
+                unit     = cells[3] if len(cells) > 3 else "mg/kg"
                 if not unit or unit.lower() == "nan":
                     unit = "mg/kg"
+                compound = self._METHOD_SUFFIX_RE.sub('', first).strip()
 
                 loq = None
                 try:
@@ -367,7 +372,7 @@ class ALSSoilPDFParser(BaseParser):
                 except (ValueError, TypeError):
                     pass
 
-                cas = name_to_cas(first) or ""
+                cas = name_to_cas(compound) or ""
 
                 for i, raw_val in enumerate(cells[4:]):
                     if i >= len(sample_cols):
@@ -379,7 +384,7 @@ class ALSSoilPDFParser(BaseParser):
                     if value is None and flag is None:
                         continue
                     records.append({
-                        "compound":      first,
+                        "compound":      compound,
                         "cas":           cas,
                         "value":         value,
                         "flag":          flag or "",

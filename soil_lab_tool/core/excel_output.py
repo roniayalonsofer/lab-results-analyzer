@@ -732,10 +732,9 @@ class LabReportExcel:
         meta_start = 2 if header_written else 1
 
         # Rows meta_start…: metadata (שם קידוח, עומק [מ'])
-        meta_rows = [
-            ("שם קידוח",  boreholes),
-            ("עומק [מ']", depths),
-        ]
+        meta_rows = [("שם קידוח", boreholes)]
+        if any(v is not None and str(v).strip() != "" for v in depths):
+            meta_rows.append(("עומק [מ']", depths))
         for ri, (label, vals) in enumerate(meta_rows, meta_start):
             ws.merge_cells(start_row=ri, start_column=1,
                            end_row=ri,   end_column=N_FIXED)
@@ -942,11 +941,10 @@ class LabReportExcel:
                              key=lambda sid: (*_borehole_sort_key(split_p[sid][0]),
                                               float(split_p[sid][1]) if split_p[sid][1] else 0.0))
             boreholes = [_dup_rich_text(split_p[sid][0]) for sid in samples]
-            depths    = [split_p[sid][1]                 for sid in samples]
-            meta_rows = [
-                ("שם קידוח",  boreholes),
-                ("עומק [מ']", depths),
-            ]
+            depths    = [split_p[sid][1] for sid in samples]
+            meta_rows = [("שם קידוח", boreholes)]
+            if any(v is not None and str(v).strip() != "" for v in depths):
+                meta_rows.append(("עומק [מ']", depths))
             if pid_map:
                 pid_vals_pm = [_pid_lookup_split(pid_map, split_p[sid][0], split_p[sid][1])
                                for sid in samples]
