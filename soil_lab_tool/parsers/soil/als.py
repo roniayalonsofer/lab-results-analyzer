@@ -360,8 +360,8 @@ class ALSSoilPDFParser(BaseParser):
                     continue
 
                 # ── Normal multi-cell data row ────────────────────────────
-                lor_raw  = cells[2] if len(cells) > 2 else ""
-                unit     = cells[3] if len(cells) > 3 else "mg/kg"
+                lor_raw  = cells[1] if len(cells) > 1 else ""
+                unit     = cells[2] if len(cells) > 2 else "mg/kg"
                 if not unit or unit.lower() == "nan":
                     unit = "mg/kg"
                 compound = self._METHOD_SUFFIX_RE.sub('', first).strip()
