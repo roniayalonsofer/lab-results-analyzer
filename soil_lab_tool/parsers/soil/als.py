@@ -290,7 +290,7 @@ class ALSSoilPDFParser(BaseParser):
                 if not any(cells):
                     continue
 
-                first    = cells[0]
+                first    = re.sub(r'\s+S-[A-Z0-9]+$', '', cells[0]).strip()
                 first_lo = first.lower()
 
                 # ── Sample ID header row ──────────────────────────────────
@@ -321,7 +321,7 @@ class ALSSoilPDFParser(BaseParser):
                         m = self._CONCAT_ROW_RE.match(line)
                         if not m:
                             continue
-                        compound  = self._METHOD_SUFFIX_RE.sub('', m.group(1)).strip()
+                        compound  = re.sub(r'\s+S-[A-Z0-9]+$', '', m.group(1)).strip()
                         loq_str   = m.group(2)
                         row_unit  = m.group(3).strip()
                         results   = m.group(4).split()
@@ -374,7 +374,7 @@ class ALSSoilPDFParser(BaseParser):
 
                 cas = name_to_cas(compound) or ""
 
-                for i, raw_val in enumerate(cells[4:]):
+                for i, raw_val in enumerate(cells[3:]):
                     if i >= len(sample_cols):
                         break
                     sample_id = sample_cols[i]
