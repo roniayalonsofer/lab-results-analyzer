@@ -328,6 +328,31 @@ header { display: none !important; }
 }
 .step-pill.active { background: #eff6ff; border-color: #3b82f6; color: #1d4ed8; font-weight: 700; }
 .step-pill.done { background: #f0fdf4; border-color: #22c55e; color: #15803d; }
+
+/* ── threshold section pill toggles ── */
+div:has(.thresh-pill-marker) + div [data-testid="stCheckbox"] label {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    padding: 5px 18px !important;
+    border-radius: 999px !important;
+    border: 1.5px solid #cbd5e1 !important;
+    background: #f1f5f9 !important;
+    font-size: 0.85rem !important;
+    font-weight: 600 !important;
+    color: #64748b !important;
+    cursor: pointer !important;
+    transition: background .15s, border-color .15s, color .15s !important;
+    user-select: none !important;
+}
+div:has(.thresh-pill-marker) + div [data-testid="stCheckbox"]:has(input:checked) label {
+    background: #eff6ff !important;
+    border-color: #3b82f6 !important;
+    color: #1d4ed8 !important;
+}
+div:has(.thresh-pill-marker) + div [data-testid="stCheckbox"] label svg {
+    display: none !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -1071,31 +1096,49 @@ if True:
     if has_soil:
         any_shown = True
         st.markdown("##### 🪨 קרקע")
-        col_vsl, col_t1r, col_t1i = st.columns(3)
 
-        with col_vsl:
-            st.markdown('<div style="font-size:0.85rem;font-weight:700;color:#374151;margin-bottom:6px;">VSL — ישיר</div>', unsafe_allow_html=True)
-            use_vsl = st.checkbox("VSL (Direct Contact)", value=True, key="vsl_cb")
+        # Pill toggle row — marker span used as CSS sibling anchor
+        st.markdown('<span class="thresh-pill-marker"></span>', unsafe_allow_html=True)
+        tog1, tog2, _tog_rest = st.columns([1, 1, 4])
+        with tog1:
+            use_vsl   = st.checkbox("📊 VSL",   value=True, key="vsl_cb")
+        with tog2:
+            use_tier1 = st.checkbox("🏗️ TIER1", value=True, key="tier1_cb")
 
-        with col_t1r:
-            st.markdown('<div style="font-size:0.85rem;font-weight:700;color:#374151;margin-bottom:6px;">Tier 1 מגורים (Residential)</div>', unsafe_allow_html=True)
-            sens_res = st.selectbox("רגישות אקוויפר", ["—","רגיש מאוד","רגיש/בינוני","לא רגיש"], key="sens_res", label_visibility="collapsed")
-            depth_res = None
-            if sens_res == "רגיש/בינוני":
-                depth_res = st.radio('עומק מי"ת', ["0-6מ'",">6מ'"], horizontal=True, key="depth_res", label_visibility="collapsed")
+        # TIER1 sub-selectors — shown only when toggle is active
+        if use_tier1:
+            sub1, sub2 = st.columns(2)
+            with sub1:
+                land_use_sel = st.radio(
+                    "שימוש קרקע", ["תעשייה", "מגורים"],
+                    horizontal=True, key="tier1_land_use",
+                    label_visibility="collapsed",
+                )
+            with sub2:
+                tier1_sens_sel = st.selectbox(
+                    "רגישות", [
+                        "רגיש מאוד",
+                        "רגיש/בינוני 0-6מ'",
+                        "רגיש/בינוני >6מ'",
+                        "לא רגיש",
+                    ],
+                    key="tier1_sens", label_visibility="collapsed",
+                )
 
-        with col_t1i:
-            st.markdown('<div style="font-size:0.85rem;font-weight:700;color:#374151;margin-bottom:6px;">Tier 1 תעשייה (Industrial)</div>', unsafe_allow_html=True)
-            sens_ind = st.selectbox("רגישות אקוויפר", ["—","רגיש מאוד","רגיש/בינוני","לא רגיש"], key="sens_ind", label_visibility="collapsed")
-            depth_ind = None
-            if sens_ind == "רגיש/בינוני":
-                depth_ind = st.radio('עומק מי"ת', ["0-6מ'",">6מ'"], horizontal=True, key="depth_ind", label_visibility="collapsed")
-
-        if use_vsl: selected_thresholds.append("VSL_SOIL")
-        k = _soil_tier1_key("res", _SENS_MAP.get(sens_res), depth_res)
-        if k: selected_thresholds.append(k)
-        k = _soil_tier1_key("ind", _SENS_MAP.get(sens_ind), depth_ind)
-        if k: selected_thresholds.append(k)
+        # Collect thresholds
+        if use_vsl:
+            selected_thresholds.append("VSL_SOIL")
+        if use_tier1:
+            _pfx = "RES" if land_use_sel == "מגורים" else "IND"
+            _TIER1_SOIL_MAP = {
+                "רגיש מאוד":          f"TIER1_{_pfx}_SOIL_VH",
+                "רגיש/בינוני 0-6מ'": f"TIER1_{_pfx}_SOIL_HM_0_6",
+                "רגיש/בינוני >6מ'":  f"TIER1_{_pfx}_SOIL_HM_6",
+                "לא רגיש":            f"TIER1_{_pfx}_SOIL_LOW",
+            }
+            k = _TIER1_SOIL_MAP.get(tier1_sens_sel)
+            if k:
+                selected_thresholds.append(k)
 
     # ── Soil PFAS ─────────────────────────────────────────────────
     if has_soil_pfas:
