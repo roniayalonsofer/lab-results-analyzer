@@ -160,6 +160,12 @@ def _parse_als_sheet(xl: pd.ExcelFile, sheet_name: str) -> tuple[list[str], dict
         compound = str(row.iloc[compound_col]).strip()
         if not compound or compound.lower() in ("nan", "", "parameter", "compound", "analyte"):
             continue
+        # Skip section header rows: "Alcohols / Esters", "PAHs", etc.
+        if re.search(r'[A-Za-z].*/', compound) and not re.search(r'\d', compound):
+            continue
+        # Skip continuation headers: "PAHs - Continued"
+        if compound.endswith("- Continued"):
+            continue
 
         unit_val = str(row.iloc[unit_col]).strip() if unit_col < len(row) else "mg/kg"
         if not unit_val or unit_val.lower() == "nan":
