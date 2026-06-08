@@ -144,6 +144,12 @@ class ALSSoilParser(BaseParser):
     })
 
     def parse(self, file_obj: io.BytesIO) -> list[dict]:
+        # Check if PDF — route to PDF parser
+        raw_bytes = file_obj.read(4)
+        file_obj.seek(0)
+        if raw_bytes == b"%PDF":
+            return self._parse_pdf(file_obj)
+
         xl = pd.ExcelFile(file_obj)
 
         # Collect all "Client *" sheets (SOIL, PFAS, VOC …) so PFAS-only
@@ -207,6 +213,111 @@ class ALSSoilParser(BaseParser):
             return "SOIL_TPH"
         return "SOIL_SVOC"
 
+    def _parse_pdf(self, file_obj) -> list[dict]:
+        """Parse ALS Czech Republic PDF soil reports."""
+        import pdfplumber, re
+
+        records = []
+        file_obj.seek(0)
+
+        _SECTION = re.compile(
+            r"^(Pesticides|Physical|Halogenated|Aromatic|Polycyclic|"
+            r"Chlorinated|Nitrosoamines|Anilines|Nitroaromatic|Chlorophenols|"
+            r"Cresols|Phthalates|Aldehydes|Alcohols|Other|Brief|Analytical|"
+            r"When sampling|Key:|right solutions|The company|Location|"
+            r"The end|The method|The symbol|CZ_SOP|S-[A-Z])",
+            re.I
+        )
+        _DATA_LINE = re.compile(
+            r"^(.+?)\s+S-[A-Z]+\d*\s+([\d.]+)\s+(mg/kg\s*DW|µg/kg\s*DW)\s+(.+)$"
+        )
+
+        def _parse_results(raw_str: str, sample_ids: list, compound: str, lor: float):
+            """Parse space-separated result values and emit records."""
+            parts = raw_str.split()
+            vals = []
+            for p in parts:
+                if p == "----":
+                    vals.append(None)
+                elif p == "*":
+                    vals.append(None)
+                elif p.startswith("<"):
+                    try:
+                        vals.append(("<LOQ", float(p[1:])))
+                    except ValueError:
+                        vals.append(None)
+                else:
+                    try:
+                        vals.append(("", float(p)))
+                    except ValueError:
+                        vals.append(None)
+
+            cas = (self._lookup_cas(compound) or self._cas_lookup(compound) or name_to_cas(compound) or "")
+            atype = self._analysis_type(compound.upper())
+            for i, sid in enumerate(sample_ids):
+                if i >= len(vals) or vals[i] is None:
+                    continue
+                flag, val = vals[i] if isinstance(vals[i], tuple) else ("", vals[i])
+                records.append({
+                    "lab": "ALS", "sample_id": sid,
+                    "compound": compound, "cas": cas,
+                    "value": val, "flag": flag,
+                    "loq": lor, "lod": None,
+                    "unit": "mg/kg DW", "analysis_type": atype,
+                })
+
+        with pdfplumber.open(file_obj) as pdf:
+            sample_ids: list[str] = []
+            for page in pdf.pages:
+                table = page.extract_table()
+                if not table:
+                    continue
+                for row in table:
+                    if not row:
+                        continue
+                    cells = [str(c).strip() if c else "" for c in row]
+                    first = cells[0]
+
+                    # Sample ID row: None None None P10 P4 P9
+                    if first == "" and any(re.match(r'^[A-Z]\d+$', c) for c in cells[1:] if c):
+                        new_ids = [c for c in cells if c and not re.match(r'^(PR\d+|[\d\-]+)$', c) and c != ""]
+                        if new_ids:
+                            sample_ids = new_ids
+                        continue
+
+                    # Format 1: multi-line cell — "Category\nCompound method LOR unit v1 v2 v3"
+                    if first and all(c == "" for c in cells[1:]):
+                        for line in first.split("\n"):
+                            line = line.strip()
+                            if not line or _SECTION.match(line):
+                                continue
+                            m = _DATA_LINE.match(line)
+                            if m:
+                                compound = m.group(1).strip()
+                                try:
+                                    lor = float(m.group(2))
+                                except ValueError:
+                                    lor = None
+                                _parse_results(m.group(4), sample_ids, compound, lor)
+                        continue
+
+                    # Format 2: compound+method | LOR | unit | v1 | v2 | v3
+                    if len(cells) >= 5 and cells[1] and cells[2]:
+                        compound_method = first
+                        # Strip method suffix (S-XXXXX)
+                        compound = re.sub(r'\s+S-[A-Z0-9]+$', '', compound_method).strip()
+                        if not compound or _SECTION.match(compound):
+                            continue
+                        try:
+                            lor = float(cells[1])
+                        except (ValueError, TypeError):
+                            continue
+                        if "mg/kg" not in cells[2] and "µg" not in cells[2]:
+                            continue
+                        _parse_results(" ".join(c for c in cells[3:] if c), sample_ids, compound, lor)
+
+        return records
+
 
 # ---------------------------------------------------------------------------
 # ALSGrainSizeParser
@@ -228,20 +339,101 @@ class ALSSoilPDFParser(BaseParser):
 
     LAB_NAME = "ALS"
 
-    _SECTION_MAP: list[tuple[tuple[str, ...], str]] = [
-        (("polycyclic", "aromatic", "pah"),         "SOIL_SVOC"),
-        (("semi-volatile", "svoc", "extractable"),   "SOIL_SVOC"),
-        (("volatile", "voc"),                        "SOIL_VOC"),
-        (("metal", "heavy metal", "inorganic"),      "SOIL_METALS"),
-        (("petroleum", "tph", "dro", "gro", "oro"),  "SOIL_TPH"),
-        (("pfas", "perfluoro", "fluorotelomer"),     "SOIL_PFAS"),
-    ]
+    # ALS uses compound names that differ from VSL table — map them here
+    _ALS_CAS_MAP: dict[str, str] = {
+        "1,1`-biphenyl":                        "92-52-4",
+        "1-chloronaphthalene":                  "90-13-1",
+        "2-chloronaphthalene":                  "91-58-7",
+        "2-methylnaphthalene":                  "91-57-6",
+        "4-bromophenyl phenyl ether":           "101-55-3",
+        "4-chlorophenyl phenyl ether":          "7005-72-3",
+        "carbazole":                            "86-74-8",
+        "acenaphthylene":                       "208-96-8",
+        "phenanthrene":                         "85-01-8",
+        "benz(a)anthracene":                    "56-55-3",
+        "benzo(b)fluoranthene":                 "205-99-2",
+        "benzo(k)fluoranthene":                 "207-08-9",
+        "benzo(a)pyrene":                       "50-32-8",
+        "indeno(1.2.3.cd)pyrene":               "193-39-5",
+        "dibenz(a.h)anthracene":                "53-70-3",
+        "benzo(g.h.i)perylene":                 "191-24-2",
+        "n-nitrosodi-n-propylamine":            "621-64-7",
+        "4-chloroaniline":                      "106-47-8",
+        "2-nitrophenol":                        "88-75-5",
+        "4-nitrophenol":                        "100-02-7",
+        "2,4-dinitrotoluene":                   "121-14-2",
+        "2,6-dinitrotoluene":                   "606-20-2",
+        "2.6-dinitrotoluene":                   "606-20-2",
+        "2,4-dinitrophenol":                    "51-28-5",
+        "4,6-dinitro-2-methylphenol":           "534-52-1",
+        "2-nitroaniline":                       "88-74-4",
+        "3-nitroaniline":                       "99-09-2",
+        "4-nitroaniline":                       "100-01-6",
+        "2-chlorophenol":                       "95-57-8",
+        "2,6-dichlorophenol":                   "87-65-0",
+        "2.6-dichlorophenol":                   "87-65-0",
+        "2.4@2.5-dichlorophenol":               "95-50-1",
+        "2,4,6-trichlorophenol":                "88-06-2",
+        "2.4.6-trichlorophenol":                "88-06-2",
+        "2,4,5-trichlorophenol":                "95-95-4",
+        "2.4.5-trichlorophenol":                "95-95-4",
+        "2-methylphenol":                       "95-48-7",
+        "3- & 4-methylphenol":                  "108-39-4",
+        "2,4-dimethylphenol":                   "105-67-9",
+        "4-chloro-3-methylphenol":              "59-50-7",
+        "dimethyl phthalate":                   "131-11-3",
+        "di-n-butyl phthalate":                 "84-74-2",
+        "di-n-octyl phthalate":                 "117-84-0",
+        "6-caprolactam":                        "105-60-2",
+        "bis(2-chloroisopropyl)ether":          "108-60-1",
+        "bis(2-chloroisopropyl)ether (all isomers)": "108-60-1",
+        "dibenzofuran":                         "132-64-9",
+    }
+
+    @classmethod
+    def _normalize_compound(cls, name: str) -> str:
+        """Clean up compound name: strip method suffix, fix newlines."""
+        import re
+        # Handle case: "Compound (all S-METHOD\nisomers)" → "Compound (all isomers)"
+        name = re.sub(r'\s+S-[A-Z0-9]+\s*\n\s*', ' ', name)
+        # Remove trailing method suffix
+        name = re.sub(r'\s+S-[A-Z0-9]+(\s+.*)?$', '', name).strip()
+        # Remove any remaining newlines
+        name = name.replace('\n', ' ').strip()
+        return name
+
+    @classmethod
+    def _lookup_cas(cls, compound: str) -> str:
+        """Look up CAS by compound name, trying ALS-specific map first."""
+        key = compound.lower().strip()
+        # ALS-specific map
+        if key in cls._ALS_CAS_MAP:
+            return cls._ALS_CAS_MAP[key]
+        # Strip parenthetical isomers suffix and retry
+        import re
+        key2 = re.sub(r'\s*\(all\s+isomers\)\s*$', '', key).strip()
+        if key2 in cls._ALS_CAS_MAP:
+            return cls._ALS_CAS_MAP[key2]
+        return ""
 
     def parse(self, file_obj: io.BytesIO) -> list[dict]:
         try:
             import pdfplumber
         except ImportError as exc:
             raise ImportError("pdfplumber is required: pip install pdfplumber") from exc
+
+        # Build CAS lookup via ThresholdManager
+        try:
+            from core.threshold_manager import ThresholdManager
+            import os
+            _thresh_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'thresholds')
+            _tm = ThresholdManager(
+                os.path.join(_thresh_dir, 'soil_vsl_tier1_v7_2024.xlsx'),
+                vsl_full_path=os.path.join(_thresh_dir, 'soil_vsl_v7_full.xlsx')
+            )
+            self._cas_lookup = _tm.get_cas_by_name
+        except Exception:
+            self._cas_lookup = lambda x: name_to_cas(x) or ""
 
         file_obj.seek(0)
         records: list[dict] = []
@@ -310,7 +502,8 @@ class ALSSoilPDFParser(BaseParser):
                     continue
 
                 # ── Standard column header row — skip ─────────────────────
-                if first_lo in ("parameter", "analyte", "compound"):
+                if first_lo in ("parameter", "analyte", "compound") or \
+                   first_lo.startswith("parameter method"):
                     continue
 
                 # ── Single-cell concatenated row ──────────────────────────
@@ -321,7 +514,7 @@ class ALSSoilPDFParser(BaseParser):
                         m = self._CONCAT_ROW_RE.match(line)
                         if not m:
                             continue
-                        compound  = re.sub(r'\s+S-[A-Z0-9]+$', '', m.group(1)).strip()
+                        compound = self._normalize_compound(m.group(1))
                         loq_str   = m.group(2)
                         row_unit  = m.group(3).strip()
                         results   = m.group(4).split()
@@ -330,7 +523,7 @@ class ALSSoilPDFParser(BaseParser):
                             loq = float(loq_str)
                         except ValueError:
                             pass
-                        cas = name_to_cas(compound) or ""
+                        cas = (self._lookup_cas(compound) or self._cas_lookup(compound) or name_to_cas(compound) or "")
                         for i, raw_val in enumerate(results):
                             if i >= len(sample_cols):
                                 break
@@ -360,11 +553,11 @@ class ALSSoilPDFParser(BaseParser):
                     continue
 
                 # ── Normal multi-cell data row ────────────────────────────
-                lor_raw  = cells[1] if len(cells) > 1 else ""
-                unit     = cells[2] if len(cells) > 2 else "mg/kg"
+                lor_raw  = cells[2] if len(cells) > 2 else ""
+                unit     = cells[3] if len(cells) > 3 else "mg/kg"
                 if not unit or unit.lower() == "nan":
                     unit = "mg/kg"
-                compound = self._METHOD_SUFFIX_RE.sub('', first).strip()
+                compound = self._normalize_compound(first)
 
                 loq = None
                 try:
@@ -372,7 +565,7 @@ class ALSSoilPDFParser(BaseParser):
                 except (ValueError, TypeError):
                     pass
 
-                cas = name_to_cas(compound) or ""
+                cas = (self._lookup_cas(compound) or self._cas_lookup(compound) or name_to_cas(compound) or "")
 
                 for i, raw_val in enumerate(cells[3:]):
                     if i >= len(sample_cols):
