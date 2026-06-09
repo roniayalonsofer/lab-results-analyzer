@@ -196,17 +196,18 @@ class AlchemParser(BaseParser):
                     lines.append(decoded)
         doc.close()
 
-        # Read actual LOQ values from the LOQ row when present.
-        loq = {"DRO": 30.0, "ORO": 20.0, "TPH": 50.0}
+        # Read actual LOD/LOQ values from their rows when present.
+        lod = {"DRO": None,  "ORO": None,  "TPH": None}
+        loq = {"DRO": 30.0,  "ORO": 20.0,  "TPH": 50.0}
         for i, line in enumerate(lines):
-            if line == "LOQ" and i + 3 < len(lines):
+            if line in ("LOD", "LOQ") and i + 3 < len(lines):
+                target = lod if line == "LOD" else loq
                 try:
-                    loq["DRO"] = float(lines[i + 1].replace(",", ""))
-                    loq["ORO"] = float(lines[i + 2].replace(",", ""))
-                    loq["TPH"] = float(lines[i + 3].replace(",", ""))
+                    target["DRO"] = float(lines[i + 1].replace(",", ""))
+                    target["ORO"] = float(lines[i + 2].replace(",", ""))
+                    target["TPH"] = float(lines[i + 3].replace(",", ""))
                 except Exception:
                     pass
-                break
 
         # State machine: sample-ID line followed by exactly 3 value lines.
         records: list[dict] = []
@@ -217,10 +218,9 @@ class AlchemParser(BaseParser):
                 if sample.startswith("p") and len(sample) > 1 and sample[1:2].isdigit():
                     sample = "ק" + sample[1:]
                 for compound, val in zip(["DRO", "ORO", "TPH"], lines[i + 1: i + 4]):
-                    if val in ("N.D.", "ND"):
-                        value, flag = loq[compound], "<LOQ"
-                    elif val == "<LOQ":
-                        value, flag = loq[compound], "<LOQ"
+                    lq = loq[compound]
+                    if val in ("N.D.", "ND", "<LOQ"):
+                        value, flag = lq, "<LOQ"
                     else:
                         try:
                             value, flag = float(val.replace(",", "")), ""
@@ -232,7 +232,7 @@ class AlchemParser(BaseParser):
                         "value": value, "flag": flag,
                         "unit": "mg/kg", "analysis_type": "SOIL_TPH",
                         "sampling_date": "",
-                        "loq": loq[compound],
+                        "lod": lod[compound], "loq": lq,
                     })
                 i += 4
             else:
@@ -266,20 +266,55 @@ class AlchemParser(BaseParser):
         col_d = next((i for i, x in enumerate(h) if "dro" in x), None)
         col_o = next((i for i, x in enumerate(h) if "oro" in x), None)
         col_t = next((i for i, x in enumerate(h) if "tph" in x), None)
-        loq = {"DRO": 30.0, "ORO": 20.0, "TPH": 50.0}
+
+        # Defaults; overridden by LOD/LOQ rows found in the table
+        lod = {"DRO": None,  "ORO": None,  "TPH": None}
+        loq = {"DRO": 30.0,  "ORO": 20.0,  "TPH": 50.0}
+
+        # First pass: extract LOD/LOQ rows at the end of the table
+        for row in table[1:]:
+            if not row:
+                continue
+            label = str(row[col_s] or "").strip().upper()
+            if label not in ("LOD", "LOQ"):
+                continue
+            for cmp, ci in [("DRO", col_d), ("ORO", col_o), ("TPH", col_t)]:
+                if ci is None or ci >= len(row):
+                    continue
+                try:
+                    v = float(str(row[ci] or "").strip().replace(",", ""))
+                    if label == "LOD":
+                        lod[cmp] = v
+                    else:
+                        loq[cmp] = v
+                except (ValueError, TypeError):
+                    pass
+
+        # Second pass: parse data rows
         records = []
         for row in table[1:]:
-            if not row: continue
+            if not row:
+                continue
             s = str(row[col_s] or "").strip()
-            if not s or s.lower() in ("sample name", "loq", "lod", "[mg/kg]", ""): continue
-            if not any(c.isdigit() for c in s): continue
+            if not s or s.upper() in ("SAMPLE NAME", "LOQ", "LOD", "[MG/KG]", ""):
+                continue
+            if not any(c.isdigit() for c in s):
+                continue
             sid, depth = self._normalize_sample(s)
-            for cmp, ci, lq in [("DRO", col_d, loq["DRO"]), ("ORO", col_o, loq["ORO"]), ("TPH", col_t, loq["TPH"])]:
-                if ci is None or ci >= len(row): continue
+            for cmp, ci in [("DRO", col_d), ("ORO", col_o), ("TPH", col_t)]:
+                if ci is None or ci >= len(row):
+                    continue
+                lq = loq[cmp]
                 value, flag = self._parse_readable_value(str(row[ci] or "").strip(), lq)
-                records.append({"lab": self.LAB_NAME, "sample_id": sid, "depth": depth,
+                # Ensure <LOQ value equals the extracted LOQ
+                if flag == "<LOQ":
+                    value = lq
+                records.append({
+                    "lab": self.LAB_NAME, "sample_id": sid, "depth": depth,
                     "compound": cmp, "cas": cmp, "value": value, "flag": flag,
-                    "unit": "mg/kg", "analysis_type": "SOIL_TPH", "sampling_date": ""})
+                    "unit": "mg/kg", "analysis_type": "SOIL_TPH", "sampling_date": "",
+                    "lod": lod[cmp], "loq": lq,
+                })
         return records
 
     def _parse_readable_voc_table(self, table, analysis_type="SOIL_VOC"):
