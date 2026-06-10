@@ -278,7 +278,7 @@ class ALSSoilParser(BaseParser):
                 continue
 
             for compound, unit, loq, sample_vals in data_rows:
-                cas   = name_to_cas(compound)
+                cas   = ALSSoilPDFParser._lookup_cas(compound) or name_to_cas(compound) or ""
                 atype = self._analysis_type(compound)
                 # µg/kg DW == ng/g numerically — normalise unit label for PFAS
                 norm_unit = "ng/g" if atype == "SOIL_PFAS" else unit
