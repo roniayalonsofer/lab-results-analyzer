@@ -477,7 +477,7 @@ class ALSSoilPDFParser(BaseParser):
         "2-chlorophenol":                       "95-57-8",
         "2,6-dichlorophenol":                   "87-65-0",
         "2.6-dichlorophenol":                   "87-65-0",
-        "2.4@2.5-dichlorophenol":               "95-50-1",
+        "2.4@2.5-dichlorophenol":               "120-83-2",
         "2,4,6-trichlorophenol":                "88-06-2",
         "2.4.6-trichlorophenol":                "88-06-2",
         "2,4,5-trichlorophenol":                "95-95-4",
