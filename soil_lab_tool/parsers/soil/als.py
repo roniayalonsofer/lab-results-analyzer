@@ -372,7 +372,7 @@ class ALSSoilParser(BaseParser):
                 for ci, raw_val in sample_vals.items():
                     value, flag = _parse_value(raw_val, loq)
                     if value is None and flag is None:
-                        continue
+                        flag = "ND"
                     records.append({
                         "compound":      compound,
                         "cas":           cas,
@@ -540,7 +540,7 @@ class ALSSoilParser(BaseParser):
                     except ValueError:
                         vals.append(None)
 
-            cas = (_als_lookup_cas(compound) or self._cas_lookup(compound) or name_to_cas(compound) or "")
+            cas = (_als_lookup_cas(compound) or name_to_cas(compound) or "")
             atype = self._analysis_type(compound.upper())
             for i, sid in enumerate(sample_ids):
                 if i >= len(vals) or vals[i] is None:
