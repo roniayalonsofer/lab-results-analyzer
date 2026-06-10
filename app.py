@@ -949,12 +949,12 @@ if True:
     if category_raw == 'auto':
         category = None
         for _fn, _fb in all_raw:
-            _cat = auto_detect_category(_fn, _fb)
+            _cat = auto_detect_category(_fn, _fb, lab=lab)
             if _cat and _cat != "soil":
                 category = _cat
                 break
         if not category:
-            category = auto_detect_category(all_raw[0][0], all_raw[0][1]) or "soil"
+            category = auto_detect_category(all_raw[0][0], all_raw[0][1], lab=lab) or "soil"
         cat_info = f"זוהה אוטומטית: **{category}**"
     else:
         category = category_raw

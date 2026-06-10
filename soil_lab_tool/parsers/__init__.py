@@ -392,7 +392,7 @@ def list_parsers() -> list[dict]:
             for (l, c), cls in _REGISTRY.items()]
 
 
-def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
+def auto_detect_category(filename: str, file_bytes: bytes | None = None, lab: str | None = None) -> str:
     """
     Guess analysis category from filename, and optionally peek at file content.
     Content-based Excel checks always run BEFORE filename-based checks so that
@@ -504,7 +504,7 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
     # ── Filename-based checks (run only after content checks) ────────────────────
     if "xrf" in n:
         return "soil"
-    if "excel_generic" in n or n.startswith("pr"):
+    if ("excel_generic" in n or n.startswith("pr")) and lab != "als":
         return "pr"
     if any(k in n for k in ("pfas", "edd", "1633")):
         return "pfas"
@@ -514,7 +514,7 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None) -> str:
         return "groundwater"
 
     # KTE "EXCEL_GENERIC.XLS" uploads are often SpreadsheetML XML (not real .xls).
-    if file_bytes is not None:
+    if file_bytes is not None and lab != "als":
         head = file_bytes.lstrip()[:512]
         if head.startswith(b"<?xml") and b"urn:schemas-microsoft-com:office:spreadsheet" in file_bytes[:4096]:
             return "pr"
