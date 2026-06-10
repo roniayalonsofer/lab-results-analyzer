@@ -322,8 +322,6 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
                 return "als"
         except Exception:
             pass
-        if is_machon_energy_pdf(file_bytes):
-            return "מכון האנרגיה"
         try:
             import pdfplumber, io as _io
             with pdfplumber.open(_io.BytesIO(file_bytes)) as _pdf:
@@ -337,6 +335,8 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
             pass
         if _is_alchem_tph_pdf(file_bytes):
             return "alchem"
+        if is_machon_energy_pdf(file_bytes):
+            return "מכון האנרגיה"
 
     # Content-based detection (runs BEFORE "kte" filename fallback so that
     # ALS files whose filenames happen to match "kte" patterns are caught here)

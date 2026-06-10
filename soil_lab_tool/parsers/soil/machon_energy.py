@@ -456,7 +456,8 @@ def is_machon_energy_pdf(file_bytes: bytes) -> bool:
                         and "Cas.No." in text
                         and "Compound" in text):
                     return True
-                if "TPH" in text and "DRO" in text and "ORO" in text:
+                if ("TPH" in text and "DRO" in text and "ORO" in text
+                        and "al-chem" not in text.lower() and "םכ-לא" not in text):
                     return True
     except Exception:
         pass
