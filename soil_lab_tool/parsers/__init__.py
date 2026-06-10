@@ -331,6 +331,18 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
     # ALS files whose filenames happen to match "kte" patterns are caught here)
     if file_bytes is not None and (n.endswith(".xlsx") or n.endswith(".xls")):
         try:
+            _head = file_bytes[:512].lstrip()
+            if _head.startswith(b"<?xml") and b"urn:schemas-microsoft-com:office:spreadsheet" in file_bytes[:2048]:
+                import xml.etree.ElementTree as _sml_et
+                _sml_root = _sml_et.fromstring(file_bytes)
+                _sml_ns_uri = _sml_root.tag[1:_sml_root.tag.index("}")] if _sml_root.tag.startswith("{") else "urn:schemas-microsoft-com:office:spreadsheet"
+                _sml_ns = {"ss": _sml_ns_uri}
+                _sml_sheets = [ws.get(f"{{{_sml_ns_uri}}}Name", "") for ws in _sml_root.findall(".//ss:Worksheet", _sml_ns)]
+                if any("Client SOIL" in s or "Client PFAS" in s or "Client VOC" in s for s in _sml_sheets):
+                    return "als"
+        except Exception:
+            pass
+        try:
             import io
             import pandas as pd
             xl = pd.ExcelFile(io.BytesIO(file_bytes))
