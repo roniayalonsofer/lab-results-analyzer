@@ -138,15 +138,24 @@ def _parse_als_sheet(xl: pd.ExcelFile, sheet_name: str) -> tuple[list[str], dict
     compound_col  = next((ci for ci, h in enumerate(hdr) if h.upper() in ("PARAMETER", "COMPOUND", "ANALYTE")), 0)
     first_smp_col = lor_col + 1
 
-    # ── Sample IDs from row 8 (idx 7) — same column positions as data ──
-    sample_row = raw.iloc[7]
+    # ── Sample IDs: prefer "Client Sample" row, fall back to row 8 (idx 7), then header ──
     sample_cols: dict[int, str] = {}
+    _client_row = None
+    for ri in range(0, hdr_row_idx):
+        _first_cell = next(
+            (str(v).strip() for v in raw.iloc[ri] if str(v).strip() and str(v).strip().lower() != "nan"),
+            ""
+        )
+        if "client sample" in _first_cell.lower():
+            _client_row = raw.iloc[ri]
+            break
+    sample_row = _client_row if _client_row is not None else raw.iloc[7]
     for ci in range(first_smp_col, len(sample_row)):
         sid = str(sample_row.iloc[ci]).strip()
         if sid and sid.lower() not in ("nan", ""):
             sample_cols[ci] = sid
 
-    # If row 8 yielded nothing, fall back to header row sample columns
+    # If neither row yielded anything, fall back to header row sample columns
     if not sample_cols:
         for ci in range(first_smp_col, len(hdr)):
             sid = hdr[ci]
@@ -305,7 +314,7 @@ class ALSSoilParser(BaseParser):
             "PERFLUORO", "FLUOROTELOMER", "SULFONAMIDE",
         )):
             return "SOIL_PFAS"
-        if any(k in c for k in ("TPH", "PETROLEUM", "DRO", "ORO", "GRO")):
+        if any(k in c for k in ("TPH", "PETROLEUM", "DRO", "GRO")) or re.search(r'\bORO\b', c):
             return "SOIL_TPH"
         return "SOIL_SVOC"
 

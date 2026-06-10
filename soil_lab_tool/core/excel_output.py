@@ -1091,9 +1091,9 @@ class LabReportExcel:
                     si = ci - N_FIXED - 1
                     display, num_v, flag, lod = sample_vals[si]
                     if flag == "<LOQ" and isinstance(val, (int, float)):
-                        c.number_format = '"<"0.###'
+                        c.number_format = '"<"0.###0'
                     elif flag == "ND":
-                        c.number_format = '"<"0.###'
+                        c.number_format = '"<"0.###0'
                     vsl_lim      = self._vsl_limit(t_vals)
                     tier1_ind    = self._tier1_ind_limit(t_vals)
                     tier1_res    = self._tier1_res_limit(t_vals)
@@ -1105,7 +1105,7 @@ class LabReportExcel:
                             if loq_val is not None and loq_val > any_lim:
                                 c.fill = GRAY
                                 c.font = _font(display, bold=True)
-                                c.number_format = '"<"0.###'
+                                c.number_format = '"<"0.###0'
                                 has_gray = True
                         # GREY: threshold < LOD/LOQ → uncertain exclusion
                         elif flag in ("<LOD", "<LOQ", "<"):
@@ -1308,7 +1308,7 @@ class LabReportExcel:
                     comp_idx               = ci - cmp_col_start
                     _, flag_nf, _          = row_meta[comp_idx]
                     if flag_nf in ("<LOQ", "ND"):
-                        c.number_format = '"<"0.###'
+                        c.number_format = '"<"0.###0'
                     else:
                         c.number_format = _num_fmt_data(val)
                 c.alignment = CENTER
@@ -1331,7 +1331,7 @@ class LabReportExcel:
                             if _loq_cmp is not None and _loq_cmp > any_lim:
                                 c.fill = GRAY
                                 c.font = _font(val, bold=True)
-                                c.number_format = '"<"0.###'
+                                c.number_format = '"<"0.###0'
                                 has_gray = True
                         # GREY: threshold < LOD/LOQ → uncertain exclusion
                         elif flag_cell in ("<LOD", "<LOQ", "<"):
