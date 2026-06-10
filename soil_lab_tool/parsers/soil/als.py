@@ -201,7 +201,7 @@ def _parse_value(raw_val: str, loq: float | None) -> tuple[float | None, str | N
     """Parse a raw cell string into (value, flag)."""
     v = raw_val.strip()
     if not v or v.lower() == "nan" or v == "----":
-        return loq, "<LOQ"
+        return None, "ND"
     if v.upper() in ("ND", "N.D.", "N/D", "<LOR", "< LOR", "NOT DETECTED"):
         return loq, "<LOQ"
     if v.startswith("<"):
@@ -214,6 +214,73 @@ def _parse_value(raw_val: str, loq: float | None) -> tuple[float | None, str | N
         return float(v), None
     except ValueError:
         return loq, "<LOQ"
+
+
+# ---------------------------------------------------------------------------
+# Module-level CAS lookup (safe to call before ALSSoilPDFParser is defined)
+# ---------------------------------------------------------------------------
+
+_ALS_CAS_MAP: dict[str, str] = {
+    "1,1`-biphenyl":                        "92-52-4",
+    "1-chloronaphthalene":                  "90-13-1",
+    "2-chloronaphthalene":                  "91-58-7",
+    "2-methylnaphthalene":                  "91-57-6",
+    "4-bromophenyl phenyl ether":           "101-55-3",
+    "4-chlorophenyl phenyl ether":          "7005-72-3",
+    "carbazole":                            "86-74-8",
+    "acenaphthylene":                       "208-96-8",
+    "phenanthrene":                         "85-01-8",
+    "benz(a)anthracene":                    "56-55-3",
+    "benzo(b)fluoranthene":                 "205-99-2",
+    "benzo(k)fluoranthene":                 "207-08-9",
+    "benzo(a)pyrene":                       "50-32-8",
+    "indeno(1.2.3.cd)pyrene":               "193-39-5",
+    "dibenz(a.h)anthracene":                "53-70-3",
+    "benzo(g.h.i)perylene":                 "191-24-2",
+    "n-nitrosodi-n-propylamine":            "621-64-7",
+    "4-chloroaniline":                      "106-47-8",
+    "2-nitrophenol":                        "88-75-5",
+    "4-nitrophenol":                        "100-02-7",
+    "2,4-dinitrotoluene":                   "121-14-2",
+    "2,6-dinitrotoluene":                   "606-20-2",
+    "2.6-dinitrotoluene":                   "606-20-2",
+    "2,4-dinitrophenol":                    "51-28-5",
+    "4,6-dinitro-2-methylphenol":           "534-52-1",
+    "2-nitroaniline":                       "88-74-4",
+    "3-nitroaniline":                       "99-09-2",
+    "4-nitroaniline":                       "100-01-6",
+    "2-chlorophenol":                       "95-57-8",
+    "2,6-dichlorophenol":                   "87-65-0",
+    "2.6-dichlorophenol":                   "87-65-0",
+    "2.4@2.5-dichlorophenol":               "120-83-2",
+    "2,4,6-trichlorophenol":                "88-06-2",
+    "2.4.6-trichlorophenol":                "88-06-2",
+    "2,4,5-trichlorophenol":                "95-95-4",
+    "2.4.5-trichlorophenol":                "95-95-4",
+    "2-methylphenol":                       "95-48-7",
+    "3- & 4-methylphenol":                  "108-39-4",
+    "2,4-dimethylphenol":                   "105-67-9",
+    "4-chloro-3-methylphenol":              "59-50-7",
+    "dimethyl phthalate":                   "131-11-3",
+    "di-n-butyl phthalate":                 "84-74-2",
+    "di-n-octyl phthalate":                 "117-84-0",
+    "6-caprolactam":                        "105-60-2",
+    "bis(2-chloroisopropyl)ether":          "108-60-1",
+    "bis(2-chloroisopropyl)ether (all isomers)": "108-60-1",
+    "dibenzofuran":                         "132-64-9",
+}
+
+
+def _als_lookup_cas(compound: str) -> str:
+    """Look up CAS by compound name using the ALS-specific map."""
+    import re as _re
+    key = compound.lower().strip()
+    if key in _ALS_CAS_MAP:
+        return _ALS_CAS_MAP[key]
+    key2 = _re.sub(r'\s*\(all\s+isomers\)\s*$', '', key).strip()
+    if key2 in _ALS_CAS_MAP:
+        return _ALS_CAS_MAP[key2]
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +363,7 @@ class ALSSoilParser(BaseParser):
                 continue
 
             for compound, unit, loq, sample_vals in data_rows:
-                cas   = ALSSoilPDFParser._lookup_cas(compound) or name_to_cas(compound) or ""
+                cas   = _als_lookup_cas(compound) or name_to_cas(compound) or ""
                 atype = self._analysis_type(compound)
                 if "WATER" in sheet:
                     atype = self._WATER_ATYPE_MAP.get(atype, "GW_VOC")
@@ -402,13 +469,13 @@ class ALSSoilParser(BaseParser):
                         values.append(t)
                         i += 1
 
-                    cas   = ALSSoilPDFParser._lookup_cas(compound) or name_to_cas(compound) or ""
+                    cas   = _als_lookup_cas(compound) or name_to_cas(compound) or ""
                     atype = self._WATER_ATYPE_MAP.get(self._analysis_type(compound), "GW_VOC")
 
                     for j, val_str in enumerate(values):
                         sid = sample_ids[j] if j < len(sample_ids) else f"Sample-{j + 1}"
                         rv  = val_str.strip()
-                        if rv in ("----", "---", "--"):
+                        if not rv or rv in ("----", "---", "--"):
                             value, flag = lor, "ND"
                         elif rv.startswith("<"):
                             try:
@@ -473,7 +540,7 @@ class ALSSoilParser(BaseParser):
                     except ValueError:
                         vals.append(None)
 
-            cas = (self._lookup_cas(compound) or self._cas_lookup(compound) or name_to_cas(compound) or "")
+            cas = (_als_lookup_cas(compound) or self._cas_lookup(compound) or name_to_cas(compound) or "")
             atype = self._analysis_type(compound.upper())
             for i, sid in enumerate(sample_ids):
                 if i >= len(vals) or vals[i] is None:
@@ -744,7 +811,7 @@ class ALSSoilPDFParser(BaseParser):
                             loq = float(loq_str)
                         except ValueError:
                             pass
-                        cas = (self._lookup_cas(compound) or self._cas_lookup(compound) or name_to_cas(compound) or "")
+                        cas = (_als_lookup_cas(compound) or self._cas_lookup(compound) or name_to_cas(compound) or "")
                         for i, raw_val in enumerate(results):
                             if i >= len(sample_cols):
                                 break
@@ -786,7 +853,7 @@ class ALSSoilPDFParser(BaseParser):
                 except (ValueError, TypeError):
                     pass
 
-                cas = (self._lookup_cas(compound) or self._cas_lookup(compound) or name_to_cas(compound) or "")
+                cas = (_als_lookup_cas(compound) or self._cas_lookup(compound) or name_to_cas(compound) or "")
 
                 for i, raw_val in enumerate(cells[3:]):
                     if i >= len(sample_cols):
