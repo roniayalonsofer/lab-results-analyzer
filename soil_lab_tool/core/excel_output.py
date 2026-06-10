@@ -544,6 +544,8 @@ class LabReportExcel:
         wb.remove(wb.active)   # remove default sheet
 
         for atype, recs in groups.items():
+            if len(recs) == 0:
+                continue
             # Skip sheets with no usable compound rows (catches nan/empty after filtering)
             if not any(
                 r.get("compound", "").strip() and r.get("compound", "").strip().lower() not in ("nan", "parameter", "compound", "analyte")
