@@ -360,7 +360,9 @@ class ALSSoilParser(BaseParser):
         for sheet in target_sheets:
             try:
                 _, sample_cols, data_rows = _parse_als_sheet(xl, sheet)
-            except Exception:
+            except Exception as _e:
+                import warnings
+                warnings.warn(f"ALS: skipping sheet {sheet!r}: {_e}")
                 continue
 
             for compound, unit, loq, sample_vals in data_rows:
