@@ -50,6 +50,7 @@ _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
     ("bactochem",     "soil"):        BactochemSoilParser,
     ("als",           "soil"):        ALSSoilParser,
     ("als",           "soil_pdf"):   ALSSoilPDFParser,
+    ("als",           "groundwater"): ALSSoilParser,
     ("als",           "grain_size"):  ALSGrainSizeParser,
     ("aminolab",      "groundwater"): AminolabGroundwaterParser,
     ("אמינולאב",     "groundwater"): AminolabGroundwaterParser,
@@ -348,6 +349,8 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
                 _sml_ns_uri = _sml_root.tag[1:_sml_root.tag.index("}")] if _sml_root.tag.startswith("{") else "urn:schemas-microsoft-com:office:spreadsheet"
                 _sml_ns = {"ss": _sml_ns_uri}
                 _sml_sheets = [ws.get(f"{{{_sml_ns_uri}}}Name", "") for ws in _sml_root.findall(".//ss:Worksheet", _sml_ns)]
+                if any("Client WATER" in s for s in _sml_sheets):
+                    return "als"  # lab=als; auto_detect_category will return "groundwater"
                 if any("Client SOIL" in s or "Client PFAS" in s or "Client VOC" in s for s in _sml_sheets):
                     return "als"
         except Exception:
@@ -440,9 +443,13 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None, lab: st
                     _cat_text += (_pg.extract_text() or "")
             _cat_lo = _cat_text.lower()
             if "als czech republic" in _cat_lo or "alsglobal.com" in _cat_lo:
+                if "sub-matrix: water" in _cat_lo:
+                    return "groundwater"
                 return "soil_pdf"
             if "sub-matrix: soil" in _cat_text and "S-SMVGMS03" in _cat_text:
                 return "soil_pdf"
+            if "sub-matrix: water" in _cat_lo and ("als czech republic" in _cat_lo or "alsglobal" in _cat_lo):
+                return "groundwater"
         except Exception:
             pass
         if file_bytes and filename.lower().endswith('.pdf'):
@@ -460,6 +467,10 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None, lab: st
     # ── Content-based detection for Excel (runs BEFORE any filename logic) ──────
     if file_bytes is not None and (n.endswith(".xlsx") or n.endswith(".xls")):
         sheet_names = _xlsx_sheet_names(file_bytes)
+
+        # ALS water: sheet name contains "Client WATER"
+        if any("Client WATER" in s for s in sheet_names):
+            return "groundwater"
 
         # ALS: sheet name contains "Client SOIL"
         if any("Client SOIL" in s for s in sheet_names):

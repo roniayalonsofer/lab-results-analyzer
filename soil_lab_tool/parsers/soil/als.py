@@ -235,6 +235,13 @@ class ALSSoilParser(BaseParser):
         "BENZENE", "TOLUENE", "XYLENE", "ETHYLBENZENE", "STYRENE",
         "NAPHTHALENE", "MTBE", "BTEX",
     })
+    _WATER_ATYPE_MAP = {
+        "SOIL_VOC":    "GW_VOC",
+        "SOIL_METALS": "GW_METALS",
+        "SOIL_SVOC":   "GW_VOC",
+        "SOIL_PFAS":   "GW_PFAS",
+        "SOIL_TPH":    "GW_VOC",
+    }
 
     def parse(self, file_obj: io.BytesIO) -> list[dict]:
         # Sniff file type
@@ -242,6 +249,17 @@ class ALSSoilParser(BaseParser):
         file_obj.seek(0)
 
         if head[:4] == b"%PDF":
+            try:
+                import pdfplumber as _pl_sniff, io as _io_sniff
+                file_obj.seek(0)
+                _pdf_bytes = file_obj.read()
+                with _pl_sniff.open(_io_sniff.BytesIO(_pdf_bytes)) as _p:
+                    _p1_text = (_p.pages[0].extract_text() or "") if _p.pages else ""
+                if "Sub-Matrix: WATER" in _p1_text:
+                    return self._parse_water_pdf(_io_sniff.BytesIO(_pdf_bytes))
+            except Exception:
+                pass
+            file_obj.seek(0)
             return self._parse_pdf(file_obj)
 
         # SpreadsheetML: <?xml … urn:schemas-microsoft-com:office:spreadsheet
@@ -262,7 +280,7 @@ class ALSSoilParser(BaseParser):
         target_sheets = [s for s in xl.sheet_names
                          if any(tag in s for tag in ("Client SOIL", "Client PFAS",
                                                      "Client VOC", "Client SVOC",
-                                                     "Client Metal"))]
+                                                     "Client Metal", "Client WATER"))]
         if not target_sheets:
             # Fallback: accept any single "SOIL" or "PFAS" sheet
             target_sheets = [s for s in xl.sheet_names
@@ -280,6 +298,8 @@ class ALSSoilParser(BaseParser):
             for compound, unit, loq, sample_vals in data_rows:
                 cas   = ALSSoilPDFParser._lookup_cas(compound) or name_to_cas(compound) or ""
                 atype = self._analysis_type(compound)
+                if "WATER" in sheet:
+                    atype = self._WATER_ATYPE_MAP.get(atype, "GW_VOC")
                 # µg/kg DW == ng/g numerically — normalise unit label for PFAS
                 norm_unit = "ng/g" if atype == "SOIL_PFAS" else unit
                 for ci, raw_val in sample_vals.items():
@@ -317,6 +337,102 @@ class ALSSoilParser(BaseParser):
         if any(k in c for k in ("TPH", "PETROLEUM", "DRO", "GRO")) or re.search(r'\bORO\b', c):
             return "SOIL_TPH"
         return "SOIL_SVOC"
+
+    def _parse_water_pdf(self, file_obj) -> list[dict]:
+        """Parse ALS water PDF (Sub-Matrix: WATER, e.g. PR2021666_0_COA_Standard_CAI.pdf).
+
+        Line format (whitespace-separated):
+          <compound> <method-code> <LOR> <unit> <val1> [± <MU%>] <val2> [± <MU%>] …
+        Values: <X → <LOQ, ---- → ND at LOR, numeric → detected.
+        """
+        import pdfplumber, re as _re
+
+        _METHOD_RE = _re.compile(
+            r'^(.+?)\s+(W-[A-Z0-9]+)\s+([\d.]+)\s+([\w/µ]+)\s+(.+)$'
+        )
+        _BLANK_RE = _re.compile(r'\bblank\b', _re.IGNORECASE)
+
+        records: list[dict] = []
+        sample_ids: list[str] = []
+
+        file_obj.seek(0)
+        with pdfplumber.open(file_obj) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text() or ""
+                lines = text.splitlines()
+
+                # Collect sample IDs from "Client sample ID" line on this page
+                for line in lines:
+                    if "client sample" in line.lower() and "id" in line.lower():
+                        tokens = line.split()
+                        for j, tok in enumerate(tokens):
+                            if tok.lower().rstrip(":") in ("id", "id:") or (
+                                tok.lower().startswith("id") and ":" in tok
+                            ):
+                                candidates = [
+                                    t for t in tokens[j + 1:]
+                                    if t and not _BLANK_RE.search(t)
+                                ]
+                                if candidates:
+                                    sample_ids = candidates
+                                break
+                        break
+
+                for line in lines:
+                    m = _METHOD_RE.match(line.strip())
+                    if not m:
+                        continue
+                    compound = m.group(1).strip()
+                    lor      = float(m.group(3))
+                    unit     = m.group(4)
+                    rest     = m.group(5)
+
+                    # Strip ± uncertainty tokens; keep values
+                    tokens = rest.split()
+                    values: list[str] = []
+                    i = 0
+                    while i < len(tokens):
+                        t = tokens[i]
+                        if t == "±":
+                            i += 2  # skip ± and the percentage
+                            continue
+                        if t.endswith("%") and values:
+                            i += 1
+                            continue
+                        values.append(t)
+                        i += 1
+
+                    cas   = ALSSoilPDFParser._lookup_cas(compound) or name_to_cas(compound) or ""
+                    atype = self._WATER_ATYPE_MAP.get(self._analysis_type(compound), "GW_VOC")
+
+                    for j, val_str in enumerate(values):
+                        sid = sample_ids[j] if j < len(sample_ids) else f"Sample-{j + 1}"
+                        rv  = val_str.strip()
+                        if rv in ("----", "---", "--"):
+                            value, flag = lor, "ND"
+                        elif rv.startswith("<"):
+                            try:
+                                value = float(rv[1:])
+                            except (ValueError, TypeError):
+                                value = lor
+                            flag = "<LOQ"
+                        else:
+                            try:
+                                value, flag = float(rv), ""
+                            except (ValueError, TypeError):
+                                continue
+                        records.append({
+                            "compound":      compound,
+                            "cas":           cas,
+                            "value":         value,
+                            "flag":          flag,
+                            "unit":          unit,
+                            "sample_id":     sid,
+                            "lod":           None,
+                            "loq":           lor,
+                            "analysis_type": atype,
+                        })
+        return records
 
     def _parse_pdf(self, file_obj) -> list[dict]:
         """Parse ALS Czech Republic PDF soil reports."""

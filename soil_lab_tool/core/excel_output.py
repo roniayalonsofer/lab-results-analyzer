@@ -465,7 +465,8 @@ SHEET_CONFIG: dict[str, dict] = {
     "SOIL_METALS":    {"name": "קרקע מתכות",         "unit": "mg/kg DW", "nd_shows_loq": True},
     "SOIL_GRAIN_SIZE":{"name": "גרנולומטריה",        "unit": "%"},
     "SOIL_PFAS":   {"name": "קרקע PFAS",       "unit": "ng/g"},
-    "GW_VOC":          {"name": "מי תהום BTEX",    "unit": "mg/L"},
+    "GW_VOC":          {"name": "מי תהום VOC",      "unit": "µg/L", "lod_loq_mode": "loq"},
+    "GW_METALS":       {"name": "מי תהום מתכות",   "unit": "µg/L", "lod_loq_mode": "loq"},
     "GW_PFAS":         {"name": "מי תהום PFAS",         "unit": "ng/L"},
     "GW_MICROBIOLOGY": {"name": "מיקרוביולוגיה מי תהום", "unit": "CFU/mL"},
     "LOWFLOW":         {"name": "pH",               "unit": ""},
@@ -1062,8 +1063,7 @@ class LabReportExcel:
                 elif flag == "<":
                     display = f"<{v}" if isinstance(v, float) else f"<{v}"
                 elif flag == "ND":
-                    loq_ref = loq_val or v
-                    display = float(loq_ref) if isinstance(loq_ref, (int, float)) else loq_ref
+                    display = "-"
                 else:
                     display = v
                 sample_vals.append((display, v, flag, lod))
@@ -1100,8 +1100,6 @@ class LabReportExcel:
                     si = ci - N_FIXED - 1
                     display, num_v, flag, lod = sample_vals[si]
                     if flag == "<LOQ" and isinstance(val, (int, float)):
-                        c.number_format = '"<"0.0##'
-                    elif flag == "ND":
                         c.number_format = '"<"0.0##'
                     vsl_lim      = self._vsl_limit(t_vals)
                     tier1_ind    = self._tier1_ind_limit(t_vals)
@@ -1300,8 +1298,7 @@ class LabReportExcel:
                     loq_ref = loq_val or v
                     display = f"<{loq_ref}" if isinstance(loq_ref, float) else f"<{loq_ref}"
                 elif flag == "ND":
-                    loq_ref = loq_val or v
-                    display = float(loq_ref) if isinstance(loq_ref, (int, float)) else loq_ref
+                    display = "-"
                 else:
                     display = v
                 col_vals.append(display)
@@ -1316,7 +1313,7 @@ class LabReportExcel:
                 if ci >= cmp_col_start and isinstance(val, (int, float)):
                     comp_idx               = ci - cmp_col_start
                     _, flag_nf, _          = row_meta[comp_idx]
-                    if flag_nf in ("<LOQ", "ND"):
+                    if flag_nf == "<LOQ":
                         c.number_format = '"<"0.0##'
                     else:
                         c.number_format = _num_fmt_data(val)
