@@ -1006,7 +1006,10 @@ if True:
         st.stop()
 
     # ── stats ─────────────────────────────────────────────────────
-    by_type  = collections.Counter(r.get('analysis_type', '?') for r in records)
+    by_type  = collections.Counter(
+        r.get('analysis_type', '?') for r in records
+        if r.get('value') is not None and r.get('flag') not in ('<LOQ', 'ND')
+    )
     samples  = sorted(set(r['sample_id'] for r in records))
     detected = [r for r in records if r.get('flag') not in ('ND', '<LOD') and r.get('value') is not None]
 
