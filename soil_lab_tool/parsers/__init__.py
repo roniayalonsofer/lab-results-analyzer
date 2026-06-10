@@ -275,7 +275,7 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
         if file_bytes and filename.lower().endswith('.pdf'):
             with _pl.open(_io2.BytesIO(file_bytes)) as _p:
                 _t = _p.pages[0].extract_text() or ''
-                if 'םכ-לא' in _t:
+                if 'םכ-לא' in _t or 'םכ–לא' in _t or 'al-chem' in _t.lower() or 'al-chem.com' in _t.lower():
                     return "alchem"
     except Exception:
         pass
@@ -327,9 +327,8 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
             with pdfplumber.open(_io.BytesIO(file_bytes)) as _pdf:
                 _text = (_pdf.pages[0].extract_text() or "") + \
                         (_pdf.pages[1].extract_text() if len(_pdf.pages) > 1 else "")
-                if ("al-chem.com" in _text.lower() or
-                        'םכ-לא' in _text or
-                        'al-chem' in _text.lower()):
+                if ('םכ-לא' in _text or 'םכ–לא' in _text or
+                        'al-chem' in _text.lower() or 'al-chem.com' in _text.lower()):
                     return "alchem"
         except Exception:
             pass
@@ -451,7 +450,7 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None, lab: st
                 import pdfplumber as _pl, io as _io2
                 with _pl.open(_io2.BytesIO(file_bytes)) as _p:
                     _t = _p.pages[0].extract_text() or ''
-                    if 'םכ-לא' in _t:
+                    if 'םכ-לא' in _t or 'םכ–לא' in _t or 'al-chem' in _t.lower() or 'al-chem.com' in _t.lower():
                         return "soil_tph_pdf"
             except Exception:
                 pass
