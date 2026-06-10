@@ -240,24 +240,54 @@ class AlchemParser(BaseParser):
         return records
 
     def _parse_alchem_readable_pdf(self, file_obj: io.BytesIO, filename: str = "") -> list[dict]:
-        import pdfplumber
+        import pdfplumber, re as _re
         file_obj.seek(0)
         raw_bytes = file_obj.read()
         records = []
         with pdfplumber.open(io.BytesIO(raw_bytes)) as pdf:
             for page in pdf.pages:
-                page_text = (page.extract_text() or "").lower()
-                for table in (page.extract_tables() or []):
-                    if not table or len(table) < 2:
-                        continue
-                    h0 = [str(c or "").strip() for c in table[0]]
-                    h0_low = [h.lower() for h in h0]
-                    hdrs = " ".join(h0_low)
-                    if "dro" in hdrs and "oro" in hdrs and "tph" in hdrs:
-                        records.extend(self._parse_readable_tph_table(table))
-                    elif "sample name" in hdrs or (h0_low and "sample name" in h0_low[0]):
-                        atype = "SOIL_SVOC" if "8270" in page_text else "SOIL_VOC"
-                        records.extend(self._parse_readable_voc_table(table, atype))
+                page_text = page.extract_text() or ""
+                page_lo   = page_text.lower()
+                tables    = page.extract_tables() or []
+
+                if _re.search(r'EPA\s*8015', page_text, _re.IGNORECASE):
+                    for table in tables:
+                        if not table or len(table) < 2:
+                            continue
+                        h = [str(c or "").lower() for c in table[0]]
+                        if any("dro" in x for x in h) and any("oro" in x for x in h):
+                            records.extend(self._parse_new_tph_table(table))
+
+                elif _re.search(r'EPA\s*6010', page_text, _re.IGNORECASE):
+                    m = _re.search(r'Analysis\s+Location[:\s]+([A-Za-z0-9\-]+)', page_text)
+                    sample_id = m.group(1).strip() if m else ""
+                    for table in tables:
+                        if not table or len(table) < 2:
+                            continue
+                        h = [str(c or "").lower() for c in table[0]]
+                        if any("conc" in x for x in h):
+                            records.extend(self._parse_metals_table(table, sample_id))
+
+                elif _re.search(r'EPA\s*8260', page_text, _re.IGNORECASE):
+                    for table in tables:
+                        if not table or len(table) < 2:
+                            continue
+                        h = [str(c or "").lower() for c in table[0]]
+                        if any("cas" in x for x in h):
+                            records.extend(self._parse_new_voc_table(table))
+
+                else:
+                    for table in tables:
+                        if not table or len(table) < 2:
+                            continue
+                        h0 = [str(c or "").strip() for c in table[0]]
+                        h0_low = [h.lower() for h in h0]
+                        hdrs = " ".join(h0_low)
+                        if "dro" in hdrs and "oro" in hdrs and "tph" in hdrs:
+                            records.extend(self._parse_readable_tph_table(table))
+                        elif "sample name" in hdrs or (h0_low and "sample name" in h0_low[0]):
+                            atype = "SOIL_SVOC" if "8270" in page_lo else "SOIL_VOC"
+                            records.extend(self._parse_readable_voc_table(table, atype))
         return records
 
     def _parse_readable_tph_table(self, table):
@@ -427,6 +457,202 @@ class AlchemParser(BaseParser):
                     "value": value, "flag": flag,
                     "unit": "mg/kg", "analysis_type": analysis_type,
                     "sampling_date": "", "lod": lod_val, "loq": loq_val,
+                })
+        return records
+
+    def _parse_new_tph_table(self, table):
+        """EPA8015: Name | DRO [mg/kg] | ORO [mg/kg] | Total TPH [mg/kg], samples as rows."""
+        h   = [str(c or "").strip() for c in table[0]]
+        hl  = [x.lower() for x in h]
+        col_name = 0
+        col_dro  = next((i for i, x in enumerate(hl) if "dro" in x), None)
+        col_oro  = next((i for i, x in enumerate(hl) if "oro" in x), None)
+        col_tph  = next((i for i, x in enumerate(hl) if "total" in x or ("tph" in x and "total" not in x)), None)
+        if col_tph is None:
+            col_tph = next((i for i, x in enumerate(hl) if "tph" in x), None)
+
+        lod = {"DRO": None, "ORO": None, "TPH": None}
+        loq = {"DRO": 30.0, "ORO": 20.0, "TPH": 50.0}
+        for row in table[1:]:
+            if not row:
+                continue
+            label = str(row[col_name] or "").strip().upper()
+            if label not in ("LOD", "LOQ"):
+                continue
+            for cmp, ci in [("DRO", col_dro), ("ORO", col_oro), ("TPH", col_tph)]:
+                if ci is None or ci >= len(row):
+                    continue
+                try:
+                    v = float(str(row[ci] or "").strip().replace(",", ""))
+                    if label == "LOD":
+                        lod[cmp] = v
+                    else:
+                        loq[cmp] = v
+                except (ValueError, TypeError):
+                    pass
+
+        records = []
+        for row in table[1:]:
+            if not row:
+                continue
+            name = str(row[col_name] or "").strip()
+            if not name or name.upper() in ("LOD", "LOQ", "NAME", "[MG/KG]", ""):
+                continue
+            sid, depth = self._normalize_sample(name)
+            for cmp, ci in [("DRO", col_dro), ("ORO", col_oro), ("TPH", col_tph)]:
+                if ci is None or ci >= len(row):
+                    continue
+                raw_val = str(row[ci] or "").strip()
+                lq = loq[cmp]
+                rv = raw_val.upper()
+                if rv in ("N.D.", "ND", "N.D", "N/D"):
+                    value, flag = lod[cmp], "ND"
+                elif rv in ("<LOQ", "<MDL", "<MRL", "<DL"):
+                    value, flag = lq, "<LOQ"
+                elif raw_val.startswith("<"):
+                    try:
+                        value, flag = float(raw_val[1:].replace(",", "")), "<LOQ"
+                    except (ValueError, TypeError):
+                        value, flag = lq, "<LOQ"
+                else:
+                    try:
+                        value, flag = float(raw_val.replace(",", "")), ""
+                    except (ValueError, TypeError):
+                        continue
+                records.append({
+                    "lab": self.LAB_NAME, "sample_id": sid, "depth": depth,
+                    "compound": cmp, "cas": cmp, "value": value, "flag": flag,
+                    "unit": "mg/kg", "analysis_type": "SOIL_TPH", "sampling_date": "",
+                    "lod": lod[cmp], "loq": lq,
+                })
+        return records
+
+    def _parse_metals_table(self, table, sample_id: str = ""):
+        """EPA6010D: Name | Final Conc. [mg/kg] | LOD [mg/kg] | LOQ. [mg/kg], one sample per page."""
+        h  = [str(c or "").strip() for c in table[0]]
+        hl = [x.lower() for x in h]
+        col_name = 0
+        col_conc = next((i for i, x in enumerate(hl) if "final conc" in x or ("conc" in x and "lod" not in x and "loq" not in x)), 1)
+        col_lod  = next((i for i, x in enumerate(hl) if x.startswith("lod")), None)
+        col_loq  = next((i for i, x in enumerate(hl) if x.startswith("loq")), None)
+
+        records = []
+        for row in table[1:]:
+            if not row or not row[0]:
+                continue
+            name = str(row[0] or "").strip()
+            if not name or name.lower() in ("compound name", "name", "nan", ""):
+                continue
+            lod_val = None
+            loq_val = None
+            if col_lod is not None and col_lod < len(row):
+                try:
+                    lod_val = float(str(row[col_lod] or "").strip().replace(",", ""))
+                except (ValueError, TypeError):
+                    pass
+            if col_loq is not None and col_loq < len(row):
+                try:
+                    loq_val = float(str(row[col_loq] or "").strip().replace(",", ""))
+                except (ValueError, TypeError):
+                    pass
+            raw_val = str(row[col_conc] or "").strip() if col_conc < len(row) else ""
+            if not raw_val or raw_val.lower() in ("nan", ""):
+                continue
+            rv = raw_val.upper()
+            fallback = loq_val or lod_val or 0.01
+            if rv in ("N.D.", "ND", "N.D", "N/D"):
+                value, flag = lod_val, "ND"
+            elif rv in ("<LOQ", "<MDL", "<MRL", "<DL"):
+                value, flag = loq_val or fallback, "<LOQ"
+            elif raw_val.startswith("<"):
+                try:
+                    value, flag = float(raw_val[1:].replace(",", "")), "<LOQ"
+                except (ValueError, TypeError):
+                    value, flag = fallback, "<LOQ"
+            else:
+                try:
+                    value, flag = float(raw_val.replace(",", "")), ""
+                except (ValueError, TypeError):
+                    continue
+            records.append({
+                "lab": self.LAB_NAME, "sample_id": sample_id or "Sample-1",
+                "compound": name, "cas": "",
+                "value": value, "flag": flag,
+                "unit": "mg/kg", "analysis_type": "SOIL_METALS", "sampling_date": "",
+                "lod": lod_val, "loq": loq_val,
+            })
+        return records
+
+    def _parse_new_voc_table(self, table):
+        """EPA8260B: Name | CAS | Final Conc. P-4 | ... | MDL | MRL, sample IDs in column headers."""
+        import re as _re
+        if not table or len(table) < 2:
+            return []
+        h  = [str(c or "").strip() for c in table[0]]
+        hl = [x.lower() for x in h]
+        col_name = 0
+        col_cas  = next((i for i, x in enumerate(hl) if x == "cas"), 1)
+        col_mdl  = next((i for i, x in enumerate(hl) if x in ("mdl", "lod")), None)
+        col_mrl  = next((i for i, x in enumerate(hl) if x in ("mrl", "loq")), None)
+
+        sample_cols: list[tuple[int, str]] = []
+        for i, hdr in enumerate(h):
+            if "final conc" in hdr.lower():
+                m = _re.search(r'(?i)final\s+conc\.?\s+(.+)', hdr)
+                sid = m.group(1).strip() if m else f"Sample-{i}"
+                sample_cols.append((i, sid))
+
+        if not sample_cols:
+            return []
+
+        records = []
+        for row in table[1:]:
+            if not row or not row[0]:
+                continue
+            compound = str(row[0] or "").strip()
+            if not compound or compound.lower() in ("compound name", "name", "nan", ""):
+                continue
+            cas = str(row[col_cas] or "").strip() if col_cas < len(row) else ""
+            mdl_val = None
+            mrl_val = None
+            if col_mdl is not None and col_mdl < len(row):
+                try:
+                    mdl_val = float(str(row[col_mdl] or "").strip().replace(",", ""))
+                except (ValueError, TypeError):
+                    pass
+            if col_mrl is not None and col_mrl < len(row):
+                try:
+                    mrl_val = float(str(row[col_mrl] or "").strip().replace(",", ""))
+                except (ValueError, TypeError):
+                    pass
+            fallback = mrl_val or mdl_val or 0.01
+            for ci, sid in sample_cols:
+                if ci >= len(row):
+                    continue
+                raw_val = str(row[ci] or "").strip()
+                if not raw_val or raw_val.lower() == "nan":
+                    continue
+                rv = raw_val.upper()
+                if rv in ("N.D.", "ND", "N.D", "N/D"):
+                    value, flag = mdl_val, "ND"
+                elif rv in ("<MDL", "<DL", "<MRL", "<LOQ"):
+                    value, flag = fallback, "<LOQ"
+                elif raw_val.startswith("<"):
+                    try:
+                        value, flag = float(raw_val[1:].replace(",", "")), "<LOQ"
+                    except (ValueError, TypeError):
+                        value, flag = fallback, "<LOQ"
+                else:
+                    try:
+                        value, flag = float(raw_val.replace(",", "")), ""
+                    except (ValueError, TypeError):
+                        value, flag = fallback, "<LOQ"
+                records.append({
+                    "lab": self.LAB_NAME, "sample_id": sid,
+                    "compound": compound, "cas": cas,
+                    "value": value, "flag": flag,
+                    "unit": "mg/kg", "analysis_type": "SOIL_VOC", "sampling_date": "",
+                    "lod": mdl_val, "loq": mrl_val,
                 })
         return records
 

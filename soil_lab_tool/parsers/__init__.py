@@ -172,18 +172,29 @@ def _is_aminolab_pdf(file_bytes: bytes) -> bool:
 
 
 def _is_alchem_tph_pdf(file_bytes: bytes) -> bool:
-    """Return True if the PDF is an Alchem TPH report (CID-font, needs pymupdf).
+    """Return True if the PDF is an Alchem TPH report (CID-font or readable).
 
-    The font uses Identity-H encoding with a +9 CID shift, so readable text
-    like "DRO"/"N.D."/"<LOQ" appears as "3CFH"/"E%;%"/"CF;" in the text layer
-    extracted by fitz.  All three must be present.
+    CID-font path: Identity-H encoding with a +9 CID shift — readable text
+    like "DRO"/"N.D."/"<LOQ" appears as "3CFH"/"E%;%"/"CF;" in fitz output.
+
+    Readable path: first-page text contains DRO, ORO, Total TPH, and N.D./<LOQ.
     """
     try:
         import fitz  # pymupdf
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         full_text = "".join(page.get_text() for page in doc)
         doc.close()
-        return "3CFH" in full_text and "E%;%" in full_text and "CF;" in full_text
+        if "3CFH" in full_text and "E%;%" in full_text and "CF;" in full_text:
+            return True
+    except Exception:
+        pass
+    try:
+        import io as _io, pdfplumber as _pl
+        with _pl.open(_io.BytesIO(file_bytes)) as _pdf:
+            first_text = (_pdf.pages[0].extract_text() or "") if _pdf.pages else ""
+        if ("DRO" in first_text and "ORO" in first_text and "Total TPH" in first_text
+                and ("N.D." in first_text or "<LOQ" in first_text)):
+            return True
     except Exception:
         pass
     return False
