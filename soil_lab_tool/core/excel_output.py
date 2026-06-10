@@ -564,7 +564,8 @@ class LabReportExcel:
             elif atype == "GW_FIELD_PARAMS":
                 self._write_field_params_sheet(sheet, recs, cfg)
             else:
-                self._write_data_sheet(sheet, recs, cfg, thresh_keys)
+                if not self._write_data_sheet(sheet, recs, cfg, thresh_keys):
+                    wb.remove(sheet)
 
         # Only create directories when out_path is a real filesystem path (not BytesIO)
         if isinstance(self.out_path, (str, os.PathLike)):
@@ -657,6 +658,8 @@ class LabReportExcel:
                 for v, _flag, _lod in pivot.get(cmp, {}).values()
             )
         compounds = [c for c in compounds if not _is_header_row(c)]
+        if not compounds:
+            return False
 
         # Per-sample metadata (soil gas: canister, sampling date, PID reading)
         sample_meta: dict[str, dict] = {}
@@ -704,6 +707,7 @@ class LabReportExcel:
                                   thresh_keys, thresh_vals, header_info, cfg,
                                   sample_meta=sample_meta, unit_map=unit_map,
                                   depth_map=depth_map, pid_map=self.pid_map)
+        return True
 
     def _write_lowflow_sheet(self, ws, records, cfg):
         """LOWFLOW/pH: field parameters as rows, samples as columns, no thresholds.
