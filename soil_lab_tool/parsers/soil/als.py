@@ -318,15 +318,16 @@ class ALSSoilParser(BaseParser):
         if head[:4] == b"%PDF":
             try:
                 import pdfplumber as _pl_sniff, io as _io_sniff
+            except ImportError:
+                pass
+            else:
                 file_obj.seek(0)
                 _pdf_bytes = file_obj.read()
                 with _pl_sniff.open(_io_sniff.BytesIO(_pdf_bytes)) as _p:
                     _p1_text = (_p.pages[0].extract_text() or "") if _p.pages else ""
                 if "Sub-Matrix: WATER" in _p1_text:
                     return self._parse_water_pdf(_io_sniff.BytesIO(_pdf_bytes))
-            except Exception:
-                pass
-            file_obj.seek(0)
+                file_obj.seek(0)
             return self._parse_pdf(file_obj)
 
         # SpreadsheetML: <?xml … urn:schemas-microsoft-com:office:spreadsheet
