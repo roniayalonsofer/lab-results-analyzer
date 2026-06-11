@@ -459,9 +459,9 @@ SHEET_CONFIG: dict[str, dict] = {
     "SOIL_VOC":   {"name": "קרקע VOC",  "unit": "mg/kg", "lod_loq_mode": "both", "nd_shows_loq": True},
     "SOIL_SVOC":  {"name": "קרקע SVOC", "unit": "mg/kg", "lod_loq_mode": "both", "nd_shows_loq": True},
     "SOIL_MBTEX": {"name": "קרקע MBTEX",         "unit": "mg/kg"},
-    "SOIL_TPH":   {"name": "קרקע TPH",            "unit": "mg/kg", "lod_loq_mode": "loq"},
-    "SOIL_TPH_VOC":   {"name": "קרקע TPH+BTEX",      "unit": "mg/kg"},
-    "SOIL_TPH_MBTEX": {"name": "קרקע TPH+MBTEX",     "unit": "mg/kg"},
+    "SOIL_TPH":   {"name": "קרקע TPH",            "unit": "mg/kg", "lod_loq_mode": "loq", "force_portrait": True},
+    "SOIL_TPH_VOC":   {"name": "קרקע TPH+BTEX",      "unit": "mg/kg", "force_portrait": True},
+    "SOIL_TPH_MBTEX": {"name": "קרקע TPH+MBTEX",     "unit": "mg/kg", "force_portrait": True},
     "SOIL_METALS":    {"name": "קרקע מתכות",         "unit": "mg/kg DW", "nd_shows_loq": True},
     "SOIL_GRAIN_SIZE":{"name": "גרנולומטריה",        "unit": "%"},
     "SOIL_PFAS":   {"name": "קרקע PFAS",       "unit": "ng/g"},
@@ -704,8 +704,9 @@ class LabReportExcel:
             if bh and sid in sample_meta and not sample_meta[sid].get("borehole"):
                 sample_meta[sid]["borehole"] = bh
 
-        # Decide orientation: portrait when n_compounds >= n_samples
-        portrait = len(compounds) >= len(samples)
+        # Decide orientation: portrait when n_compounds >= n_samples,
+        # or when the sheet config explicitly forces portrait (e.g. SOIL_TPH).
+        portrait = len(compounds) >= len(samples) or cfg.get("force_portrait", False)
 
         header_info = {
             "project": self.project,
