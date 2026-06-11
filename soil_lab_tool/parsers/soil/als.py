@@ -418,7 +418,7 @@ class ALSSoilParser(BaseParser):
         import pdfplumber, re as _re
 
         _METHOD_RE = _re.compile(
-            r'^(.+?)\s+(W-[A-Z0-9]+)\s+([\d.]+)\s+([\w/µ]+)\s+(.+)$'
+            r'^(.+?)\s+(W-[A-Z0-9-]+)\s+([\d.]+)\s+(\S+)\s+(.+)$'
         )
         _BLANK_RE = _re.compile(r'\bblank\b', _re.IGNORECASE)
 
