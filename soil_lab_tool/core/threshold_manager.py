@@ -120,6 +120,13 @@ _GW_METALS_STANDARDS: dict[str, float] = {
     "7782-49-2": 0.01,    # Selenium
     "7440-22-4": 0.1,     # Silver
     "7440-66-6": 3.0,     # Zinc
+    "7429-90-5": 0.2,     # Aluminium
+    "7440-36-0": 0.005,   # Antimony
+    "7440-41-7": 0.004,   # Beryllium
+    "7440-48-4": 0.05,    # Cobalt
+    "7439-98-7": 0.07,    # Molybdenum
+    "7440-28-0": 0.002,   # Thallium
+    "7440-62-2": 0.05,    # Vanadium
 }
 
 # All Tier-1 soil direct-contact keys (used to declare valid keys per atype)
