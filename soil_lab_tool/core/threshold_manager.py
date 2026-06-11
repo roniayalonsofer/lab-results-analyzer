@@ -104,6 +104,24 @@ _CAS_VSL_OVERRIDES: dict[str, float | None] = {
     "ORO": None,
 }
 
+# Israeli drinking water standards for metals (mg/L).
+# Source: Israeli Drinking Water Regulations.
+_GW_METALS_STANDARDS: dict[str, float] = {
+    "7440-38-2": 0.01,    # Arsenic
+    "7440-39-3": 0.7,     # Barium
+    "7440-43-9": 0.003,   # Cadmium
+    "7440-47-3": 0.05,    # Chromium
+    "7440-50-8": 1.0,     # Copper
+    "7439-89-6": 0.3,     # Iron
+    "7439-92-1": 0.01,    # Lead
+    "7439-96-5": 0.5,     # Manganese
+    "7439-97-6": 0.001,   # Mercury
+    "7440-02-0": 0.02,    # Nickel
+    "7782-49-2": 0.01,    # Selenium
+    "7440-22-4": 0.1,     # Silver
+    "7440-66-6": 3.0,     # Zinc
+}
+
 # All Tier-1 soil direct-contact keys (used to declare valid keys per atype)
 _SOIL_TIER1_KEYS: list[str] = [
     "TIER1_RES_SOIL_VH",    "TIER1_RES_SOIL_HM_0_6",
@@ -393,6 +411,9 @@ class ThresholdManager:
         cas = str(cas).strip() if cas is not None else ""
         if not cas or cas == "None":
             return None
+
+        if threshold_key == "GW" and cas in _GW_METALS_STANDARDS:
+            return _GW_METALS_STANDARDS[cas]
 
         if threshold_key in _MAIN_COL_MAP:
             return self._lookup_main(cas, _MAIN_COL_MAP[threshold_key])

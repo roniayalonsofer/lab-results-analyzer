@@ -465,7 +465,7 @@ SHEET_CONFIG: dict[str, dict] = {
     "SOIL_METALS":    {"name": "קרקע מתכות",         "unit": "mg/kg DW", "nd_shows_loq": True},
     "SOIL_GRAIN_SIZE":{"name": "גרנולומטריה",        "unit": "%"},
     "SOIL_PFAS":   {"name": "קרקע PFAS",       "unit": "ng/g"},
-    "GW_VOC":          {"name": "מי תהום VOC",      "unit": "µg/L", "lod_loq_mode": "loq"},
+    "GW_VOC":          {"name": "מי תהום VOC",      "unit": "µg/L", "lod_loq_mode": "loq", "force_portrait": True},
     "GW_SVOC":         {"name": "מי תהום SVOC",     "unit": "µg/L", "lod_loq_mode": "loq", "force_portrait": True},
     "GW_METALS":       {"name": "מי תהום מתכות",   "unit": "µg/L", "lod_loq_mode": "loq", "force_portrait": True},
     "GW_PFAS":         {"name": "מי תהום PFAS",         "unit": "ng/L"},
