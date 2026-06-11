@@ -162,6 +162,40 @@ CHEMICAL_MAP: dict[str, str | None] = {
     "bromochloromethane":                    "74-97-5",
     "bromodichloromethane":                  "75-27-4",
     "dibromochloromethane":                  "124-48-1",
+    # Chlorinated solvents — IUPAC "-ene" spellings (distinct from "-ylene" entries above)
+    "tetrachloroethene":                     "127-18-4",
+    "trichloroethene":                       "79-01-6",
+    # Oxygenates — full names
+    "ethyl tert-butyl ether (etbe)":         "637-92-3",
+    "tert-amyl methyl ether (tame)":         "994-05-8",
+    "tert-amyl ethyl ether (taee)":          "919-94-8",
+    "tert-butyl alcohol":                    "75-65-0",
+    # Alkylbenzenes / cyclic hydrocarbons
+    "indane":                                "496-11-7",
+    "tert-butylbenzene":                     "98-06-6",
+    "sec-butylbenzene":                      "135-98-8",
+    "p-isopropyltoluene":                    "99-87-6",
+    # Trimethylbenzenes (ALS dot notation variants)
+    "1.2.4-trimethylbenzene":               "95-63-6",
+    "1.3.5-trimethylbenzene":               "108-67-8",
+    # PAHs
+    "benzo(a)fluoranthene":                  "203-33-8",
+    # Macro-elements and inorganics (Fix 1 — correct CAS)
+    "calcium":                               "7440-70-2",
+    "magnesium":                             "7439-95-4",
+    "sodium":                                "7440-23-5",
+    "potassium":                             "7440-09-7",
+    "silicon":                               "7440-21-3",
+    "sulphur":                               "7704-34-9",
+    "tellurium":                             "13494-80-9",
+    "chloride":                              None,        # no valid single CAS; 107-05-1 is allyl chloride
+    # PCBs
+    "pcb 28":                                "7012-37-5",
+    "pcb 52":                                "35693-99-3",
+    "pcb 101":                               "37680-73-2",
+    "pcb 138":                               "35065-28-2",
+    "pcb 153":                               "35065-27-1",
+    "pcb 180":                               "35065-29-3",
 }
 
 

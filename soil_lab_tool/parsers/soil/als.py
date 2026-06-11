@@ -341,6 +341,26 @@ class ALSSoilParser(BaseParser):
         "SOIL_TPH":    "GW_VOC",
     }
 
+    # Compounds to skip entirely when parsing WATER sheets or water PDFs.
+    # These are general chemistry / physical parameters and macro-elements that
+    # are not environmental contaminants, plus aggregate sum parameters.
+    _SKIP_WATER_COMPOUNDS: frozenset[str] = frozenset({
+        # General chemistry / physical parameters
+        "total organic carbon", "chloride", "fluoride",
+        "nitrates", "nitrate as n", "nitrites", "nitrite as n",
+        "sulphate as so4 2-",
+        # Macro-elements (not contaminants)
+        "bismuth", "boron", "calcium", "lithium", "magnesium",
+        "phosphorus", "potassium", "silicon", "sodium", "strontium",
+        "sulphur", "tellurium", "titanium", "zirconium",
+        # Aggregate sum parameters (not individual contaminants)
+        "sum of btex", "sum of tex", "sum of xylenes", "sum of btexs",
+        "sum of 3 dichlorobenzenes", "sum of 3 trichlorobenzenes",
+        "sum of 4 trihalomethanes", "sum of 5 chlorinated ethenes",
+        "sum of 1.2-dichloroethenes", "sum of 16 pah", "sum of 17 pah",
+        "sum of 7 pcbs",
+    })
+
     def parse(self, file_obj: io.BytesIO) -> list[dict]:
         # Sniff file type
         head = file_obj.read(512)
@@ -397,6 +417,8 @@ class ALSSoilParser(BaseParser):
                 continue
 
             for compound, unit, loq, sample_vals in data_rows:
+                if "WATER" in sheet and compound.strip().lower() in self._SKIP_WATER_COMPOUNDS:
+                    continue
                 cas   = _als_lookup_cas(compound) or name_to_cas(compound) or ""
                 atype = self._analysis_type(compound)
                 if "WATER" in sheet:
@@ -488,6 +510,8 @@ class ALSSoilParser(BaseParser):
                     if not m:
                         continue
                     compound = m.group(1).strip()
+                    if compound.lower() in self._SKIP_WATER_COMPOUNDS:
+                        continue
                     lor      = float(m.group(3))
                     unit     = m.group(4)
                     rest     = m.group(5)
