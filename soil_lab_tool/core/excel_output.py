@@ -662,6 +662,16 @@ class LabReportExcel:
         if not compounds:
             return False
 
+        # Remove sample columns where every compound is ND (no real data at all).
+        def _sample_has_data(sid: str) -> bool:
+            return any(
+                pivot.get(cmp, {}).get(sid, (None, "ND", None))[1] != "ND"
+                for cmp in compounds
+            )
+        samples = [s for s in samples if _sample_has_data(s)]
+        if not samples:
+            return False
+
         # Per-sample metadata (soil gas: canister, sampling date, PID reading)
         sample_meta: dict[str, dict] = {}
         for r in records:
@@ -682,9 +692,17 @@ class LabReportExcel:
         ):
             cfg["lod_loq_mode"] = "loq"
 
-        # depth_map not needed when depth is embedded in the composite key,
-        # but kept as a fallback for any callers that rely on it.
+        # depth_map: overrides depth string for a sample; populated from
+        # pre-parsed record["depth_from"] when available (e.g. ALS "BH1-1.5m").
         depth_map: dict[str, str] = {}
+        for r in records:
+            sid = _sid(r)
+            dep = r.get("depth_from")
+            bh  = r.get("borehole")
+            if dep is not None and sid not in depth_map:
+                depth_map[sid] = str(dep)
+            if bh and sid in sample_meta and not sample_meta[sid].get("borehole"):
+                sample_meta[sid]["borehole"] = bh
 
         # Decide orientation: portrait when n_compounds >= n_samples
         portrait = len(compounds) >= len(samples)
@@ -947,6 +965,12 @@ class LabReportExcel:
             if depth_map:
                 split_p = {sid: (split_p[sid][0], depth_map.get(sid, split_p[sid][1]))
                            for sid in samples}
+            # Override borehole from pre-parsed record fields when _split_sample_depth
+            # could not parse the ID format (e.g. ALS "BH1-1.5m" style).
+            for sid in samples:
+                bh_override = sample_meta.get(sid, {}).get("borehole")
+                if bh_override:
+                    split_p[sid] = (_norm_borehole(bh_override), split_p[sid][1])
             samples = sorted(samples,
                              key=lambda sid: (*_borehole_sort_key(split_p[sid][0]),
                                               float(split_p[sid][1]) if split_p[sid][1] else 0.0))
@@ -1176,6 +1200,12 @@ class LabReportExcel:
         if depth_map:
             split_map = {sid: (split_map[sid][0], depth_map.get(sid, split_map[sid][1]))
                          for sid in samples}
+        # Override borehole from pre-parsed record fields when available.
+        if sample_meta:
+            for sid in samples:
+                bh_override = sample_meta.get(sid, {}).get("borehole")
+                if bh_override:
+                    split_map[sid] = (_norm_borehole(bh_override), split_map[sid][1])
         has_depth = any(depth for _, depth in split_map.values())
 
         if has_depth:

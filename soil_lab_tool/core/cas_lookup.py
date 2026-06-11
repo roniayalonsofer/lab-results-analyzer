@@ -4,7 +4,7 @@ core/cas_lookup.py
 Maps chemical names (Hebrew / English / symbols) to CAS numbers.
 """
 
-CHEMICAL_MAP: dict[str, str] = {
+CHEMICAL_MAP: dict[str, str | None] = {
     # BTEX
     "benzene":              "71-43-2",
     "בנזן":                 "71-43-2",
@@ -121,6 +121,46 @@ CHEMICAL_MAP: dict[str, str] = {
     "hfpo-da":                               "13252-13-6",
     "pfmoaa":                                "13252-13-6",
     "genx":                                  "13252-13-6",
+    # TPH fractions (pseudo-CAS identifiers)
+    "c10 - c28 fraction (dro)":              "DRO",
+    "c24 - c40 fraction (oro)":              "ORO",
+    # Sums / grouped parameters (no CAS)
+    "sum of btex":                           None,
+    "sum of tex":                            None,
+    # Xylene isomers (ALS dot notation)
+    "meta- & para-xylene":                   "108-38-3",
+    "ortho-xylene":                          "95-47-6",
+    # Chlorinated benzenes
+    "1.2.3-trichlorobenzene":                "87-61-6",
+    "1.2.4-trichlorobenzene":                "120-82-1",
+    "1.3.5-trichlorobenzene":                "108-70-3",
+    # Chlorinated toluenes
+    "2-chlorotoluene":                       "95-49-8",
+    "4-chlorotoluene":                       "106-43-4",
+    # Chlorinated C1–C3 solvents (ALS dot notation)
+    "1.1-dichloroethane":                    "75-34-3",
+    "1.1-dichloroethene":                    "75-35-4",
+    "1.1-dichloropropene":                   "563-58-6",
+    "1.1.1-trichloroethane":                 "71-55-6",
+    "1.1.1.2-tetrachloroethane":             "630-20-6",
+    "1.1.2-trichloroethane":                 "79-00-5",
+    "1.1.2.2-tetrachloroethane":             "79-34-5",
+    "1.2-dibromoethane (edb)":               "106-93-4",
+    "1.2-dichloropropane":                   "78-87-5",
+    "1.2.3-trichloropropane":                "96-18-4",
+    "1.3-dichloropropane":                   "142-28-9",
+    "2.2-dichloropropane":                   "594-20-7",
+    "cis-1.2-dichloroethene":                "156-59-2",
+    "trans-1.2-dichloroethene":              "156-60-5",
+    "cis-1.3-dichloropropene":               "10061-01-5",
+    "trans-1.3-dichloropropene":             "10061-02-6",
+    # Chlorinated/halogenated methanes
+    "tetrachloromethane":                    "56-23-5",
+    "trichlorofluoromethane":                "75-69-4",
+    "dichlorodifluoromethane":               "75-71-8",
+    "bromochloromethane":                    "74-97-5",
+    "bromodichloromethane":                  "75-27-4",
+    "dibromochloromethane":                  "124-48-1",
 }
 
 

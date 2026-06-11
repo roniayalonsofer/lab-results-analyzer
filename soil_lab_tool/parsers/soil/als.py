@@ -282,6 +282,9 @@ _ALS_CAS_MAP: dict[str, str] = {
     "bis(2-chloroisopropyl)ether":          "108-60-1",
     "bis(2-chloroisopropyl)ether (all isomers)": "108-60-1",
     "dibenzofuran":                         "132-64-9",
+    # TPH fractions
+    "c10 - c28 fraction (dro)":             "DRO",
+    "c24 - c40 fraction (oro)":             "ORO",
 }
 
 
@@ -697,6 +700,9 @@ class ALSSoilPDFParser(BaseParser):
         "bis(2-chloroisopropyl)ether":          "108-60-1",
         "bis(2-chloroisopropyl)ether (all isomers)": "108-60-1",
         "dibenzofuran":                         "132-64-9",
+        # TPH fractions
+        "c10 - c28 fraction (dro)":             "DRO",
+        "c24 - c40 fraction (oro)":             "ORO",
     }
 
     @classmethod

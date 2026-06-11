@@ -96,6 +96,14 @@ THRESHOLD_LABELS: dict[str, str] = {
     "TIER1_IND_SOIL_LOW":    "TIER1 תעשייה - לא רגיש",
 }
 
+# Explicit per-CAS VSL overrides for compounds that use pseudo-CAS identifiers.
+# DRO: VSL = 350 mg/kg (same as the C10-C40 TPH entry in the threshold table).
+# ORO: no Israeli VSL threshold defined.
+_CAS_VSL_OVERRIDES: dict[str, float | None] = {
+    "DRO": 350.0,
+    "ORO": None,
+}
+
 # All Tier-1 soil direct-contact keys (used to declare valid keys per atype)
 _SOIL_TIER1_KEYS: list[str] = [
     "TIER1_RES_SOIL_VH",    "TIER1_RES_SOIL_HM_0_6",
@@ -429,8 +437,9 @@ class ThresholdManager:
             return self._lookup_rbtl(_rbtl_map[threshold_key], cas)
         return None
 
-    # Compound names/CAS values that all map to the VSL entry "TPH - DRO + ORO (Tier 1)"
-    _TPH_ALIASES: frozenset[str] = frozenset({"tph", "dro", "oro", "tph - dro + oro"})
+    # Compound names/CAS values that map to the VSL entry "TPH - DRO + ORO (Tier 1)".
+    # "oro" is intentionally excluded — ORO has no VSL and must not alias to C10-C40.
+    _TPH_ALIASES: frozenset[str] = frozenset({"tph", "dro", "tph - dro + oro"})
 
     def get_threshold_with_name(self, cas: str, threshold_key: str,
                                 compound_name: str = "") -> float | None:
@@ -438,11 +447,19 @@ class ThresholdManager:
         Like get_threshold but falls back to compound name lookup when CAS fails.
         The compound name column in the threshold file is 'chimical' (or similar).
         """
-        TPH_COMPOUNDS = {"tph", "dro", "oro"}
+        # Explicit pseudo-CAS overrides (DRO=350, ORO=None) take priority.
+        cas_upper = str(cas).strip().upper() if cas else ""
+        if cas_upper in _CAS_VSL_OVERRIDES:
+            return _CAS_VSL_OVERRIDES[cas_upper] if "VSL" in threshold_key else None
+
+        # TPH/DRO compounds return 350 for all thresholds when matched by name.
+        # ORO is excluded: it has no defined threshold and is handled above via CAS.
+        TPH_COMPOUNDS = {"tph", "dro"}
         if compound_name and compound_name.strip().lower() in TPH_COMPOUNDS:
             return 350.0
 
-        # TPH sub-fractions (DRO, ORO, TPH) share a single VSL entry keyed on C10-C40.
+        # TPH sub-fractions (DRO, TPH) share a single VSL entry keyed on C10-C40.
+        # ORO is intentionally excluded so CAS "ORO" returns None rather than 350.
         name_lo = str(compound_name).strip().lower() if compound_name else ""
         cas_lo  = str(cas).strip().lower() if cas else ""
         if name_lo in self._TPH_ALIASES or cas_lo in self._TPH_ALIASES:
