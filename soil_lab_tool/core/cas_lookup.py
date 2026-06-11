@@ -79,6 +79,12 @@ CHEMICAL_MAP: dict[str, str | None] = {
     "tl":   "7440-28-0",  "thallium":  "7440-28-0",  "תלאיום":   "7440-28-0",
     "v":    "7440-62-2",  "vanadium":  "7440-62-2",  "ונדיום":   "7440-62-2",
     "sn":   "7440-31-5",  "tin":       "7440-31-5",  "בדיל":     "7440-31-5",
+    "bismuth":            "7440-69-9",
+    "lithium":            "7439-93-2",
+    "phosphorus":         "7723-14-0",
+    "strontium":          "7440-24-6",
+    "titanium":           "7550-45-0",
+    "zirconium":          "7440-67-7",
     # PFAS compounds
     "pfhxa":                                 "307-24-4",
     "perfluorohexanoic acid":                "307-24-4",
@@ -134,6 +140,8 @@ CHEMICAL_MAP: dict[str, str | None] = {
     "1.2.3-trichlorobenzene":                "87-61-6",
     "1.2.4-trichlorobenzene":                "120-82-1",
     "1.3.5-trichlorobenzene":                "108-70-3",
+    "chlorobenzene":                         "108-90-7",
+    "bromobenzene":                          "108-86-1",
     # Chlorinated toluenes
     "2-chlorotoluene":                       "95-49-8",
     "4-chlorotoluene":                       "106-43-4",
@@ -162,6 +170,11 @@ CHEMICAL_MAP: dict[str, str | None] = {
     "bromochloromethane":                    "74-97-5",
     "bromodichloromethane":                  "75-27-4",
     "dibromochloromethane":                  "124-48-1",
+    "chloromethane":                         "74-87-3",
+    "chloroethane":                          "75-00-3",
+    "bromomethane":                          "74-83-9",
+    "bromoform":                             "75-25-2",
+    "dibromomethane":                        "74-95-3",
     # Chlorinated solvents — IUPAC "-ene" spellings (distinct from "-ylene" entries above)
     "tetrachloroethene":                     "127-18-4",
     "trichloroethene":                       "79-01-6",
@@ -170,6 +183,8 @@ CHEMICAL_MAP: dict[str, str | None] = {
     "tert-amyl methyl ether (tame)":         "994-05-8",
     "tert-amyl ethyl ether (taee)":          "919-94-8",
     "tert-butyl alcohol":                    "75-65-0",
+    "diisopropyl ether (dipe)":              "108-20-3",
+    "1.4-dioxane":                           "123-91-1",
     # Alkylbenzenes / cyclic hydrocarbons
     "indane":                                "496-11-7",
     "tert-butylbenzene":                     "98-06-6",

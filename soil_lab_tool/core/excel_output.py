@@ -54,6 +54,7 @@ from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
 
 from core.threshold_manager import ThresholdManager, ANALYSIS_THRESHOLDS, THRESHOLD_LABELS
+from core.cas_lookup import name_to_cas as _name_to_cas
 
 
 def _is_ind_key(k: str) -> bool:
@@ -617,13 +618,18 @@ class LabReportExcel:
                 unit_map[cmp] = r.get("unit", cfg.get("unit", ""))
             pivot[cmp][sid] = (r.get("value"), r.get("flag", ""), r.get("lod"))
 
-        # Enrich cas_map: for compounds with no CAS from the parser, try a
-        # name-based lookup in the threshold manager's VSL tables.
+        # Enrich cas_map: for compounds with no CAS from the parser, try the
+        # threshold manager's VSL tables first, then fall back to cas_lookup
+        # CHEMICAL_MAP (covers metals and water-specific compounds).
         for cmp in list(cas_map):
             if not cas_map[cmp]:
                 looked_up = self.tm.get_cas_by_name(cmp)
                 if looked_up:
                     cas_map[cmp] = looked_up
+                else:
+                    resolved = _name_to_cas(cmp.strip().lower())
+                    if resolved:
+                        cas_map[cmp] = resolved
 
         # Get thresholds per compound
         thresh_vals: dict[str, dict[str, float | None]] = {}
