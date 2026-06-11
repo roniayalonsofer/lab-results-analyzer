@@ -1,6 +1,6 @@
 # app.py  --  Streamlit UI for the Lab Results Analyzer
 # Run: py -3 -m streamlit run app.py
-import sys, os, io, re, collections, socket, base64
+import sys, os, io, re, collections, socket
 from datetime import date
 
 # ── add soil_lab_tool to path ─────────────────────────────────────
@@ -10,21 +10,30 @@ if TOOL_DIR not in sys.path:
     sys.path.insert(0, TOOL_DIR)
 
 THRESH_DIR = os.path.join(TOOL_DIR, 'thresholds')
+LAB_DIR    = os.path.join(ROOT, 'Laboratory_results')
 
 # ── company logo (base64 embed) ────────────────────────────────────
-def _logo_b64() -> str:
-    for name in ('תמונה1.png', 'logo.png'):
-        logo_path = os.path.join(ROOT, name)
-        if os.path.exists(logo_path):
-            with open(logo_path, 'rb') as f:
-                return base64.b64encode(f.read()).decode()
-    return ""
+import base64, pathlib
+_LOGO_PATH = pathlib.Path(__file__).parent / "assets" / "adama_logo.png"
+if _LOGO_PATH.exists():
+    _LOGO_B64 = base64.b64encode(_LOGO_PATH.read_bytes()).decode()
+    LOGO_TAG = f'<img src="data:image/png;base64,{_LOGO_B64}" style="height:48px;">'
+else:
+    # fallback to legacy logo names
+    def _logo_b64_fallback() -> str:
+        for name in ('תמונה1.png', 'logo.png'):
+            p = os.path.join(ROOT, name)
+            if os.path.exists(p):
+                with open(p, 'rb') as _f:
+                    return base64.b64encode(_f.read()).decode()
+        return ""
+    _LOGO_B64 = _logo_b64_fallback()
+    if _LOGO_B64:
+        LOGO_TAG = f'<img src="data:image/png;base64,{_LOGO_B64}" style="height:48px;">'
+    else:
+        LOGO_TAG = '<span style="font-size:1.4rem;font-weight:800;color:#1e3a4f;">אדמה</span>'
 
-LOGO_B64 = _logo_b64()
-LOGO_TAG = (f'<img src="data:image/png;base64,{LOGO_B64}" '
-            f'style="width:100%;max-width:200px;display:block;">'
-            if LOGO_B64 else '🧪')
-LAB_DIR    = os.path.join(ROOT, 'Laboratory_results')
+LOGO_B64 = _LOGO_B64   # kept for any legacy references
 
 import streamlit as st
 import pandas as pd
@@ -58,16 +67,7 @@ def _pid_norm(name: str) -> str:
 
 
 def _parse_pid_file(uploaded_file) -> dict:
-    """Parse a PID field-data file.
-
-    Returns {normalized_borehole: [(depth_to, pid_value), ...]} — one tuple per
-    data row (rows where PID is N/A / None / empty are skipped; 0 is kept).
-
-    Expected column layout (0-based):
-      col 0 — borehole name (forward-filled from first row of each borehole)
-      col 2 — depth_to [m]
-      col 7 — PID [ppm]
-    """
+    """Parse a PID field-data file."""
     df = pd.read_excel(uploaded_file, header=None)
     df.iloc[:, 0] = df.iloc[:, 0].ffill()
     pid_data: dict = {}
@@ -80,12 +80,10 @@ def _parse_pid_file(uploaded_file) -> dict:
             continue
         entries: list = []
         for _, row in grp.iterrows():
-            # depth_to — column 2
             try:
                 depth_to = float(row.iloc[2])
             except (ValueError, TypeError, IndexError):
                 continue
-            # PID — column 7; skip N/A / None / empty, keep 0
             pid_raw = row.iloc[7] if row.shape[0] > 7 else None
             if pid_raw is None:
                 continue
@@ -103,71 +101,235 @@ def _parse_pid_file(uploaded_file) -> dict:
             pid_data[key] = entries
     return pid_data
 
+
 # ══════════════════════════════════════════════════════════════════
-# CSS — full design system
+# CSS — Adama design system
 # ══════════════════════════════════════════════════════════════════
 st.markdown("""
 <style>
-/* ── fonts + base ── */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-html, body { direction: ltr; font-family: Inter, system-ui, -apple-system, sans-serif; }
-[data-testid="stMain"] { direction: rtl; background: #f8fafc; }
+@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800;900&display=swap');
+
+* { box-sizing: border-box; }
+html, body {
+    direction: rtl;
+    font-family: 'Heebo', sans-serif !important;
+    background: #f0f4f8;
+    margin: 0;
+}
+
+/* Hide Streamlit chrome */
+#MainMenu, footer, header { display: none !important; }
+[data-testid="stToolbar"] { display: none !important; }
+.stDeployButton { display: none !important; }
+
+/* Main container */
+[data-testid="stMain"] {
+    direction: rtl;
+    background: #f0f4f8;
+    padding: 0 !important;
+}
 [data-testid="stMain"] .block-container {
     direction: rtl;
-    padding-top: 0.5rem;
-    max-width: 1200px;
-    padding-left: 2rem;
-    padding-right: 2rem;
+    padding: 0 !important;
+    max-width: 100% !important;
 }
 
-/* ── sidebar ── */
-[data-testid="stSidebar"] {
-    direction: rtl;
-    background: #1e293b;
-    min-width: 15rem !important;
-    max-width: 16rem !important;
-    width: 15.5rem !important;
-    flex-shrink: 0 !important;
-    right: 0; left: auto;
-    transform: none !important;
-    transition: none !important;
-    visibility: visible !important;
-    display: block !important;
-    margin-left: 0 !important;
+/* Top navigation bar */
+.nav-bar {
+    background: #1e3a4f;
+    padding: 0 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 64px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    position: sticky;
+    top: 0;
+    z-index: 999;
 }
-[data-testid="stSidebarContent"] { direction: rtl; }
-[data-testid="stSidebar"][aria-expanded="false"] {
-    transform: none !important;
-    width: 15.5rem !important;
-    min-width: 15rem !important;
-    overflow: visible !important;
+.nav-logo { display: flex; align-items: center; gap: 12px; }
+.nav-links { display: flex; gap: 4px; }
+.nav-link {
+    color: #94b8c8 !important;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-decoration: none;
+    border: none;
+    background: transparent;
 }
-[data-testid="stSidebarCollapseButton"],
-[data-testid="stSidebarNavCollapseButton"],
-[data-testid="collapsedControl"],
-button[aria-label="Close sidebar"],
-button[aria-label="Open sidebar"],
-button[aria-label="פתח סרגל צד"],
-button[aria-label="סגור סרגל צד"] { display: none !important; }
+.nav-link:hover { background: rgba(255,255,255,0.1); color: white !important; }
+.nav-link.active {
+    background: #4a7a8a;
+    color: white !important;
+    font-weight: 600;
+}
 
-[data-testid="stSidebar"] * { color: #e2e8f0 !important; }
-[data-testid="stSidebar"] input { color: #111827 !important; }
-[data-testid="stSidebar"] input::placeholder { color: #6b7280 !important; }
-[data-testid="stSidebar"] [data-baseweb="select"] span,
-[data-testid="stSidebar"] [data-baseweb="select"] div { color: #111827 !important; }
-[data-testid="stSidebar"] .stSelectbox label,
-[data-testid="stSidebar"] .stTextInput label,
-[data-testid="stSidebar"] .stCheckbox label { color: #94a3b8 !important; }
-[data-testid="stSidebar"] .stMarkdown h2,
-[data-testid="stSidebar"] .stMarkdown h3 { color: #f1f5f9 !important; }
-[data-testid="stSidebar"] hr { border-color: #334155; }
+/* Page wrapper */
+.page-wrapper {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 2rem;
+}
 
-/* ── hide Streamlit chrome ── */
-#MainMenu { display: none !important; }
-footer { display: none !important; }
-header { display: none !important; }
+/* Cards */
+.card {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.05);
+    margin-bottom: 1.25rem;
+    border: 1px solid #e8eef3;
+}
+.card-header {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #1e3a4f;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 2px solid #f0f4f8;
+}
 
-/* ── RTL typography ── */
+/* Hero section */
+.hero {
+    background: linear-gradient(135deg, #1e3a4f 0%, #2d5a6e 50%, #4a7a8a 100%);
+    border-radius: 16px;
+    padding: 3rem 2.5rem;
+    color: white;
+    margin-bottom: 2rem;
+}
+.hero h1 { font-size: 2.5rem; font-weight: 900; margin: 0 0 0.5rem; }
+.hero p { font-size: 1.1rem; opacity: 0.85; margin: 0; font-weight: 300; }
+
+/* Stat boxes */
+.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+.stat-box {
+    background: white;
+    border-radius: 12px;
+    padding: 1.25rem;
+    text-align: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    border-top: 3px solid #4a7a8a;
+}
+.stat-number { font-size: 2rem; font-weight: 800; color: #1e3a4f; }
+.stat-label { font-size: 0.85rem; color: #64748b; font-weight: 500; margin-top: 4px; }
+
+/* Step indicator */
+.steps { display: flex; gap: 1rem; margin-bottom: 1.5rem; }
+.step {
+    flex: 1;
+    background: white;
+    border-radius: 12px;
+    padding: 1.25rem;
+    text-align: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    border: 1px solid #e8eef3;
+}
+.step-num {
+    width: 36px; height: 36px;
+    background: #1e3a4f;
+    color: white;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 1rem;
+    margin: 0 auto 0.75rem;
+}
+.step-title { font-weight: 700; color: #1e3a4f; font-size: 0.95rem; }
+.step-desc { font-size: 0.82rem; color: #64748b; margin-top: 4px; }
+
+/* Badge tags */
+.badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin: 2px;
+}
+.badge-blue { background: #dbeafe; color: #1e40af; }
+.badge-green { background: #dcfce7; color: #166534; }
+.badge-gray { background: #f1f5f9; color: #475569; }
+
+/* Upload area */
+.upload-card {
+    border: 2px dashed #cbd5e1;
+    border-radius: 12px;
+    padding: 2rem;
+    text-align: center;
+    background: #f8fafc;
+    transition: all 0.2s;
+}
+.upload-card:hover { border-color: #4a7a8a; background: #f0f7fa; }
+
+/* Download buttons */
+.dl-btn {
+    background: #1e3a4f;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0.75rem 1.5rem;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: background 0.2s;
+}
+.dl-btn:hover { background: #2d5a6e; }
+
+/* Progress bar */
+.progress-wrap {
+    background: #e2e8f0;
+    border-radius: 999px;
+    height: 6px;
+    overflow: hidden;
+    margin: 1rem 0;
+}
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #4a7a8a, #7a9a7a);
+    border-radius: 999px;
+    transition: width 0.4s ease;
+}
+
+/* Table styling */
+.lab-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.lab-table th {
+    background: #1e3a4f;
+    color: white;
+    padding: 10px 14px;
+    text-align: right;
+    font-weight: 600;
+}
+.lab-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid #f1f5f9;
+    color: #374151;
+}
+.lab-table tr:hover td { background: #f8fafc; }
+
+/* Footer */
+.footer {
+    background: #1e3a4f;
+    color: #94b8c8;
+    text-align: center;
+    padding: 1.5rem;
+    font-size: 0.82rem;
+    margin-top: 3rem;
+}
+.footer strong { color: white; }
+
+/* Sidebar hidden on non-soil pages (override per-page below) */
+[data-testid="stSidebar"] { display: none !important; }
+section[data-testid="stSidebar"] { display: none !important; }
+
+/* RTL typography for Streamlit widgets */
 .stMarkdown p, .stMarkdown li,
 .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4 {
     direction: rtl; text-align: right;
@@ -181,54 +343,17 @@ header { display: none !important; }
     direction: rtl; text-align: right;
 }
 
-/* ── top navbar ── */
-.app-navbar {
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    padding: 0.85rem 1.5rem;
-    margin-bottom: 1.25rem;
-    display: flex;
-    align-items: center;
-    direction: rtl;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-}
-.app-navbar-brand {
-    font-size: 1.05rem;
-    font-weight: 700;
-    color: #0f172a;
-    letter-spacing: -0.3px;
-    margin: 0;
-}
-.app-navbar-sub {
-    font-size: 0.78rem;
-    color: #64748b;
-    margin-top: 2px;
-}
-
-/* ── section cards ── */
+/* section-card for soil page */
 .section-card {
     background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
+    border: 1px solid #e2eef3;
+    border-radius: 12px;
     padding: 1.5rem;
-    margin-bottom: 1rem;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    margin: 0 2rem 1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 
-/* ── analysis-type pill badges ── */
-.type-badge {
-    display: inline-block;
-    padding: 3px 10px;
-    border-radius: 999px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    letter-spacing: 0.2px;
-    margin: 2px 3px;
-    color: white;
-}
-
-/* ── banners ── */
+/* banners */
 .info-banner {
     background: #eff6ff;
     border: 1px solid #bfdbfe;
@@ -252,7 +377,19 @@ header { display: none !important; }
     border-right: 3px solid #16a34a;
 }
 
-/* ── sidebar section label ── */
+/* analysis-type pill badges */
+.type-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    margin: 2px 3px;
+    color: white;
+}
+
+/* sidebar label */
 .sidebar-label {
     font-size: 0.65rem;
     font-weight: 700;
@@ -264,7 +401,7 @@ header { display: none !important; }
     border-bottom: 1px solid #334155;
 }
 
-/* ── upload zone ── */
+/* upload zone */
 [data-testid="stFileUploader"] {
     border: 2px dashed #cbd5e1;
     border-radius: 8px;
@@ -273,8 +410,8 @@ header { display: none !important; }
     transition: border-color 0.2s;
 }
 [data-testid="stFileUploader"]:hover {
-    border-color: #3b82f6;
-    background: #eff6ff;
+    border-color: #4a7a8a;
+    background: #f0f7fa;
 }
 [data-testid="stFileUploader"] label {
     font-size: 0.95rem !important;
@@ -282,25 +419,22 @@ header { display: none !important; }
     color: #334155 !important;
 }
 
-/* ── download button ── */
+/* download button */
 .stDownloadButton button {
     width: 100%;
-    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    background: linear-gradient(135deg, #1e3a4f, #2d5a6e);
     color: white;
     font-weight: 700;
     font-size: 0.95rem;
     border-radius: 8px;
     border: none;
     padding: 0.65rem;
-    letter-spacing: 0.3px;
-    box-shadow: 0 1px 3px rgba(59,130,246,0.3);
 }
 .stDownloadButton button:hover {
-    background: linear-gradient(135deg, #2563eb, #1d4ed8);
-    box-shadow: 0 4px 12px rgba(59,130,246,0.4);
+    background: linear-gradient(135deg, #2d5a6e, #4a7a8a);
 }
 
-/* ── metric cards ── */
+/* metric cards */
 [data-testid="metric-container"] {
     background: #ffffff;
     border: 1px solid #e2e8f0;
@@ -310,7 +444,7 @@ header { display: none !important; }
 }
 [data-testid="stMetricValue"] {
     font-size: 1.6rem !important;
-    color: #0f172a !important;
+    color: #1e3a4f !important;
     font-weight: 700 !important;
 }
 [data-testid="stMetricLabel"] {
@@ -318,7 +452,7 @@ header { display: none !important; }
     color: #64748b !important;
 }
 
-/* ── step indicators (kept for compat) ── */
+/* step pills (soil page) */
 .step-row { display: flex; gap: 0.75rem; margin-bottom: 1.25rem; direction: rtl; }
 .step-pill {
     display: flex; align-items: center; gap: 0.4rem;
@@ -326,10 +460,10 @@ header { display: none !important; }
     padding: 0.3rem 0.9rem; font-size: 0.8rem; color: #64748b;
     font-weight: 500; flex: 1; justify-content: center;
 }
-.step-pill.active { background: #eff6ff; border-color: #3b82f6; color: #1d4ed8; font-weight: 700; }
+.step-pill.active { background: #e8f4f8; border-color: #4a7a8a; color: #1e3a4f; font-weight: 700; }
 .step-pill.done { background: #f0fdf4; border-color: #22c55e; color: #15803d; }
 
-/* ── threshold section pill toggles ── */
+/* threshold pill toggles */
 div:has(.thresh-pill-marker) + div [data-testid="stCheckbox"] label {
     display: inline-flex !important;
     align-items: center !important;
@@ -346,15 +480,16 @@ div:has(.thresh-pill-marker) + div [data-testid="stCheckbox"] label {
     user-select: none !important;
 }
 div:has(.thresh-pill-marker) + div [data-testid="stCheckbox"]:has(input:checked) label {
-    background: #eff6ff !important;
-    border-color: #3b82f6 !important;
-    color: #1d4ed8 !important;
+    background: #e8f4f8 !important;
+    border-color: #4a7a8a !important;
+    color: #1e3a4f !important;
 }
 div:has(.thresh-pill-marker) + div [data-testid="stCheckbox"] label svg {
     display: none !important;
 }
 </style>
 """, unsafe_allow_html=True)
+
 
 # ══════════════════════════════════════════════════════════════════
 # LOAD THRESHOLD MANAGER
@@ -372,65 +507,6 @@ def load_threshold_manager(_mtime):
                  else None)
     return ThresholdManager(MAIN_THRESH, pfas_path=pfas_path, vsl_full_path=vsl_full_path)
 
-# ══════════════════════════════════════════════════════════════════
-# SIDEBAR — defined before module imports so it always renders
-# ══════════════════════════════════════════════════════════════════
-with st.sidebar:
-    st.markdown(
-        f'<div style="text-align:center;padding:0.5rem 0 0.75rem;">'
-        f'<div style="background:white;border-radius:2px;padding:0.6rem 0.8rem;'
-        f'margin-bottom:0.5rem;display:inline-block;width:90%;">'
-        f'{LOGO_TAG}</div>'
-        f'<div style="font-size:0.7rem;color:#94a3b8;margin-top:4px;">Lab Results Analyzer</div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown('<hr style="margin:0.5rem 0 1rem;">', unsafe_allow_html=True)
-
-    st.markdown('<div class="sidebar-label">📋 פרטי פרויקט</div>', unsafe_allow_html=True)
-    client_name  = st.text_input("שם לקוח",  value="", label_visibility="collapsed",
-                                  placeholder="שם לקוח (לדוג׳: סונול)")
-    project_name = st.text_input("שם האתר",  value="", label_visibility="collapsed",
-                                  placeholder="שם האתר (לדוג׳: צומת שמשון)")
-
-    st.markdown('<div class="sidebar-label">🏭 מעבדה וקטגוריה</div>', unsafe_allow_html=True)
-    lab = st.selectbox("מעבדה", ["🔍 זיהוי אוטומטי", "KTE", "מכון הנפט", "מכון האנרגיה", "בקטוכם", "Alchem", "ALS", "Aminolab", "RJ Lee", "אלכם (XRF)"],
-                       label_visibility="collapsed")
-    category_display = {
-        "🔍 זיהוי אוטומטי":           "auto",
-        "🪨 קרקע (soil)":             "soil",
-        "💧 מי תהום (groundwater)":   "groundwater",
-        "🧬 PFAS":                    "pfas",
-        "📊 PR format (KTE מתכות)":   "pr",
-        "💨 גז קרקע (soil_gas)":      "soil_gas",
-        "🪨 גרנולומטריה (grain_size)": "grain_size",
-    }
-    cat_label    = st.selectbox("קטגוריה", list(category_display.keys()),
-                                label_visibility="collapsed")
-    category_raw = category_display[cat_label]
-
-    st.markdown('<hr style="margin:1rem 0 0.5rem;">', unsafe_allow_html=True)
-
-# ══════════════════════════════════════════════════════════════════
-# HERO HEADER — defined before module imports so it always renders
-# ══════════════════════════════════════════════════════════════════
-_nav_logo = (
-    f'<img src="data:image/png;base64,{LOGO_B64}" style="height:34px;display:block;">'
-    if LOGO_B64 else '<span style="font-size:1.3rem;line-height:1;">🧪</span>'
-)
-st.html(f"""
-<div class="app-navbar">
-  <div style="display:flex;align-items:center;gap:0.75rem;">
-    <div style="background:#f1f5f9;border-radius:6px;padding:0.3rem 0.55rem;line-height:0;">
-      {_nav_logo}
-    </div>
-    <div>
-      <div class="app-navbar-brand">מערכת ניתוח תוצאות מעבדה — אדמה</div>
-      <div class="app-navbar-sub">העלה קובץ · בחר ערכי סף · הורד דוח</div>
-    </div>
-  </div>
-</div>
-""")
 
 # ══════════════════════════════════════════════════════════════════
 # MODULE IMPORTS
@@ -448,8 +524,9 @@ except Exception as e:
     st.error(f"שגיאת טעינת מודולים: {e}")
     st.stop()
 
+
 # ══════════════════════════════════════════════════════════════════
-# STEP INDICATOR (used by Excel tab)
+# HELPER FUNCTIONS
 # ══════════════════════════════════════════════════════════════════
 def _build_pivot_table(recs):
     """Build a compound × sample_id pivot DataFrame for preview."""
@@ -493,12 +570,7 @@ _PREVIEW_LEGEND = (
 
 
 def _build_styled_pivot(recs: list[dict], tm, selected_thresholds: list[str]):
-    """Return (Styler, has_any_color) for a compound × sample_id pivot.
-
-    Yellow (#FFFF00) = value exceeds the selected VSL threshold.
-    Orange (#FFC000) = value exceeds a selected Tier-1 threshold (takes
-                       priority over yellow when both are exceeded).
-    """
+    """Return (Styler, has_any_color) for a compound × sample_id pivot."""
     if not recs:
         return pd.DataFrame().style, False
 
@@ -533,7 +605,6 @@ def _build_styled_pivot(recs: list[dict], tm, selected_thresholds: list[str]):
     except Exception:
         return pd.DataFrame(rows_d).style, False
 
-    # VSL keys → yellow; everything else (Tier1, GW, GAS_*) → orange
     vsl_keys   = [k for k in selected_thresholds if 'VSL' in k]
     tier1_keys = [k for k in selected_thresholds if k not in vsl_keys]
     has_colors = bool((vsl_keys or tier1_keys) and tm is not None)
@@ -552,7 +623,6 @@ def _build_styled_pivot(recs: list[dict], tm, selected_thresholds: list[str]):
                 except (TypeError, ValueError, KeyError):
                     continue
 
-                # Orange: any Tier-1 key exceeded (checked first — higher priority)
                 for tk in tier1_keys:
                     thresh = tm.get_threshold_with_name(cas, tk, compound)
                     if thresh is not None and num_val > thresh:
@@ -562,7 +632,6 @@ def _build_styled_pivot(recs: list[dict], tm, selected_thresholds: list[str]):
                 if colors.loc[compound, sample]:
                     continue
 
-                # Yellow: any VSL key exceeded
                 for vk in vsl_keys:
                     thresh = tm.get_threshold_with_name(cas, vk, compound)
                     if thresh is not None and num_val > thresh:
@@ -581,6 +650,7 @@ def _steps(step: int):
         icon = "✅ " if i < step else ""
         pills += f'<div class="step-pill {cls}">{icon}{lbl}</div>'
     st.markdown(f'<div class="step-row">{pills}</div>', unsafe_allow_html=True)
+
 
 _PREV_LABELS = {
     "SOIL_VOC": "VOC", "SOIL_SVOC": "SVOC", "SOIL_TPH": "TPH",
@@ -624,7 +694,6 @@ def _preview_dialog(records, tm, project_name, client_name, rep_date,
         with tab:
             ws = wb[sname]
 
-            # Propagate merged-cell values so every cell has a value
             for mr in list(ws.merged_cells.ranges):
                 top_val  = ws.cell(mr.min_row, mr.min_col).value
                 ws.unmerge_cells(str(mr))
@@ -645,31 +714,27 @@ def _preview_dialog(records, tm, project_name, client_name, rep_date,
                     v = cell.value
                     row_vals.append("" if v is None else
                                     (v if isinstance(v, (int, float)) else str(v)))
-                    # Extract solid fill colour → CSS background
                     css_bg = ""
                     try:
                         f = cell.fill
                         if getattr(f, 'fill_type', None) == "solid":
                             fc = getattr(f, 'fgColor', None)
                             if fc and getattr(fc, 'type', None) == 'rgb':
-                                rgb = fc.rgb          # 8-char ARGB
+                                rgb = fc.rgb
                                 hx = rgb[2:] if len(rgb) == 8 else rgb
                                 if hx.upper() not in ("FFFFFF", "000000", "00000000"):
                                     css_bg = f"background-color: #{hx}; color: #000;"
                     except Exception:
                         pass
                     row_css.append(css_bg)
-                # pad to uniform width
                 pad = n_cols - len(row_vals)
                 row_vals += [""] * pad
                 row_css  += [""] * pad
                 data_list.append(row_vals)
                 css_list.append(row_css)
 
-            # Build DataFrame (all rows as data; integer column labels)
             df = pd.DataFrame(data_list, columns=list(range(n_cols)))
 
-            # Build matching style DataFrame
             n_dr, n_dc = len(df), len(df.columns)
             padded = []
             for ri in range(n_dr):
@@ -685,185 +750,280 @@ def _preview_dialog(records, tm, project_name, client_name, rep_date,
 
 
 # ══════════════════════════════════════════════════════════════════
-# EXCEL EXPORT FLOW
+# ROUTING
 # ══════════════════════════════════════════════════════════════════
-if False:
-    st.markdown("#### 📄 יצוא דוח Word מקובץ ALS")
-    st.caption("העלה קבצי ALS מהמעבדה, בחר ערכי סף והורד דוח Word מעוצב")
-    st.markdown("---")
+page = st.query_params.get("page", "home")
 
-    # ── Threshold settings ────────────────────────────────────────
-    st.markdown("##### ⚙️ הגדרות ערכי סף")
-    wc1, wc2, wc3, wc4 = st.columns([2, 2, 2, 2])
-    with wc1:
-        w_thresh_file = st.file_uploader(
-            "📂 קובץ ערכי סף (Excel)",
-            type=["xlsx", "xls"],
-            key="w_thresh",
-            help="קובץ Excel עם ערכי VSL ו-TIER 1",
-        )
-    with wc2:
-        w_land = st.selectbox("Land Use", ["Industrial", "Residential"], key="w_land")
-    with wc3:
-        w_aquifer = st.selectbox(
-            "Aquifer Sensitivity", ["A-1, A, B", "B-1 or C"], key="w_aquifer"
-        )
-    with wc4:
-        _w_depth_opts = ["Not Applicable"] if "b-1" in w_aquifer.lower() else ["0 - 6 m", ">6 m"]
-        w_depth = st.selectbox("Depth to GW", _w_depth_opts, key="w_depth")
 
-    w_t1col = get_tier1_col(w_land, w_aquifer, w_depth)
-    w_t1lbl = tier1_label(w_land, w_aquifer, w_depth)
-    st.caption(f"📌 TIER 1: **{w_land}** | {w_aquifer} | {w_depth}")
-
-    st.markdown("---")
-
-    # ── ALS file upload ───────────────────────────────────────────
-    st.markdown("##### 📤 קבצי ALS")
-    w_files = st.file_uploader(
-        "העלה קבצי ALS (Excel)",
-        type=["xlsx", "xls"],
-        accept_multiple_files=True,
-        key="w_als",
+# ── Navigation bar HTML ──────────────────────────────────────────
+def _nav_html(active: str) -> str:
+    _pages = [
+        ("home",        "🏠 דף בית"),
+        ("soil",        "🪨 ניתוח קרקע"),
+        ("groundwater", "💧 מי תהום"),
+        ("guide",       "📖 מדריך"),
+    ]
+    links = "".join(
+        f'<a class="nav-link{" active" if p == active else ""}" href="?page={p}">{lbl}</a>'
+        for p, lbl in _pages
+    )
+    return (
+        f'<div class="nav-bar">'
+        f'<div class="nav-logo">{LOGO_TAG}'
+        f'<span style="color:white;font-size:0.8rem;opacity:0.7;">מערכת ניתוח תוצאות</span>'
+        f'</div>'
+        f'<div class="nav-links">{links}</div>'
+        f'</div>'
     )
 
-    st.markdown("---")
 
-    # ── Table options (4 columns) ─────────────────────────────────
-    st.markdown("##### 📋 הגדרות טבלאות")
-    tcol1, tcol2, tcol3, tcol4 = st.columns(4)
+_FOOTER = (
+    '<div class="footer"><strong>אדמה אפיון ושיקום אתרים בע"מ</strong>'
+    ' · מערכת ניתוח תוצאות מעבדה · גרסה 2.0</div>'
+)
 
-    with tcol1:
-        with st.expander("🛢️ TPH", expanded=True):
-            w_tph_inc   = st.checkbox("כלול בדוח", value=True,  key="w_tph_inc")
-            w_tph_title = st.text_input("כותרת", value="טבלה 1 – TPH",     key="w_tph_title")
-            w_tph_page  = st.selectbox("גודל דף", ["A4", "Tabloid"],        key="w_tph_page")
-            w_tph_land  = st.selectbox("כיוון", ["לרוחב", "לאורך"],        key="w_tph_orient") == "לרוחב"
+# ══════════════════════════════════════════════════════════════════
+# SIDEBAR — soil page only
+# ══════════════════════════════════════════════════════════════════
+if page == "soil":
+    # Un-hide sidebar for soil page (overrides global "display:none")
+    st.markdown(
+        '<style>[data-testid="stSidebar"],'
+        'section[data-testid="stSidebar"]{'
+        'display:flex!important;'
+        'background:#1e293b;'
+        'min-width:15rem!important;max-width:16rem!important;width:15.5rem!important;'
+        'flex-shrink:0!important;}'
+        '[data-testid="stSidebarContent"]{direction:rtl;}'
+        '[data-testid="stSidebar"] *{color:#e2e8f0!important;}'
+        '[data-testid="stSidebar"] input{color:#111827!important;}'
+        '[data-testid="stSidebar"] [data-baseweb="select"] span,'
+        '[data-testid="stSidebar"] [data-baseweb="select"] div{color:#111827!important;}'
+        '[data-testid="stSidebar"] .stSelectbox label,'
+        '[data-testid="stSidebar"] .stTextInput label,'
+        '[data-testid="stSidebar"] .stCheckbox label{color:#94a3b8!important;}'
+        '[data-testid="stSidebarCollapseButton"],'
+        '[data-testid="stSidebarNavCollapseButton"],'
+        '[data-testid="collapsedControl"],'
+        'button[aria-label="Close sidebar"],'
+        'button[aria-label="Open sidebar"],'
+        'button[aria-label="פתח סרגל צד"],'
+        'button[aria-label="סגור סרגל צד"]{display:none!important;}'
+        '</style>',
+        unsafe_allow_html=True,
+    )
 
-    with tcol2:
-        with st.expander("⚗️ Metals", expanded=True):
-            w_met_inc   = st.checkbox("כלול בדוח", value=True,  key="w_met_inc")
-            w_met_title = st.text_input("כותרת", value="טבלה 2 – מתכות",   key="w_met_title")
-            w_met_page  = st.selectbox("גודל דף", ["A4", "Tabloid"],        key="w_met_page")
-            w_met_land  = st.selectbox("כיוון", ["לרוחב", "לאורך"],        key="w_met_orient") == "לרוחב"
+    _nav_logo_small = (
+        f'<img src="data:image/png;base64,{LOGO_B64}" style="height:34px;display:block;">'
+        if LOGO_B64 else '<span style="font-size:1.3rem;">🧪</span>'
+    )
 
-    with tcol3:
-        with st.expander("🧪 VOC+SVOC", expanded=True):
-            w_voc_inc   = st.checkbox("כלול בדוח", value=True,  key="w_voc_inc")
-            w_voc_title = st.text_input("כותרת", value="טבלה 3 – VOC+SVOC", key="w_voc_title")
-            w_voc_page  = st.selectbox("גודל דף", ["A4", "Tabloid"],         key="w_voc_page")
-            w_voc_land  = st.selectbox("כיוון", ["לרוחב", "לאורך"],         key="w_voc_orient") == "לרוחב"
-
-    with tcol4:
-        with st.expander("🔬 PFAS", expanded=True):
-            w_pfas_inc   = st.checkbox("כלול בדוח", value=True,  key="w_pfas_inc")
-            w_pfas_title = st.text_input("כותרת", value="טבלה 4 – PFAS",   key="w_pfas_title")
-            w_pfas_page  = st.selectbox("גודל דף", ["A4", "Tabloid"],       key="w_pfas_page")
-            w_pfas_land  = st.selectbox("כיוון", ["לרוחב", "לאורך"],       key="w_pfas_orient") == "לרוחב"
-
-    st.markdown("---")
-
-    # ── Generate button ───────────────────────────────────────────
-    _w_ready = bool(w_files and w_thresh_file)
-    if not w_files:
-        st.info("👆 העלה קבצי ALS כדי להתחיל")
-    elif not w_thresh_file:
-        st.info("👆 העלה קובץ ערכי סף כדי לצור את הדוח")
-
-    if _w_ready:
-        if st.button("📄 צור דוח Word", type="primary",
-                     use_container_width=True, key="w_gen"):
-            with st.spinner("⏳ בונה דוח..."):
-                try:
-                    _thresh_dict = load_threshold_file(w_thresh_file.read())
-
-                    _all_dfs: dict = {"TPH": [], "Metals": [], "VOC+SVOC": [], "PFAS": []}
-                    _w_errors = []
-                    for _wf in w_files:
-                        _df, _err = parse_als_file(_wf.read(), _wf.name)
-                        if _err:
-                            _w_errors.append(f"{_wf.name}: {_err}")
-                        elif _df is not None and not _df.empty:
-                            _grp = _df["group"].str.upper().str.strip()
-                            if _grp.str.contains("PFAS", na=False).any():
-                                _all_dfs["PFAS"].append(
-                                    _df[_grp.str.contains("PFAS", na=False)]
-                                )
-                            if _grp.str.contains("VOC|SVOC|BTEX", na=False).any():
-                                _all_dfs["VOC+SVOC"].append(
-                                    _df[_grp.str.contains("VOC|SVOC|BTEX", na=False)]
-                                )
-                            if _grp.str.contains(
-                                "METAL|INORGANIC|ICP|ELEMENT", na=False
-                            ).any():
-                                _all_dfs["Metals"].append(
-                                    _df[_grp.str.contains(
-                                        "METAL|INORGANIC|ICP|ELEMENT", na=False
-                                    )]
-                                )
-                            if _grp.str.contains(
-                                "TPH|PETROLEUM|HYDROCARBON|DRO|ORO", na=False
-                            ).any():
-                                _all_dfs["TPH"].append(
-                                    _df[_grp.str.contains(
-                                        "TPH|PETROLEUM|HYDROCARBON|DRO|ORO", na=False
-                                    )]
-                                )
-
-                    for _e in _w_errors:
-                        st.warning(f"⚠️ {_e}")
-
-                    _merged = {
-                        k: pd.concat(v, ignore_index=True) if v else None
-                        for k, v in _all_dfs.items()
-                    }
-
-                    _table_cfgs = []
-                    if w_tph_inc and _merged.get("TPH") is not None and not _merged["TPH"].empty:
-                        _table_cfgs.append({"type": "TPH",      "df": _merged["TPH"],
-                                            "title": w_tph_title,  "page_size": w_tph_page,
-                                            "landscape": w_tph_land})
-                    if w_met_inc and _merged.get("Metals") is not None and not _merged["Metals"].empty:
-                        _table_cfgs.append({"type": "Metals",   "df": _merged["Metals"],
-                                            "title": w_met_title,  "page_size": w_met_page,
-                                            "landscape": w_met_land})
-                    if w_voc_inc and _merged.get("VOC+SVOC") is not None and not _merged["VOC+SVOC"].empty:
-                        _table_cfgs.append({"type": "VOC+SVOC", "df": _merged["VOC+SVOC"],
-                                            "title": w_voc_title,  "page_size": w_voc_page,
-                                            "landscape": w_voc_land})
-                    if w_pfas_inc and _merged.get("PFAS") is not None and not _merged["PFAS"].empty:
-                        _table_cfgs.append({"type": "PFAS",     "df": _merged["PFAS"],
-                                            "title": w_pfas_title, "page_size": w_pfas_page,
-                                            "landscape": w_pfas_land})
-
-                    if not _table_cfgs:
-                        st.warning("⚠️ לא נמצאו נתונים מסווגים בקבצים שהועלו")
-                    else:
-                        _docx_bytes = build_word_report(
-                            _table_cfgs, _thresh_dict, w_t1col, w_t1lbl
-                        )
-                        st.session_state["w_docx_bytes"] = _docx_bytes
-                        st.success(f"✅ הדוח נוצר — {len(_table_cfgs)} טבלאות")
-
-                except Exception as _ex:
-                    st.error(f"❌ שגיאה: {_ex}")
-                    import traceback
-                    st.code(traceback.format_exc())
-
-    if st.session_state.get("w_docx_bytes"):
-        st.download_button(
-            "⬇️ הורד דוח Word",
-            data=st.session_state["w_docx_bytes"],
-            file_name="word_report.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            use_container_width=True,
-            key="w_dl",
+    with st.sidebar:
+        st.markdown(
+            f'<div style="text-align:center;padding:0.5rem 0 0.75rem;">'
+            f'<div style="background:white;border-radius:2px;padding:0.6rem 0.8rem;'
+            f'margin-bottom:0.5rem;display:inline-block;width:90%;">'
+            f'{_nav_logo_small}</div>'
+            f'<div style="font-size:0.7rem;color:#94a3b8;margin-top:4px;">Lab Results Analyzer</div>'
+            f'</div>',
+            unsafe_allow_html=True,
         )
+        st.markdown('<hr style="margin:0.5rem 0 1rem;">', unsafe_allow_html=True)
+
+        st.markdown('<div class="sidebar-label">📋 פרטי פרויקט</div>', unsafe_allow_html=True)
+        client_name  = st.text_input("שם לקוח",  value="", label_visibility="collapsed",
+                                      placeholder="שם לקוח (לדוג׳: סונול)")
+        project_name = st.text_input("שם האתר",  value="", label_visibility="collapsed",
+                                      placeholder="שם האתר (לדוג׳: צומת שמשון)")
+
+        st.markdown('<div class="sidebar-label">🏭 מעבדה וקטגוריה</div>', unsafe_allow_html=True)
+        lab = st.selectbox(
+            "מעבדה",
+            ["🔍 זיהוי אוטומטי", "KTE", "מכון הנפט", "מכון האנרגיה", "בקטוכם",
+             "Alchem", "ALS", "Aminolab", "RJ Lee", "אלכם (XRF)"],
+            label_visibility="collapsed",
+        )
+        category_display = {
+            "🔍 זיהוי אוטומטי":           "auto",
+            "🪨 קרקע (soil)":             "soil",
+            "💧 מי תהום (groundwater)":   "groundwater",
+            "🧬 PFAS":                    "pfas",
+            "📊 PR format (KTE מתכות)":   "pr",
+            "💨 גז קרקע (soil_gas)":      "soil_gas",
+            "🪨 גרנולומטריה (grain_size)": "grain_size",
+        }
+        cat_label    = st.selectbox("קטגוריה", list(category_display.keys()),
+                                    label_visibility="collapsed")
+        category_raw = category_display[cat_label]
+
+        st.markdown('<hr style="margin:1rem 0 0.5rem;">', unsafe_allow_html=True)
+
 
 # ══════════════════════════════════════════════════════════════════
-# UPLOAD
+# HOME PAGE
 # ══════════════════════════════════════════════════════════════════
-if True:
+if page == "home":
+    st.markdown(_nav_html("home"), unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="page-wrapper">'
+        f'<div class="hero">'
+        f'<h1>🧪 מערכת ניתוח תוצאות מעבדה</h1>'
+        f'<p>פלטפורמה מתקדמת לניתוח אוטומטי של דוחות מעבדה סביבתיים — קרקע ומי תהום</p>'
+        f'</div>'
+        f'<div class="stat-grid">'
+        f'<div class="stat-box"><div class="stat-number">9</div><div class="stat-label">מעבדות נתמכות</div></div>'
+        f'<div class="stat-box"><div class="stat-number">VSL</div><div class="stat-label">ו-TIER1 אוטומטי</div></div>'
+        f'<div class="stat-box"><div class="stat-number">Excel</div><div class="stat-label">פלט מקצועי</div></div>'
+        f'</div>'
+        f'<div class="steps">'
+        f'<div class="step"><div class="step-num">1</div><div class="step-title">העלאת קבצים</div><div class="step-desc">PDF, Excel או CSV מהמעבדה</div></div>'
+        f'<div class="step"><div class="step-num">2</div><div class="step-title">עיבוד אוטומטי</div><div class="step-desc">זיהוי מעבדה, תרכובות וערכי סף</div></div>'
+        f'<div class="step"><div class="step-num">3</div><div class="step-title">הורדת דוח</div><div class="step-desc">Excel מקצועי עם צביעה אוטומטית</div></div>'
+        f'</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🪨 התחל ניתוח קרקע", use_container_width=True, type="primary"):
+            st.query_params["page"] = "soil"
+            st.rerun()
+    with col2:
+        if st.button("💧 התחל ניתוח מי תהום", use_container_width=True):
+            st.query_params["page"] = "groundwater"
+            st.rerun()
+
+    st.markdown(_FOOTER, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════
+# GROUNDWATER PAGE (placeholder)
+# ══════════════════════════════════════════════════════════════════
+elif page == "groundwater":
+    st.markdown(_nav_html("groundwater"), unsafe_allow_html=True)
+    st.markdown(
+        '<div class="page-wrapper">'
+        '<div class="card">'
+        '<div class="card-header">💧 ניתוח מי תהום</div>'
+        '<p style="color:#64748b;font-size:1.05rem;">עמוד זה בפיתוח — בקרוב!</p>'
+        '<p style="color:#94a3b8;font-size:0.9rem;">בינתיים ניתן לנתח קבצי מי תהום דרך עמוד ניתוח הקרקע — '
+        'בחר קטגוריה <strong>מי תהום (groundwater)</strong> בסרגל הצד.</p>'
+        '</div></div>',
+        unsafe_allow_html=True,
+    )
+    if st.button("← עבור לניתוח קרקע"):
+        st.query_params["page"] = "soil"
+        st.rerun()
+    st.markdown(_FOOTER, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════
+# GUIDE PAGE
+# ══════════════════════════════════════════════════════════════════
+elif page == "guide":
+    st.markdown(_nav_html("guide"), unsafe_allow_html=True)
+    st.markdown(
+        '<div class="page-wrapper">'
+        '<div class="hero" style="padding:2rem 2.5rem;">'
+        '<h1 style="font-size:2rem;">📖 מדריך למשתמש</h1>'
+        '<p>כל מה שצריך לדעת לניתוח תוצאות מעבדה סביבתיות</p>'
+        '</div>'
+
+        '<div class="card">'
+        '<div class="card-header">🚀 שלבי השימוש במערכת</div>'
+        '<div class="steps">'
+        '<div class="step">'
+        '<div class="step-num">1</div>'
+        '<div class="step-title">בחר מעבדה</div>'
+        '<div class="step-desc">בחר מתוך הרשימה או השתמש בזיהוי אוטומטי</div>'
+        '</div>'
+        '<div class="step">'
+        '<div class="step-num">2</div>'
+        '<div class="step-title">העלה קובץ</div>'
+        '<div class="step-desc">PDF, Excel (XLSX/XLS) או CSV</div>'
+        '</div>'
+        '<div class="step">'
+        '<div class="step-num">3</div>'
+        '<div class="step-title">בחר ערכי סף</div>'
+        '<div class="step-desc">VSL, TIER1, GW לפי סוג האתר</div>'
+        '</div>'
+        '<div class="step">'
+        '<div class="step-num">4</div>'
+        '<div class="step-title">הורד דוח</div>'
+        '<div class="step-desc">Excel + Word עם צביעה אוטומטית</div>'
+        '</div>'
+        '</div>'
+        '</div>'
+
+        '<div class="card">'
+        '<div class="card-header">🏭 מעבדות נתמכות</div>'
+        '<table class="lab-table">'
+        '<thead><tr>'
+        '<th>מעבדה</th>'
+        '<th>פורמטים נתמכים</th>'
+        '<th>סוגי ניתוח</th>'
+        '</tr></thead>'
+        '<tbody>'
+        '<tr><td><strong>Alchem</strong></td>'
+        '<td><span class="badge badge-blue">Excel</span><span class="badge badge-green">PDF</span></td>'
+        '<td>קרקע, VOC, SVOC, TPH, מתכות, גז קרקע</td></tr>'
+        '<tr><td><strong>KTE</strong></td>'
+        '<td><span class="badge badge-blue">Excel</span><span class="badge badge-gray">XML</span></td>'
+        '<td>קרקע, מי תהום, גז קרקע, PFAS</td></tr>'
+        '<tr><td><strong>מכון הנפט</strong></td>'
+        '<td><span class="badge badge-blue">Excel</span></td>'
+        '<td>קרקע (VOC, SVOC, מתכות)</td></tr>'
+        '<tr><td><strong>מכון האנרגיה</strong></td>'
+        '<td><span class="badge badge-blue">Excel</span></td>'
+        '<td>קרקע, גז קרקע</td></tr>'
+        '<tr><td><strong>בקטוכם</strong></td>'
+        '<td><span class="badge badge-green">PDF</span><span class="badge badge-gray">CSV</span></td>'
+        '<td>קרקע (SVOC, ICP, TPH), מי תהום</td></tr>'
+        '<tr><td><strong>ALS</strong></td>'
+        '<td><span class="badge badge-blue">Excel</span><span class="badge badge-green">PDF</span></td>'
+        '<td>קרקע, מי תהום, גרנולומטריה</td></tr>'
+        '<tr><td><strong>Aminolab</strong></td>'
+        '<td><span class="badge badge-green">PDF</span></td>'
+        '<td>מי תהום</td></tr>'
+        '<tr><td><strong>RJ Lee</strong></td>'
+        '<td><span class="badge badge-blue">Excel</span></td>'
+        '<td>PFAS (Method 1633)</td></tr>'
+        '<tr><td><strong>XRF (אלכם)</strong></td>'
+        '<td><span class="badge badge-blue">Excel</span><span class="badge badge-gray">CSV</span></td>'
+        '<td>קרקע — ניתוח מתכות XRF</td></tr>'
+        '</tbody></table>'
+        '</div>'
+
+        '<div class="card">'
+        '<div class="card-header">🎨 מפתח צבעים בדוח Excel</div>'
+        '<table class="lab-table">'
+        '<thead><tr><th>צבע</th><th>משמעות</th></tr></thead>'
+        '<tbody>'
+        '<tr><td><span style="background:#FFFF00;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">צהוב</span></td>'
+        '<td>ערך עולה על ערך ה-VSL (Soil Screening Value)</td></tr>'
+        '<tr><td><span style="background:#FFC000;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">כתום</span></td>'
+        '<td>ערך עולה על ערך TIER 1 (Risk-Based Threshold Level)</td></tr>'
+        '<tr><td><span style="background:#BDD7EE;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">כחול</span></td>'
+        '<td>ערך מתחת לגבול הכימות (LOQ / MRL)</td></tr>'
+        '<tr><td><span style="background:#E2EFDA;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">ירוק</span></td>'
+        '<td>כותרת ערך סף</td></tr>'
+        '</tbody></table>'
+        '</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(_FOOTER, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════
+# SOIL PAGE — existing analysis logic
+# ══════════════════════════════════════════════════════════════════
+elif page == "soil":
+    # nav bar
+    st.markdown(_nav_html("soil"), unsafe_allow_html=True)
+
+    # ── UPLOAD ────────────────────────────────────────────────────
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
 
     col_up, col_meta = st.columns([3, 1])
@@ -878,7 +1038,6 @@ if True:
         )
 
     with col_meta:
-        # Detect lab early if auto-detect mode and files are already available
         _display_lab = lab
         if uploaded_files and lab == "🔍 זיהוי אוטומטי":
             try:
@@ -896,7 +1055,7 @@ if True:
                     padding:0.9rem 1rem;margin-top:1.75rem;text-align:center;">
           <div style="font-size:0.65rem;color:#94a3b8;font-weight:700;letter-spacing:0.8px;
                       text-transform:uppercase;margin-bottom:4px;">מעבדה</div>
-          <div style="font-size:1.2rem;font-weight:800;color:#2d4a5a;">{_display_lab}</div>
+          <div style="font-size:1.2rem;font-weight:800;color:#1e3a4f;">{_display_lab}</div>
           <div style="font-size:0.7rem;color:#64748b;margin-top:4px;">{cat_clean}</div>
         </div>
         """, unsafe_allow_html=True)
@@ -922,15 +1081,14 @@ if True:
 
     if not uploaded_files:
         st.markdown("""
-        <div class="info-banner">
+        <div class="info-banner" style="margin:0 2rem;">
           ℹ️ העלה קובץ דוח מעבדה כדי להתחיל — המערכת תזהה אוטומטית את סוג הניתוח
         </div>
         """, unsafe_allow_html=True)
+        st.markdown(_FOOTER, unsafe_allow_html=True)
         st.stop()
 
-    # ══════════════════════════════════════════════════════════════
-    # PARSE
-    # ══════════════════════════════════════════════════════════════
+    # ── PARSE ─────────────────────────────────────────────────────
     all_raw: list[tuple[str, bytes]] = [(uf.name, uf.read()) for uf in uploaded_files]
     fname     = " | ".join(f for f, _ in all_raw)
     raw_bytes = all_raw[0][1]
@@ -978,9 +1136,6 @@ if True:
     file_summaries: list[dict] = []
     n_files = len(all_raw)
 
-    # Separate companion PDFs from Excel/CSV data files.
-    # Collect bytes from ALL uploaded PDFs so every Lab ID → borehole
-    # mapping is available regardless of how many PDFs were uploaded.
     _pdf_raws    = [b for n, b in all_raw if n.lower().endswith(".pdf")]
     _data_files  = [(n, b) for n, b in all_raw if not n.lower().endswith(".pdf")]
     _parse_files = _data_files if _data_files else all_raw
@@ -1001,8 +1156,12 @@ if True:
     records = all_records
 
     if not records:
-        st.markdown('<div class="info-banner">⚠️ לא נמצאו רשומות — בדוק פורמט הקובץ ובחירת מעבדה / קטגוריה</div>',
-                    unsafe_allow_html=True)
+        st.markdown(
+            '<div class="info-banner" style="margin:0 2rem;">'
+            '⚠️ לא נמצאו רשומות — בדוק פורמט הקובץ ובחירת מעבדה / קטגוריה'
+            '</div>',
+            unsafe_allow_html=True,
+        )
         st.stop()
 
     # ── stats ─────────────────────────────────────────────────────
@@ -1013,22 +1172,19 @@ if True:
     samples  = sorted(set(r['sample_id'] for r in records))
     detected = [r for r in records if r.get('flag') not in ('ND', '<LOD') and r.get('value') is not None]
 
-    # success line
     st.markdown(f"""
-    <div class="success-banner">
+    <div class="success-banner" style="margin:0 2rem 0.5rem;">
       ✅ {cat_info} &nbsp;|&nbsp; Parser: <code>{type(parser).__name__}</code>
       {"&nbsp;|&nbsp; " + " ".join(f'<b>{s["name"]}</b>: {s["records"]} רשומות' for s in file_summaries) if n_files > 1 else ""}
     </div>
     """, unsafe_allow_html=True)
 
-    # metric cards
-    c1, c2, c3, c4 = st.columns(4)
-    with c1: st.metric("סה\"כ רשומות",  f"{len(records):,}")
-    with c2: st.metric("ערכים מזוהים",  f"{len(detected):,}")
-    with c3: st.metric("דגימות",        f"{len(samples):,}")
-    with c4: st.metric("סוגי ניתוח",   f"{len(by_type):,}")
+    _mc1, _mc2, _mc3, _mc4 = st.columns(4)
+    with _mc1: st.metric("סה\"כ רשומות",  f"{len(records):,}")
+    with _mc2: st.metric("ערכים מזוהים",  f"{len(detected):,}")
+    with _mc3: st.metric("דגימות",        f"{len(samples):,}")
+    with _mc4: st.metric("סוגי ניתוח",   f"{len(by_type):,}")
 
-    # analysis-type badges
     BADGE_COLORS = {
         "SOIL_GAS_VOC": "#7c3aed", "SOIL_VOC":    "#0d9488",
         "SOIL_TPH":     "#0891b2", "SOIL_MBTEX":  "#0f766e",
@@ -1051,11 +1207,9 @@ if True:
         f'{_TYPE_LABELS.get(t, t)}</span>'
         for t in by_type
     )
-    st.markdown(f'<div style="margin:0.5rem 0;">{badges}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="margin:0.5rem 2rem;">{badges}</div>', unsafe_allow_html=True)
 
-    # ══════════════════════════════════════════════════════════════
-    # THRESHOLD SELECTION
-    # ══════════════════════════════════════════════════════════════
+    # ── THRESHOLD SELECTION ───────────────────────────────────────
     found_atypes  = list(by_type.keys())
     has_soil      = (any(t in found_atypes for t in ("SOIL_VOC","SOIL_TPH","SOIL_METALS","SOIL_MBTEX","SOIL_SVOC","XRF"))
                      or category in ("soil", "soil_pdf"))
@@ -1095,12 +1249,9 @@ if True:
 
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
 
-    # ── Soil ─────────────────────────────────────────────────────
     if has_soil:
         any_shown = True
         st.markdown("##### 🪨 קרקע")
-
-        # Pill toggle row — marker span used as CSS sibling anchor
         st.markdown('<span class="thresh-pill-marker"></span>', unsafe_allow_html=True)
         tog1, tog2, _tog_rest = st.columns([1, 1, 4])
         with tog1:
@@ -1108,7 +1259,6 @@ if True:
         with tog2:
             use_tier1 = st.checkbox("🏗️ TIER1", value=True, key="tier1_cb")
 
-        # TIER1 sub-selectors — shown only when toggle is active
         if use_tier1:
             sub1, sub2 = st.columns(2)
             with sub1:
@@ -1128,7 +1278,6 @@ if True:
                     key="tier1_sens", label_visibility="collapsed",
                 )
 
-        # Collect thresholds
         if use_vsl:
             selected_thresholds.append("VSL_SOIL")
         if use_tier1:
@@ -1143,7 +1292,6 @@ if True:
             if k:
                 selected_thresholds.append(k)
 
-    # ── Soil PFAS ─────────────────────────────────────────────────
     if has_soil_pfas:
         any_shown = True
         st.markdown("##### 🧬 קרקע PFAS")
@@ -1178,7 +1326,6 @@ if True:
         k = _pfas_tier1_key("ind", _PFAS_SENS_MAP.get(pfas_sens_ind), pfas_depth_ind)
         if k: selected_thresholds.append(k)
 
-    # ── Soil gas ──────────────────────────────────────────────────
     if has_soil_gas:
         any_shown = True
         st.markdown("##### 💨 גז קרקע VOC")
@@ -1207,7 +1354,6 @@ if True:
         if sg_ind_in:  selected_thresholds.append("GAS_AMBIENT_IND" if _use_ambient else "GAS_INDOOR_IND")
         if sg_ind_out: selected_thresholds.append("GAS_OUTDOOR_IND")
 
-    # ── Groundwater ───────────────────────────────────────────────
     if has_gw:
         any_shown = True
         st.markdown("##### 💧 מי תהום")
@@ -1219,7 +1365,6 @@ if True:
     elif not selected_thresholds:
         st.warning("⚠️ לא נבחרו ערכי סף — הדוח ייצא ללא עמודות השוואה")
 
-    # ── Combine options ───────────────────────────────────────────
     has_tph_and_voc   = "SOIL_TPH" in found_atypes and "SOIL_VOC"   in found_atypes
     has_tph_and_mbtex = "SOIL_TPH" in found_atypes and "SOIL_MBTEX" in found_atypes
     combine_tph_voc   = False
@@ -1235,11 +1380,9 @@ if True:
             if has_tph_and_mbtex:
                 combine_tph_mbtex = st.checkbox("שלב TPH + MBTEX בגיליון אחד", value=False, key="combine_tph_mbtex")
 
-    st.markdown('</div>', unsafe_allow_html=True)  # end section-card
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    # ══════════════════════════════════════════════════════════════
-    # BUILD EXCEL + DOWNLOAD
-    # ══════════════════════════════════════════════════════════════
+    # ── BUILD EXCEL + DOWNLOAD ────────────────────────────────────
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
 
     _sniff   = raw_bytes.lstrip()[:200]
@@ -1320,8 +1463,8 @@ if True:
 
     if excel_ok:
         def _safe(s: str) -> str:
-            import re
-            return re.sub(r'[\\/*?:"<>|\s]+', '_', s.strip()).strip('_') or 'x'
+            import re as _re
+            return _re.sub(r'[\\/*?:"<>|\s]+', '_', s.strip()).strip('_') or 'x'
         _parts = ["lab_report"]
         if client_name.strip():  _parts.append(_safe(client_name))
         if project_name.strip(): _parts.append(_safe(project_name))
@@ -1362,14 +1505,16 @@ if True:
                 key       = "word_dl_btn",
             )
 
-    st.markdown('</div>', unsafe_allow_html=True)  # end section-card
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    # ── footer ────────────────────────────────────────────────────
+    # ── file info footer ──────────────────────────────────────────
     st.markdown(
-        f'<div style="text-align:center;color:#94a3b8;font-size:0.75rem;margin-top:1rem;">'
+        f'<div style="text-align:center;color:#94a3b8;font-size:0.75rem;margin:0.5rem 2rem 0;">'
         f'🔬 {lab} / {category} &nbsp;·&nbsp; '
         f'📁 {fname[:80]}{"…" if len(fname)>80 else ""} &nbsp;·&nbsp; '
         f'📅 {date.today().strftime("%d.%m.%Y")}'
         f'</div>',
         unsafe_allow_html=True,
     )
+
+    st.markdown(_FOOTER, unsafe_allow_html=True)
