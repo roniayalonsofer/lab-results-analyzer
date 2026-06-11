@@ -228,6 +228,22 @@ _XRF_ELEMENTS = frozenset({
 _XRF_MIN_ELEMENTS = 6  # at least this many element columns to be considered XRF
 
 
+def _is_bactochem_csv(file_bytes: bytes) -> bool:
+    """Return True if the CSV looks like a Bactochem export."""
+    sample = file_bytes[:4096]
+    for enc in ("utf-8-sig", "utf-8", "cp1255", "latin-1"):
+        try:
+            text = sample.decode(enc, errors="replace")
+            if "bactochem" in text.lower():
+                return True
+            if "מספר תעודה" in text and "תיאור דוגמה" in text:
+                return True
+            break
+        except Exception:
+            continue
+    return False
+
+
 def _is_xrf_tabular(file_bytes: bytes, is_csv: bool = False) -> bool:
     """Return True if the file looks like a wide-format XRF metals table."""
     try:
@@ -375,6 +391,11 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
                 return "אלכם"
         except Exception:
             pass
+
+    # CSV content check for Bactochem (run before XRF check)
+    if file_bytes is not None and n.endswith(".csv"):
+        if _is_bactochem_csv(file_bytes):
+            return "בקטוכם"
 
     # CSV content check for XRF (run before KTE fallback)
     if file_bytes is not None and n.endswith(".csv"):
@@ -539,6 +560,27 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None, lab: st
         head = file_bytes.lstrip()[:512]
         if head.startswith(b"<?xml") and b"urn:schemas-microsoft-com:office:spreadsheet" in file_bytes[:4096]:
             return "pr"
+
+    # Bactochem CSV: determine soil vs groundwater from column content
+    if file_bytes is not None and n.endswith(".csv") and _is_bactochem_csv(file_bytes):
+        try:
+            import io as _io_bc, pandas as _pd_bc
+            for _enc_bc in ("utf-8-sig", "utf-8", "cp1255", "latin-1"):
+                try:
+                    _bc_df = _pd_bc.read_csv(_io_bc.BytesIO(file_bytes), dtype=str,
+                                              nrows=20, encoding=_enc_bc).fillna("")
+                    _bc_cols = [str(c).strip() for c in _bc_df.columns]
+                    if "תיאור דוגמה" in _bc_cols:
+                        if any("קרקע" in str(v) for v in _bc_df["תיאור דוגמה"].tolist()):
+                            return "soil"
+                    if "סוג דוגמה" in _bc_cols:
+                        if any("SOIL" in str(v).upper() for v in _bc_df["סוג דוגמה"].tolist()):
+                            return "soil"
+                    break
+                except Exception:
+                    continue
+        except Exception:
+            pass
 
     # Content peek for CSV and remaining Excel cases (KTE analysis code detection)
     if file_bytes is not None and (n.endswith(".xlsx") or n.endswith(".xls") or n.endswith(".csv")):

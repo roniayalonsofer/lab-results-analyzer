@@ -457,7 +457,7 @@ SHEET_CONFIG: dict[str, dict] = {
         "filter_nd_safe":  False,
         "units_in_header": True,
     },
-    "SOIL_VOC":   {"name": "קרקע VOC",  "unit": "mg/kg", "lod_loq_mode": "both", "nd_shows_loq": True},
+    "SOIL_VOC":   {"name": "קרקע VOC",  "unit": "mg/kg", "lod_loq_mode": "both", "nd_shows_loq": True, "force_portrait": True},
     "SOIL_SVOC":  {"name": "קרקע SVOC", "unit": "mg/kg", "lod_loq_mode": "both", "nd_shows_loq": True},
     "SOIL_MBTEX": {"name": "קרקע MBTEX",         "unit": "mg/kg"},
     "SOIL_TPH":   {"name": "קרקע TPH",            "unit": "mg/kg", "lod_loq_mode": "loq", "force_portrait": True},

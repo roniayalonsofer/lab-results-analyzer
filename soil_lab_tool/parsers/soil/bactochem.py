@@ -104,6 +104,18 @@ _MTBE_CAS = "1634-04-4"
 # Page footer — skip these lines
 _PAGE_FOOTER_RE = re.compile(r"Page\s+\d+\s+of\s+\d+", re.I)
 
+# ── CSV patterns ──────────────────────────────────────────────────────────────
+
+# Extract borehole and depth from Bactochem CSV column תיאור דוגמה
+# e.g. "קרקע ק1- 0.7" → bh="ק1", depth="0.7"
+_CSV_DESC_RE = re.compile(
+    r'(?:קרקע\s+)?(?P<bh>[^\d\s\-]+\d+)[-\s]*(?P<depth>[\d.]+)',
+    re.UNICODE,
+)
+
+# Compounds containing these keywords map to SOIL_TPH
+_TPH_KW_RE = re.compile(r'\b(dro|oro|tph)\b', re.IGNORECASE)
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -178,6 +190,90 @@ def _parse_result(raw: str, loq: float | None) -> tuple[float | None, str]:
         return None, ""
 
 
+def _parse_csv_desc(desc: str) -> tuple[str, str]:
+    """Extract (borehole, depth_str) from Bactochem CSV column תיאור דוגמה.
+    'קרקע ק1- 0.7' → ('ק-1', '0.7')
+    """
+    m = _CSV_DESC_RE.search(desc)
+    if not m:
+        return desc.strip(), ""
+    bh = re.sub(r'([^\d\s\-])(\d)', r'\1-\2', m.group("bh"))
+    return bh, m.group("depth")
+
+
+def _csv_atype_loq(compound: str) -> tuple[str, float]:
+    """Return (analysis_type, LOQ) inferred from the compound name."""
+    if _TPH_KW_RE.search(compound):
+        return "SOIL_TPH", 10.0
+    return "SOIL_VOC", 0.02
+
+
+def _parse_csv(file_obj: io.BytesIO) -> list[dict]:
+    """Parse Bactochem CSV export format.
+
+    Expected columns: מספר דוגמה, רכיב, תוצאה, יחידות מידה, תיאור דוגמה
+    """
+    try:
+        import pandas as pd
+    except ImportError:
+        return []
+
+    df = None
+    for enc in ("utf-8-sig", "utf-8", "cp1255", "latin-1"):
+        try:
+            file_obj.seek(0)
+            df = pd.read_csv(file_obj, dtype=str, encoding=enc).fillna("")
+            df.columns = [str(c).strip() for c in df.columns]
+            break
+        except Exception:
+            continue
+    if df is None or df.empty:
+        return []
+
+    col_compound = "רכיב"
+    col_result   = "תוצאה"
+    col_unit     = "יחידות מידה"
+    col_desc     = "תיאור דוגמה"
+
+    if not all(c in df.columns for c in (col_compound, col_result, col_unit, col_desc)):
+        return []
+
+    records: list[dict] = []
+    for _, row in df.iterrows():
+        compound = str(row.get(col_compound, "")).strip()
+        if not compound or compound.lower() in ("nan", ""):
+            continue
+
+        result_raw = str(row.get(col_result, "")).strip()
+        unit_raw   = str(row.get(col_unit, "")).strip()
+        desc       = str(row.get(col_desc, "")).strip()
+
+        borehole, depth_str = _parse_csv_desc(desc)
+        sample_id = f"{borehole} {depth_str}" if depth_str else borehole
+
+        atype, loq = _csv_atype_loq(compound)
+        value, flag = _parse_result(result_raw, loq)
+
+        if value is None and not flag:
+            continue
+
+        unit = unit_raw if unit_raw not in ("nan", "") else "mg/kg"
+
+        records.append({
+            "sample_id":     sample_id,
+            "compound":      compound,
+            "cas":           "",
+            "value":         value,
+            "flag":          flag,
+            "unit":          unit,
+            "lod":           None,
+            "loq":           loq,
+            "analysis_type": atype,
+        })
+
+    return records
+
+
 # ── Parser ────────────────────────────────────────────────────────────────────
 
 class BactochemSoilParser(BaseParser):
@@ -193,15 +289,21 @@ class BactochemSoilParser(BaseParser):
     ]
 
     def parse(self, file_obj: io.BytesIO) -> list[dict]:
-        try:
-            import pdfplumber
-        except ImportError as exc:
-            raise ImportError(
-                "pdfplumber is required: pip install pdfplumber"
-            ) from exc
+        file_obj.seek(0)
+        magic = file_obj.read(4)
+        file_obj.seek(0)
 
-        lines = _extract_lines(file_obj, pdfplumber)
-        return _parse_lines(lines)
+        if magic[:4] == b"%PDF":
+            try:
+                import pdfplumber
+            except ImportError as exc:
+                raise ImportError(
+                    "pdfplumber is required: pip install pdfplumber"
+                ) from exc
+            lines = _extract_lines(file_obj, pdfplumber)
+            return _parse_lines(lines)
+
+        return _parse_csv(file_obj)
 
 
 # ── Module-level parsing functions (testable without instantiation) ───────────
