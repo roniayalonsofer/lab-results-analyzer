@@ -24,7 +24,7 @@ import xml.etree.ElementTree as _ET
 import pandas as pd
 
 from parsers.base import BaseParser
-from core.cas_lookup import name_to_cas
+from core.cas_lookup import fuzzy_name_to_cas
 
 
 # ---------------------------------------------------------------------------
@@ -423,7 +423,7 @@ class ALSSoilParser(BaseParser):
             for compound, unit, loq, sample_vals in data_rows:
                 if "WATER" in sheet and compound.strip().lower() in self._SKIP_WATER_COMPOUNDS:
                     continue
-                cas   = _als_lookup_cas(compound) or name_to_cas(compound) or ""
+                cas   = _als_lookup_cas(compound) or fuzzy_name_to_cas(compound) or ""
                 atype = self._analysis_type(compound)
                 if "WATER" in sheet:
                     atype = self._WATER_ATYPE_MAP.get(atype, "GW_VOC")
@@ -546,7 +546,7 @@ class ALSSoilParser(BaseParser):
                         values.append(t)
                         i += 1
 
-                    cas   = _als_lookup_cas(compound) or name_to_cas(compound) or ""
+                    cas   = _als_lookup_cas(compound) or fuzzy_name_to_cas(compound) or ""
                     atype = self._WATER_ATYPE_MAP.get(self._analysis_type(compound), "GW_VOC")
 
                     for j, val_str in enumerate(values):
@@ -617,7 +617,7 @@ class ALSSoilParser(BaseParser):
                     except ValueError:
                         vals.append(None)
 
-            cas = (_als_lookup_cas(compound) or name_to_cas(compound) or "")
+            cas = (_als_lookup_cas(compound) or fuzzy_name_to_cas(compound) or "")
             atype = self._analysis_type(compound.upper())
             for i, sid in enumerate(sample_ids):
                 if i >= len(vals) or vals[i] is None:
@@ -801,7 +801,7 @@ class ALSSoilPDFParser(BaseParser):
             )
             self._cas_lookup = _tm.get_cas_by_name
         except Exception:
-            self._cas_lookup = lambda x: name_to_cas(x) or ""
+            self._cas_lookup = lambda x: fuzzy_name_to_cas(x) or ""
 
         file_obj.seek(0)
         records: list[dict] = []
@@ -891,7 +891,7 @@ class ALSSoilPDFParser(BaseParser):
                             loq = float(loq_str)
                         except ValueError:
                             pass
-                        cas = (_als_lookup_cas(compound) or self._cas_lookup(compound) or name_to_cas(compound) or "")
+                        cas = (_als_lookup_cas(compound) or self._cas_lookup(compound) or fuzzy_name_to_cas(compound) or "")
                         for i, raw_val in enumerate(results):
                             if i >= len(sample_cols):
                                 break
@@ -933,7 +933,7 @@ class ALSSoilPDFParser(BaseParser):
                 except (ValueError, TypeError):
                     pass
 
-                cas = (_als_lookup_cas(compound) or self._cas_lookup(compound) or name_to_cas(compound) or "")
+                cas = (_als_lookup_cas(compound) or self._cas_lookup(compound) or fuzzy_name_to_cas(compound) or "")
 
                 for i, raw_val in enumerate(cells[3:]):
                     if i >= len(sample_cols):

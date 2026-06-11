@@ -54,7 +54,7 @@ from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
 
 from core.threshold_manager import ThresholdManager, ANALYSIS_THRESHOLDS, THRESHOLD_LABELS
-from core.cas_lookup import name_to_cas as _name_to_cas
+from core.cas_lookup import name_to_cas as _name_to_cas, fuzzy_name_to_cas as _fuzzy_name_to_cas
 
 
 def _is_ind_key(k: str) -> bool:
@@ -627,7 +627,7 @@ class LabReportExcel:
                 if looked_up:
                     cas_map[cmp] = looked_up
                 else:
-                    resolved = _name_to_cas(cmp.strip().lower())
+                    resolved = _fuzzy_name_to_cas(cmp.strip().lower())
                     if resolved:
                         cas_map[cmp] = resolved
 

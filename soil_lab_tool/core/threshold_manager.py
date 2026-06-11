@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import re
 import pandas as pd
+from core.cas_lookup import fuzzy_name_to_cas
 
 
 # ── Main file column mapping ──────────────────────────────────────────
@@ -506,6 +507,12 @@ class ThresholdManager:
             cas = "C10-C40"
 
         val = self.get_threshold(cas, threshold_key)
+        # Fuzzy CAS resolve: if direct CAS lookup missed, try matching compound name
+        # to a known CAS via cas_lookup, then re-run the threshold lookup.
+        if val is None and compound_name:
+            _fuzzy_cas = fuzzy_name_to_cas(compound_name)
+            if _fuzzy_cas and _fuzzy_cas != cas:
+                val = self.get_threshold(_fuzzy_cas, threshold_key)
         if val is not None or not compound_name:
             return val
         # CAS lookup failed — try by compound name

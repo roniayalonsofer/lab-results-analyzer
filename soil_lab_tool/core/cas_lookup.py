@@ -4,6 +4,9 @@ core/cas_lookup.py
 Maps chemical names (Hebrew / English / symbols) to CAS numbers.
 """
 
+import difflib
+import re
+
 CHEMICAL_MAP: dict[str, str | None] = {
     # BTEX
     "benzene":              "71-43-2",
@@ -217,6 +220,61 @@ CHEMICAL_MAP: dict[str, str | None] = {
 def name_to_cas(chemical_name: str) -> str | None:
     key = chemical_name.strip().lower()
     return CHEMICAL_MAP.get(key)
+
+
+def _cas_norm(s: str) -> str:
+    """Normalize a compound name for fuzzy comparison: lowercase, strip punctuation/spaces."""
+    return re.sub(r'[().,\-/\s]', '', s.lower())
+
+
+def fuzzy_name_to_cas(name: str) -> str | None:
+    """
+    CAS lookup with progressive fuzzy matching.
+
+    1. Exact case-insensitive match via name_to_cas.
+    2. Normalized exact match: strip (, ), ., ,, -, /, spaces then compare.
+    3. Substring match (normalized input ≥ 5 chars): input is substring of a key
+       or vice versa, preferring the longer overlap.
+    4. difflib similarity > 0.85: return the CAS of the highest-scoring match.
+
+    Returns None when the key exists but has no CAS (e.g. "chloride": None),
+    or when no match meets the thresholds.
+    """
+    if not name:
+        return None
+
+    # Step 1: exact match (returns None for known-but-CAS-less entries too)
+    key = name.strip().lower()
+    if key in CHEMICAL_MAP:
+        return CHEMICAL_MAP[key]
+
+    # Steps 2-4: only when the key is entirely absent
+    name_norm = _cas_norm(name)
+    if not name_norm:
+        return None
+
+    # Step 2: normalized exact match
+    for map_key, cas in CHEMICAL_MAP.items():
+        if _cas_norm(map_key) == name_norm:
+            return cas
+
+    # Step 3: substring match (≥5 chars to avoid short-abbreviation false positives)
+    if len(name_norm) >= 5:
+        for map_key, cas in CHEMICAL_MAP.items():
+            mk_norm = _cas_norm(map_key)
+            if name_norm in mk_norm or mk_norm in name_norm:
+                return cas
+
+    # Step 4: difflib similarity > 0.85
+    best_score = 0.0
+    best_cas: str | None = None
+    for map_key, cas in CHEMICAL_MAP.items():
+        score = difflib.SequenceMatcher(None, name_norm, _cas_norm(map_key)).ratio()
+        if score > best_score and score > 0.85:
+            best_score = score
+            best_cas = cas
+
+    return best_cas
 
 
 def cas_to_name(cas: str, lang: str = "en") -> str | None:
