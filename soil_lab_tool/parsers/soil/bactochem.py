@@ -116,6 +116,24 @@ _CSV_DESC_RE = re.compile(
 # Compounds containing these keywords map to SOIL_TPH
 _TPH_KW_RE = re.compile(r'\b(dro|oro|tph)\b', re.IGNORECASE)
 
+# Canonical pseudo-CAS identifiers for TPH fractions (maps to themselves;
+# used as a normalisation reference and for threshold lookups in both PDF and CSV paths).
+_PSEUDO_CAS_MAP: dict[str, str] = {
+    "DRO":     "DRO",
+    "ORO":     "ORO",
+    "DRO-ORO": "DRO-ORO",
+}
+
+# Compound name (lower-case) → pseudo-CAS for the CSV parser
+_CSV_COMPOUND_CAS: dict[str, str] = {
+    "total dro":     "DRO",
+    "total oro":     "ORO",
+    "total dro+oro": "DRO-ORO",
+    "dro+oro":       "DRO-ORO",
+    "dro":           "DRO",
+    "oro":           "ORO",
+}
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -201,6 +219,11 @@ def _parse_csv_desc(desc: str) -> tuple[str, str]:
     return bh, m.group("depth")
 
 
+def _csv_compound_cas(compound: str) -> str:
+    """Return the canonical pseudo-CAS for known TPH fraction compound names."""
+    return _CSV_COMPOUND_CAS.get(compound.strip().lower(), "")
+
+
 def _csv_atype_loq(compound: str) -> tuple[str, float]:
     """Return (analysis_type, LOQ) inferred from the compound name."""
     if _TPH_KW_RE.search(compound):
@@ -262,7 +285,7 @@ def _parse_csv(file_obj: io.BytesIO) -> list[dict]:
         records.append({
             "sample_id":     sample_id,
             "compound":      compound,
-            "cas":           "",
+            "cas":           _csv_compound_cas(compound),
             "value":         value,
             "flag":          flag,
             "unit":          unit,

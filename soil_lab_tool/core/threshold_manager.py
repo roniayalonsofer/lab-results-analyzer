@@ -104,6 +104,13 @@ _CAS_VSL_OVERRIDES: dict[str, float | None] = {
     "ORO": None,
 }
 
+# VSL_SOIL thresholds for TPH pseudo-CAS identifiers (mg/kg).
+# DRO+ORO combined fraction uses the same 350 mg/kg limit as DRO alone.
+_TPH_STANDARDS: dict[str, float] = {
+    "DRO":     350.0,
+    "DRO-ORO": 350.0,
+}
+
 # Israeli drinking water standards for metals (mg/L).
 # Source: Israeli Drinking Water Regulations.
 _GW_METALS_STANDARDS: dict[str, float] = {
@@ -418,6 +425,9 @@ class ThresholdManager:
         cas = str(cas).strip() if cas is not None else ""
         if not cas or cas == "None":
             return None
+
+        if threshold_key == "VSL_SOIL" and cas.upper() in _TPH_STANDARDS:
+            return _TPH_STANDARDS[cas.upper()]
 
         if threshold_key == "GW" and cas in _GW_METALS_STANDARDS:
             return _GW_METALS_STANDARDS[cas]
