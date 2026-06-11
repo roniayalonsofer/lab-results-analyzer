@@ -108,7 +108,7 @@ class _FakeExcelFile:
 # Shared format reader
 # ---------------------------------------------------------------------------
 
-def _parse_als_sheet(xl: pd.ExcelFile, sheet_name: str) -> tuple[list[str], dict[int, str], list[tuple]]:
+def _parse_als_sheet(xl: pd.ExcelFile, sheet_name: str) -> tuple[list[str], dict[int, str], list[tuple], dict[int, dict]]:
     """
     Parse an ALS "Client SOIL" sheet.
 
@@ -162,6 +162,18 @@ def _parse_als_sheet(xl: pd.ExcelFile, sheet_name: str) -> tuple[list[str], dict
             if sid and sid.lower() not in ("nan", ""):
                 sample_cols[ci] = sid
 
+    # ── Borehole / depth from sample IDs like "BH1-1.5m" ──
+    _DEPTH_RE = re.compile(r'^(.+?)-(\d+(?:[.,]\d+)?)m$', re.IGNORECASE)
+    sample_meta: dict[int, dict] = {}
+    for ci, sid in sample_cols.items():
+        m = _DEPTH_RE.match(sid)
+        if m:
+            borehole = m.group(1)
+            depth = float(m.group(2).replace(',', '.'))
+            sample_meta[ci] = {"borehole": borehole, "depth_from": depth, "depth_to": depth}
+        else:
+            sample_meta[ci] = {"borehole": None, "depth_from": None, "depth_to": None}
+
     # ── Data rows ──
     data_rows = []
     for ri in range(hdr_row_idx + 1, len(raw)):
@@ -179,6 +191,8 @@ def _parse_als_sheet(xl: pd.ExcelFile, sheet_name: str) -> tuple[list[str], dict
         unit_val = str(row.iloc[unit_col]).strip() if unit_col < len(row) else "mg/kg"
         if not unit_val or unit_val.lower() == "nan":
             unit_val = "mg/kg"
+        if unit_val == "mg/kg" and "DW" not in unit_val:
+            continue
 
         loq: float | None = None
         lor_raw = str(row.iloc[lor_col]).strip().lstrip("<") if lor_col < len(row) else ""
@@ -194,7 +208,7 @@ def _parse_als_sheet(xl: pd.ExcelFile, sheet_name: str) -> tuple[list[str], dict
 
         data_rows.append((compound, unit_val, loq, sample_vals))
 
-    return hdr, sample_cols, data_rows
+    return hdr, sample_cols, data_rows, sample_meta
 
 
 def _parse_value(raw_val: str, loq: float | None) -> tuple[float | None, str | None]:
@@ -359,7 +373,7 @@ class ALSSoilParser(BaseParser):
         records = []
         for sheet in target_sheets:
             try:
-                _, sample_cols, data_rows = _parse_als_sheet(xl, sheet)
+                _, sample_cols, data_rows, sample_meta = _parse_als_sheet(xl, sheet)
             except Exception as _e:
                 import warnings
                 warnings.warn(f"ALS: skipping sheet {sheet!r}: {_e}")
@@ -376,6 +390,7 @@ class ALSSoilParser(BaseParser):
                     value, flag = _parse_value(raw_val, loq)
                     if value is None and flag is None:
                         flag = "ND"
+                    meta = sample_meta.get(ci, {})
                     records.append({
                         "compound":      compound,
                         "cas":           cas,
@@ -386,6 +401,9 @@ class ALSSoilParser(BaseParser):
                         "lod":           None,
                         "loq":           loq,
                         "analysis_type": atype,
+                        "borehole":      meta.get("borehole"),
+                        "depth_from":    meta.get("depth_from"),
+                        "depth_to":      meta.get("depth_to"),
                     })
 
         return records
@@ -921,7 +939,7 @@ class ALSGrainSizeParser(BaseParser):
         if sheet is None:
             raise ValueError(f"No 'Client SOIL' sheet found. Sheets: {xl.sheet_names}")
 
-        _, sample_cols, data_rows = _parse_als_sheet(xl, sheet)
+        _, sample_cols, data_rows, sample_meta = _parse_als_sheet(xl, sheet)
         records = []
 
         for compound, unit, loq, sample_vals in data_rows:
@@ -930,6 +948,7 @@ class ALSGrainSizeParser(BaseParser):
                 value, flag = _parse_value(raw_val, loq)
                 if value is None and flag is None:
                     continue
+                meta = sample_meta.get(ci, {})
                 records.append({
                     "compound":      compound,
                     "cas":           cas,
@@ -940,6 +959,9 @@ class ALSGrainSizeParser(BaseParser):
                     "lod":           None,
                     "loq":           loq,
                     "analysis_type": "SOIL_GRAIN_SIZE",
+                    "borehole":      meta.get("borehole"),
+                    "depth_from":    meta.get("depth_from"),
+                    "depth_to":      meta.get("depth_to"),
                 })
 
         return records
