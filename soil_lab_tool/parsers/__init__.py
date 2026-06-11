@@ -319,7 +319,7 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
             if ("als czech republic" in _als_lower or
                     "alsglobal" in _als_lower or
                     ("certificate of analysis" in _als_lower and
-                     "sub-matrix: soil" in _als_text)):
+                     ("sub-matrix: soil" in _als_lower or "sub-matrix: water" in _als_lower))):
                 return "als"
         except Exception:
             pass

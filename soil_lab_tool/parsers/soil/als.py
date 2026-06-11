@@ -336,7 +336,7 @@ class ALSSoilParser(BaseParser):
     _WATER_ATYPE_MAP = {
         "SOIL_VOC":    "GW_VOC",
         "SOIL_METALS": "GW_METALS",
-        "SOIL_SVOC":   "GW_VOC",
+        "SOIL_SVOC":   "GW_SVOC",
         "SOIL_PFAS":   "GW_PFAS",
         "SOIL_TPH":    "GW_VOC",
     }
@@ -416,6 +416,10 @@ class ALSSoilParser(BaseParser):
                 warnings.warn(f"ALS: skipping sheet {sheet!r}: {_e}")
                 continue
 
+            if "WATER" in sheet:
+                sample_cols = {ci: sid for ci, sid in sample_cols.items()
+                               if "blank" not in sid.lower()}
+
             for compound, unit, loq, sample_vals in data_rows:
                 if "WATER" in sheet and compound.strip().lower() in self._SKIP_WATER_COMPOUNDS:
                     continue
@@ -426,6 +430,8 @@ class ALSSoilParser(BaseParser):
                 # µg/kg DW == ng/g numerically — normalise unit label for PFAS
                 norm_unit = "ng/g" if atype == "SOIL_PFAS" else unit
                 for ci, raw_val in sample_vals.items():
+                    if ci not in sample_cols:
+                        continue
                     value, flag = _parse_value(raw_val, loq)
                     if value is None and flag is None:
                         flag = "ND"
@@ -463,6 +469,12 @@ class ALSSoilParser(BaseParser):
             return "SOIL_PFAS"
         if any(k in c for k in ("TPH", "PETROLEUM", "DRO", "GRO")) or re.search(r'\bORO\b', c):
             return "SOIL_TPH"
+        if any(k in c for k in (
+            "BENZO", "ANTHRACENE", "PYRENE", "FLUORENE", "ACENAPHTH", "CHRYSENE",
+            "PHENANTHRENE", "FLUORANTHENE", "INDENO", "DIBENZ", "PERYLENE",
+            "PCB", "NAPHTHALENE",
+        )):
+            return "SOIL_SVOC"
         return "SOIL_SVOC"
 
     def _parse_water_pdf(self, file_obj) -> list[dict]:
