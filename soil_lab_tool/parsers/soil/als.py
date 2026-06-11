@@ -510,7 +510,10 @@ class ALSSoilParser(BaseParser):
                             ):
                                 candidates = [
                                     t for t in tokens[j + 1:]
-                                    if t and not _BLANK_RE.search(t)
+                                    if t
+                                    and not _BLANK_RE.search(t)
+                                    and not _re.match(r'^\d+$', t)
+                                    and not (t.startswith("(") and t.endswith(")"))
                                 ]
                                 if candidates:
                                     sample_ids = candidates
