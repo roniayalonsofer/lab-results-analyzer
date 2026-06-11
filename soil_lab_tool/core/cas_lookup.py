@@ -122,8 +122,8 @@ CHEMICAL_MAP: dict[str, str | None] = {
     "pfmoaa":                                "13252-13-6",
     "genx":                                  "13252-13-6",
     # TPH fractions (pseudo-CAS identifiers)
-    "c10 - c28 fraction (dro)":              "DRO",
-    "c24 - c40 fraction (oro)":              "ORO",
+    "c10 - c28 fraction (dro)":              None,
+    "c24 - c40 fraction (oro)":              None,
     # Sums / grouped parameters (no CAS)
     "sum of btex":                           None,
     "sum of tex":                            None,
@@ -155,6 +155,7 @@ CHEMICAL_MAP: dict[str, str | None] = {
     "cis-1.3-dichloropropene":               "10061-01-5",
     "trans-1.3-dichloropropene":             "10061-02-6",
     # Chlorinated/halogenated methanes
+    "dichloromethane":                       "75-09-2",
     "tetrachloromethane":                    "56-23-5",
     "trichlorofluoromethane":                "75-69-4",
     "dichlorodifluoromethane":               "75-71-8",
