@@ -98,17 +98,16 @@ THRESHOLD_LABELS: dict[str, str] = {
 }
 
 # Explicit per-CAS VSL overrides for compounds that use pseudo-CAS identifiers.
-# DRO: VSL = 350 mg/kg (same as the C10-C40 TPH entry in the threshold table).
-# ORO: no Israeli VSL threshold defined.
+# DRO, ORO, DRO-ORO: VSL = 350 mg/kg (Israeli environmental standard).
 _CAS_VSL_OVERRIDES: dict[str, float | None] = {
     "DRO": 350.0,
-    "ORO": None,
+    "ORO": 350.0,
 }
 
 # VSL_SOIL thresholds for TPH pseudo-CAS identifiers (mg/kg).
-# DRO+ORO combined fraction uses the same 350 mg/kg limit as DRO alone.
 _TPH_STANDARDS: dict[str, float] = {
     "DRO":     350.0,
+    "ORO":     350.0,
     "DRO-ORO": 350.0,
 }
 
@@ -479,7 +478,7 @@ class ThresholdManager:
         return None
 
     # Compound names/CAS values that map to the VSL entry "TPH - DRO + ORO (Tier 1)".
-    # "oro" is intentionally excluded — ORO has no VSL and must not alias to C10-C40.
+    # "oro" is handled via _CAS_VSL_OVERRIDES and must not alias to C10-C40.
     _TPH_ALIASES: frozenset[str] = frozenset({"tph", "dro", "tph - dro + oro"})
 
     def get_threshold_with_name(self, cas: str, threshold_key: str,
@@ -493,9 +492,8 @@ class ThresholdManager:
         if cas_upper in _CAS_VSL_OVERRIDES:
             return _CAS_VSL_OVERRIDES[cas_upper] if "VSL" in threshold_key else None
 
-        # TPH/DRO compounds return 350 for all thresholds when matched by name.
-        # ORO is excluded: it has no defined threshold and is handled above via CAS.
-        TPH_COMPOUNDS = {"tph", "dro"}
+        # TPH/DRO/ORO compounds return 350 when matched by name.
+        TPH_COMPOUNDS = {"tph", "dro", "oro"}
         if compound_name and compound_name.strip().lower() in TPH_COMPOUNDS:
             return 350.0
 

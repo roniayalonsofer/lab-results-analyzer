@@ -10,7 +10,7 @@ from parsers.base import BaseParser
 
 from parsers.soil_gas.alchem    import AlchemSoilGasParser
 from parsers.soil_gas.kte       import KTESoilGasParser
-from parsers.soil.alchem        import AlchemSoilParser
+from parsers.soil.alchem        import AlchemSoilParser, AlchemMultiSectionParser
 from parsers.alchem             import AlchemTPHPDFParser
 from parsers.soil.kte           import KTESoilParser
 from parsers.soil.kte_pr        import KTEPRParser
@@ -33,7 +33,7 @@ _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
     ("מכון האנרגיה",  "soil"):       MachonEnergyParser,
     ("machon energy", "soil_gas"):   MachonEnergyParser,
     ("machon energy", "soil"):       MachonEnergyParser,
-    ("alchem",        "soil"):        AlchemSoilParser,
+    ("alchem",        "soil"):        AlchemMultiSectionParser,
     ("alchem",        "soil_tph_pdf"): AlchemTPHPDFParser,
     ("kte",           "soil"):        KTESoilParser,
     ("kte",           "groundwater"): KTEGroundwaterParser,
@@ -170,6 +170,23 @@ def _is_aminolab_pdf(file_bytes: bytes) -> bool:
     except Exception:
         pass
     return False
+
+
+def _is_alchem_multi_section_pdf(file_bytes: bytes) -> bool:
+    """Return True if the PDF contains all three Alchem multi-section markers:
+    EPA 6010 (metals), EPA 8015 (TPH), and EPA 8260 (VOC)."""
+    try:
+        import io as _io, pdfplumber as _pl
+        with _pl.open(_io.BytesIO(file_bytes)) as _pdf:
+            full_text = "".join(
+                (p.extract_text() or "") for p in _pdf.pages[:15]
+            )
+        has_metals = bool(_re.search(r'EPA\s*6010', full_text, _re.IGNORECASE))
+        has_tph    = bool(_re.search(r'EPA\s*8015|Based\s+On\s+EPA', full_text, _re.IGNORECASE))
+        has_voc    = bool(_re.search(r'EPA\s*8260', full_text, _re.IGNORECASE))
+        return has_metals and has_tph and has_voc
+    except Exception:
+        return False
 
 
 def _is_alchem_tph_pdf(file_bytes: bytes) -> bool:
@@ -473,6 +490,8 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None, lab: st
                 return "groundwater"
         except Exception:
             pass
+        if _is_alchem_multi_section_pdf(file_bytes):
+            return "soil"
         if file_bytes and filename.lower().endswith('.pdf'):
             try:
                 import pdfplumber as _pl, io as _io2
