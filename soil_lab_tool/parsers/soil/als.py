@@ -375,7 +375,7 @@ class ALSSoilParser(BaseParser):
                 file_obj.seek(0)
                 _pdf_bytes = file_obj.read()
                 with _pl_sniff.open(_io_sniff.BytesIO(_pdf_bytes)) as _p:
-                    _p1_text = (_p.pages[0].extract_text() or "") if _p.pages else ""
+                    _p1_text = " ".join((_p.pages[i].extract_text() or "") for i in range(min(3, len(_p.pages))))
                 if "Sub-Matrix: WATER" in _p1_text:
                     return self._parse_water_pdf(_io_sniff.BytesIO(_pdf_bytes))
                 file_obj.seek(0)
