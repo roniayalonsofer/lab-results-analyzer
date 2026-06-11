@@ -457,18 +457,18 @@ SHEET_CONFIG: dict[str, dict] = {
         "filter_nd_safe":  False,
         "units_in_header": True,
     },
-    "SOIL_VOC":   {"name": "קרקע VOC",  "unit": "mg/kg", "lod_loq_mode": "both", "nd_shows_loq": True, "force_portrait": True},
-    "SOIL_SVOC":  {"name": "קרקע SVOC", "unit": "mg/kg", "lod_loq_mode": "both", "nd_shows_loq": True, "force_portrait": True},
+    "SOIL_VOC":   {"name": "קרקע VOC",  "unit": "mg/kg", "lod_loq_mode": "both", "nd_shows_loq": True},
+    "SOIL_SVOC":  {"name": "קרקע SVOC", "unit": "mg/kg", "lod_loq_mode": "both", "nd_shows_loq": True},
     "SOIL_MBTEX": {"name": "קרקע MBTEX",         "unit": "mg/kg"},
-    "SOIL_TPH":   {"name": "קרקע TPH",            "unit": "mg/kg", "lod_loq_mode": "loq", "force_portrait": True},
-    "SOIL_TPH_VOC":   {"name": "קרקע TPH+BTEX",      "unit": "mg/kg", "force_portrait": True},
-    "SOIL_TPH_MBTEX": {"name": "קרקע TPH+MBTEX",     "unit": "mg/kg", "force_portrait": True},
-    "SOIL_METALS":    {"name": "קרקע מתכות",         "unit": "mg/kg DW", "nd_shows_loq": True, "force_portrait": True},
+    "SOIL_TPH":   {"name": "קרקע TPH",            "unit": "mg/kg", "lod_loq_mode": "loq"},
+    "SOIL_TPH_VOC":   {"name": "קרקע TPH+BTEX",      "unit": "mg/kg"},
+    "SOIL_TPH_MBTEX": {"name": "קרקע TPH+MBTEX",     "unit": "mg/kg"},
+    "SOIL_METALS":    {"name": "קרקע מתכות",         "unit": "mg/kg DW", "nd_shows_loq": True},
     "SOIL_GRAIN_SIZE":{"name": "גרנולומטריה",        "unit": "%"},
     "SOIL_PFAS":   {"name": "קרקע PFAS",       "unit": "ng/g"},
-    "GW_VOC":          {"name": "מי תהום VOC",      "unit": "µg/L", "lod_loq_mode": "loq", "force_portrait": True},
-    "GW_SVOC":         {"name": "מי תהום SVOC",     "unit": "µg/L", "lod_loq_mode": "loq", "force_portrait": True},
-    "GW_METALS":       {"name": "מי תהום מתכות",   "unit": "µg/L", "lod_loq_mode": "loq", "force_portrait": True},
+    "GW_VOC":          {"name": "מי תהום VOC",      "unit": "µg/L", "lod_loq_mode": "loq"},
+    "GW_SVOC":         {"name": "מי תהום SVOC",     "unit": "µg/L", "lod_loq_mode": "loq"},
+    "GW_METALS":       {"name": "מי תהום מתכות",   "unit": "µg/L", "lod_loq_mode": "loq"},
     "GW_PFAS":         {"name": "מי תהום PFAS",         "unit": "ng/L"},
     "GW_MICROBIOLOGY": {"name": "מיקרוביולוגיה מי תהום", "unit": "CFU/mL"},
     "LOWFLOW":         {"name": "pH",               "unit": ""},
@@ -711,9 +711,8 @@ class LabReportExcel:
             if bh and sid in sample_meta and not sample_meta[sid].get("borehole"):
                 sample_meta[sid]["borehole"] = bh
 
-        # Decide orientation: portrait when n_compounds >= n_samples,
-        # or when the sheet config explicitly forces portrait (e.g. SOIL_TPH).
-        portrait = len(compounds) >= len(samples) or cfg.get("force_portrait", False)
+        # Decide orientation: portrait when n_compounds >= n_samples.
+        portrait = len(compounds) >= len(samples)
 
         header_info = {
             "project": self.project,
