@@ -242,16 +242,24 @@ class AlchemSoilParser(BaseParser):
                 param = "TPH"
             col_params[ci] = param
 
-        # Scan ALL rows (before and after header) for a LOQ row
+        # Scan ALL rows for a LOQ row (may appear at top or bottom)
         loq_per_col: dict[int, float | None] = {}
         for i in range(len(raw)):
-            if str(raw.iloc[i, 0]).strip().upper() == "LOQ":
+            cell = str(raw.iloc[i, 0]).strip().upper()
+            if cell in ("LOQ", "LOQ [MG/KG]", "LOQ[MG/KG]"):
                 for ci in col_params:
                     try:
                         loq_per_col[ci] = float(str(raw.iloc[i, ci]).strip())
                     except (ValueError, TypeError):
                         loq_per_col[ci] = None
                 break
+
+        # Fallback: use hardcoded Alchem TPH LOQ defaults per param name
+        if not loq_per_col:
+            _TPH_LOQ_DEFAULTS = {"DRO": 30.0, "ORO": 20.0, "TPH": 50.0,
+                                  "DRO-ORO": 30.0, "GRO": 10.0}
+            for ci, param in col_params.items():
+                loq_per_col[ci] = _TPH_LOQ_DEFAULTS.get(param.upper())
 
         records = []
         for i in range(header_row + 1, len(raw)):
