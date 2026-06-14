@@ -111,12 +111,13 @@ st.markdown("""
 
 * { box-sizing: border-box; font-family: 'Heebo', sans-serif !important; }
 html, body {
-    direction: rtl;
+    direction: ltr;
     font-family: 'Heebo', sans-serif !important;
     font-size: 18px;
     background: #f0f4f8;
     margin: 0;
 }
+[data-testid="stSidebarContent"], [data-testid="stMain"], .block-container { direction: rtl; }
 
 p, label, div, span, input, select { font-size: inherit !important; }
 
