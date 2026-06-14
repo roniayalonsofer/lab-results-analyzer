@@ -671,6 +671,11 @@ class LabReportExcel:
 
         # Remove sample columns where every compound is ND (no real data at all).
         def _sample_has_data(sid: str) -> bool:
+            # For TPH, always show all samples (N.D. is a valid result)
+            if cfg.get("analysis_type") == "SOIL_TPH" or all(
+                r.get("analysis_type") == "SOIL_TPH" for r in records
+            ):
+                return True
             return any(
                 pivot.get(cmp, {}).get(sid, (None, "ND", None))[1] != "ND"
                 for cmp in compounds
