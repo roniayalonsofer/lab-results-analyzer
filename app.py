@@ -765,15 +765,6 @@ def _preview_dialog(records, tm, project_name, client_name, rep_date,
 
 
 # ══════════════════════════════════════════════════════════════════
-# SIDEBAR VARIABLE DEFAULTS (always defined, overridden on soil page)
-# ══════════════════════════════════════════════════════════════════
-client_name  = ""
-project_name = ""
-lab          = "🔍 זיהוי אוטומטי"
-cat_label    = "🔍 זיהוי אוטומטי"
-category_raw = "auto"
-
-# ══════════════════════════════════════════════════════════════════
 # ROUTING
 # ══════════════════════════════════════════════════════════════════
 page = st.query_params.get("page", "home")
@@ -814,60 +805,58 @@ _FOOTER = (
 )
 
 # ══════════════════════════════════════════════════════════════════
-# SIDEBAR — soil page only
+# SIDEBAR — always visible
 # ══════════════════════════════════════════════════════════════════
-if page == "soil":
-    _nav_logo_small = (
-        f'<img src="data:image/png;base64,{LOGO_B64}" style="height:34px;display:block;">'
-        if LOGO_B64 else '<span style="font-size:1.3rem;">🧪</span>'
+_nav_logo_small = (
+    f'<img src="data:image/png;base64,{LOGO_B64}" style="height:34px;display:block;">'
+    if LOGO_B64 else '<span style="font-size:1.3rem;">🧪</span>'
+)
+
+with st.sidebar:
+    st.markdown(
+        f'<div style="text-align:center;padding:0.5rem 0 0.75rem;">'
+        f'<div style="background:white;border-radius:2px;padding:0.6rem 0.8rem;'
+        f'margin-bottom:0.5rem;display:inline-block;width:90%;">'
+        f'{_nav_logo_small}</div>'
+        f'<div style="font-size:0.7rem;color:#94a3b8;margin-top:4px;">Lab Results Analyzer</div>'
+        f'</div>',
+        unsafe_allow_html=True,
     )
+    st.markdown('<hr style="margin:0.5rem 0 1rem;">', unsafe_allow_html=True)
 
-    with st.sidebar:
-        st.markdown(
-            f'<div style="text-align:center;padding:0.5rem 0 0.75rem;">'
-            f'<div style="background:white;border-radius:2px;padding:0.6rem 0.8rem;'
-            f'margin-bottom:0.5rem;display:inline-block;width:90%;">'
-            f'{_nav_logo_small}</div>'
-            f'<div style="font-size:0.7rem;color:#94a3b8;margin-top:4px;">Lab Results Analyzer</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-        st.markdown('<hr style="margin:0.5rem 0 1rem;">', unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-label">📋 פרטי פרויקט</div>', unsafe_allow_html=True)
+    client_name  = st.text_input("שם לקוח",  value="", label_visibility="collapsed",
+                                  placeholder="שם לקוח (לדוג׳: סונול)")
+    project_name = st.text_input("שם האתר",  value="", label_visibility="collapsed",
+                                  placeholder="שם האתר (לדוג׳: צומת שמשון)")
 
-        st.markdown('<div class="sidebar-label">📋 פרטי פרויקט</div>', unsafe_allow_html=True)
-        client_name  = st.text_input("שם לקוח",  value="", label_visibility="collapsed",
-                                      placeholder="שם לקוח (לדוג׳: סונול)")
-        project_name = st.text_input("שם האתר",  value="", label_visibility="collapsed",
-                                      placeholder="שם האתר (לדוג׳: צומת שמשון)")
+    st.markdown('<div class="sidebar-label">🏭 מעבדה וקטגוריה</div>', unsafe_allow_html=True)
+    lab = st.selectbox(
+        "מעבדה",
+        ["🔍 זיהוי אוטומטי", "KTE", "מכון הנפט", "מכון האנרגיה", "בקטוכם",
+         "Alchem", "ALS", "Aminolab", "RJ Lee", "אלכם (XRF)"],
+        label_visibility="collapsed",
+    )
+    category_display = {
+        "🔍 זיהוי אוטומטי":           "auto",
+        "🪨 קרקע (soil)":             "soil",
+        "💧 מי תהום (groundwater)":   "groundwater",
+        "🧬 PFAS":                    "pfas",
+        "📊 PR format (KTE מתכות)":   "pr",
+        "💨 גז קרקע (soil_gas)":      "soil_gas",
+        "🪨 גרנולומטריה (grain_size)": "grain_size",
+    }
+    cat_label    = st.selectbox("קטגוריה", list(category_display.keys()),
+                                label_visibility="collapsed")
+    category_raw = category_display[cat_label]
 
-        st.markdown('<div class="sidebar-label">🏭 מעבדה וקטגוריה</div>', unsafe_allow_html=True)
-        lab = st.selectbox(
-            "מעבדה",
-            ["🔍 זיהוי אוטומטי", "KTE", "מכון הנפט", "מכון האנרגיה", "בקטוכם",
-             "Alchem", "ALS", "Aminolab", "RJ Lee", "אלכם (XRF)"],
-            label_visibility="collapsed",
-        )
-        category_display = {
-            "🔍 זיהוי אוטומטי":           "auto",
-            "🪨 קרקע (soil)":             "soil",
-            "💧 מי תהום (groundwater)":   "groundwater",
-            "🧬 PFAS":                    "pfas",
-            "📊 PR format (KTE מתכות)":   "pr",
-            "💨 גז קרקע (soil_gas)":      "soil_gas",
-            "🪨 גרנולומטריה (grain_size)": "grain_size",
-        }
-        cat_label    = st.selectbox("קטגוריה", list(category_display.keys()),
-                                    label_visibility="collapsed")
-        category_raw = category_display[cat_label]
-
-        st.markdown('<hr style="margin:1rem 0 0.5rem;">', unsafe_allow_html=True)
+    st.markdown('<hr style="margin:1rem 0 0.5rem;">', unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════
 # HOME PAGE
 # ══════════════════════════════════════════════════════════════════
 if page == "home":
-    st.markdown('<style>[data-testid="stSidebar"]{display:none!important;min-width:0!important;width:0!important;}</style>', unsafe_allow_html=True)
     _render_nav("home")
     st.markdown(
         '<div class="page-wrapper">'
@@ -907,7 +896,6 @@ if page == "home":
 # GROUNDWATER PAGE (placeholder)
 # ══════════════════════════════════════════════════════════════════
 elif page == "groundwater":
-    st.markdown('<style>[data-testid="stSidebar"]{display:none!important;min-width:0!important;width:0!important;}</style>', unsafe_allow_html=True)
     _render_nav("groundwater")
     st.markdown(
         '<div class="page-wrapper">'
@@ -929,7 +917,6 @@ elif page == "groundwater":
 # GUIDE PAGE
 # ══════════════════════════════════════════════════════════════════
 elif page == "guide":
-    st.markdown('<style>[data-testid="stSidebar"]{display:none!important;min-width:0!important;width:0!important;}</style>', unsafe_allow_html=True)
     _render_nav("guide")
     st.markdown(
         '<div class="page-wrapper">'
