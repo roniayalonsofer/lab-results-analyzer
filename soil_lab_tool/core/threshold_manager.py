@@ -429,6 +429,17 @@ class ThresholdManager:
         if threshold_key == "VSL_SOIL" and cas.upper() in _TPH_STANDARDS:
             return _TPH_STANDARDS[cas.upper()]
 
+        if cas.upper() in ("DRO", "ORO", "DRO-ORO") and threshold_key in (
+            "TIER1_IND_SOIL_VH", "TIER1_IND_SOIL_HM_0_6",
+            "TIER1_IND_SOIL_HM_6", "TIER1_IND_SOIL_LOW",
+        ):
+            return 1280.0
+        if cas.upper() in ("DRO", "ORO", "DRO-ORO") and threshold_key in (
+            "TIER1_RES_SOIL_VH", "TIER1_RES_SOIL_HM_0_6",
+            "TIER1_RES_SOIL_HM_6", "TIER1_RES_SOIL_LOW",
+        ):
+            return 350.0
+
         if threshold_key == "GW" and cas in _GW_METALS_STANDARDS:
             return _GW_METALS_STANDARDS[cas]
 
