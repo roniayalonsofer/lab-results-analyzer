@@ -875,7 +875,7 @@ if page == "soil":
 # ══════════════════════════════════════════════════════════════════
 # HOME PAGE
 # ══════════════════════════════════════════════════════════════════
-if page == "home":
+elif page == "home":
     _render_nav("home")
     st.markdown(
         '<div class="page-wrapper">'
@@ -1082,7 +1082,7 @@ elif page == "guide":
 # ══════════════════════════════════════════════════════════════════
 # SOIL PAGE — existing analysis logic
 # ══════════════════════════════════════════════════════════════════
-if page == "soil":
+elif page == "soil":
     # nav bar
     _render_nav("soil")
 
