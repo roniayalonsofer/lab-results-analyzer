@@ -242,12 +242,15 @@ class AlchemSoilParser(BaseParser):
                 param = "TPH"
             col_params[ci] = param
 
-        # Scan rows before the header for a LOQ row
+        # Scan ALL rows (before and after header) for a LOQ row
         loq_per_col: dict[int, float | None] = {}
-        for i in range(header_row):
-            if "loq" in str(raw.iloc[i, 0]).lower():
+        for i in range(len(raw)):
+            if str(raw.iloc[i, 0]).strip().upper() == "LOQ":
                 for ci in col_params:
-                    loq_per_col[ci] = self._parse_float(str(raw.iloc[i, ci]))
+                    try:
+                        loq_per_col[ci] = float(str(raw.iloc[i, ci]).strip())
+                    except (ValueError, TypeError):
+                        loq_per_col[ci] = None
                 break
 
         records = []
