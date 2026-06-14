@@ -109,6 +109,17 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800;900&display=swap');
 
+/* Sidebar — hidden everywhere; soil page overrides below */
+body:not(.soil-page) [data-testid="stSidebar"],
+[data-testid="stSidebar"] {
+    display: none !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    overflow: hidden !important;
+    visibility: hidden !important;
+}
+
 * { box-sizing: border-box; font-family: 'Heebo', sans-serif !important; }
 html, body {
     direction: rtl;
@@ -328,26 +339,27 @@ p, label, div, span, input, select { font-size: inherit !important; }
 }
 .footer strong { color: white; }
 
-/* Sidebar — hidden globally, shown only on soil page via override below */
-[data-testid="stSidebar"],
-section[data-testid="stSidebar"] {
-    display: none !important;
-    width: 0 !important;
+/* App layout — full-width main content */
+[data-testid="stAppViewContainer"] {
+    flex-direction: row-reverse !important;
+}
+[data-testid="stMain"] {
+    flex: 1 !important;
     min-width: 0 !important;
+    margin-right: 0 !important;
+    padding-right: 0 !important;
+    width: 100% !important;
+}
+[data-testid="stMain"] .block-container {
+    max-width: 100% !important;
+    padding: 0 !important;
 }
 [data-testid="stAppViewContainer"] > section:first-child {
     display: none !important;
     width: 0 !important;
     min-width: 0 !important;
-}
-[data-testid="stAppViewContainer"] > section.main {
-    margin-right: 0 !important;
-    width: 100% !important;
-}
-section[data-testid="stMain"] {
-    margin-right: 0 !important;
-    padding-right: 0 !important;
-    width: 100% !important;
+    max-width: 0 !important;
+    overflow: hidden !important;
 }
 
 /* RTL typography for Streamlit widgets */
@@ -793,20 +805,20 @@ def _render_nav(active: str):
         cls = "nav-link active" if p == active else "nav-link"
         links_html += f'<a href="?page={p}" class="{cls}">{lbl}</a>'
     st.markdown(
-        f'<div class="nav-bar">'
+        f'<div class="nav-bar" dir="rtl">'
         f'<div class="nav-logo">'
         f'{logo_html}'
-        f'<span style="color:rgba(255,255,255,0.55);font-size:1rem;font-family:Heebo,sans-serif;">'
+        f'<span style="color:rgba(255,255,255,0.55);font-size:1rem;font-family:Heebo,sans-serif;direction:rtl;">'
         f'מערכת ניתוח תוצאות</span>'
         f'</div>'
-        f'<div class="nav-links">{links_html}</div>'
+        f'<div class="nav-links" dir="ltr">{links_html}</div>'
         f'</div>',
         unsafe_allow_html=True,
     )
 
 
 _FOOTER = (
-    '<div class="footer"><strong>אדמה אפיון ושיקום אתרים בע"מ</strong>'
+    '<div class="footer" dir="rtl"><strong>אדמה אפיון ושיקום אתרים בע"מ</strong>'
     ' · מערכת ניתוח תוצאות מעבדה · גרסה 2.0</div>'
 )
 
@@ -819,6 +831,8 @@ if page == "soil":
         '<style>'
         '[data-testid="stAppViewContainer"] > section[data-testid="stSidebar"]{'
         'display:flex!important;'
+        'visibility:visible!important;'
+        'overflow:visible!important;'
         'background:#1e293b;'
         'min-width:15rem!important;max-width:16rem!important;width:15.5rem!important;'
         'flex-shrink:0!important;}'
