@@ -109,17 +109,6 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800;900&display=swap');
 
-/* Sidebar — hidden everywhere; soil page overrides below */
-body:not(.soil-page) [data-testid="stSidebar"],
-[data-testid="stSidebar"] {
-    display: none !important;
-    width: 0 !important;
-    min-width: 0 !important;
-    max-width: 0 !important;
-    overflow: hidden !important;
-    visibility: hidden !important;
-}
-
 * { box-sizing: border-box; font-family: 'Heebo', sans-serif !important; }
 html, body {
     direction: rtl;
@@ -353,13 +342,6 @@ p, label, div, span, input, select { font-size: inherit !important; }
 [data-testid="stMain"] .block-container {
     max-width: 100% !important;
     padding: 0 !important;
-}
-[data-testid="stAppViewContainer"] > section:first-child {
-    display: none !important;
-    width: 0 !important;
-    min-width: 0 !important;
-    max-width: 0 !important;
-    overflow: hidden !important;
 }
 
 /* RTL typography for Streamlit widgets */
@@ -783,6 +765,15 @@ def _preview_dialog(records, tm, project_name, client_name, rep_date,
 
 
 # ══════════════════════════════════════════════════════════════════
+# SIDEBAR VARIABLE DEFAULTS (always defined, overridden on soil page)
+# ══════════════════════════════════════════════════════════════════
+client_name  = ""
+project_name = ""
+lab          = "🔍 זיהוי אוטומטי"
+cat_label    = "🔍 זיהוי אוטומטי"
+category_raw = "auto"
+
+# ══════════════════════════════════════════════════════════════════
 # ROUTING
 # ══════════════════════════════════════════════════════════════════
 page = st.query_params.get("page", "home")
@@ -826,35 +817,6 @@ _FOOTER = (
 # SIDEBAR — soil page only
 # ══════════════════════════════════════════════════════════════════
 if page == "soil":
-    # Un-hide sidebar for soil page (overrides global "display:none")
-    st.markdown(
-        '<style>'
-        '[data-testid="stAppViewContainer"] > section[data-testid="stSidebar"]{'
-        'display:flex!important;'
-        'visibility:visible!important;'
-        'overflow:visible!important;'
-        'background:#1e293b;'
-        'min-width:15rem!important;max-width:16rem!important;width:15.5rem!important;'
-        'flex-shrink:0!important;}'
-        '[data-testid="stSidebarContent"]{direction:rtl;}'
-        '[data-testid="stSidebar"] *{color:#e2e8f0!important;}'
-        '[data-testid="stSidebar"] input{color:#111827!important;}'
-        '[data-testid="stSidebar"] [data-baseweb="select"] span,'
-        '[data-testid="stSidebar"] [data-baseweb="select"] div{color:#111827!important;}'
-        '[data-testid="stSidebar"] .stSelectbox label,'
-        '[data-testid="stSidebar"] .stTextInput label,'
-        '[data-testid="stSidebar"] .stCheckbox label{color:#94a3b8!important;}'
-        '[data-testid="stSidebarCollapseButton"],'
-        '[data-testid="stSidebarNavCollapseButton"],'
-        '[data-testid="collapsedControl"],'
-        'button[aria-label="Close sidebar"],'
-        'button[aria-label="Open sidebar"],'
-        'button[aria-label="פתח סרגל צד"],'
-        'button[aria-label="סגור סרגל צד"]{display:none!important;}'
-        '</style>',
-        unsafe_allow_html=True,
-    )
-
     _nav_logo_small = (
         f'<img src="data:image/png;base64,{LOGO_B64}" style="height:34px;display:block;">'
         if LOGO_B64 else '<span style="font-size:1.3rem;">🧪</span>'
@@ -905,6 +867,7 @@ if page == "soil":
 # HOME PAGE
 # ══════════════════════════════════════════════════════════════════
 if page == "home":
+    st.markdown('<style>[data-testid="stSidebar"]{display:none!important;min-width:0!important;width:0!important;}</style>', unsafe_allow_html=True)
     _render_nav("home")
     st.markdown(
         '<div class="page-wrapper">'
@@ -944,6 +907,7 @@ if page == "home":
 # GROUNDWATER PAGE (placeholder)
 # ══════════════════════════════════════════════════════════════════
 elif page == "groundwater":
+    st.markdown('<style>[data-testid="stSidebar"]{display:none!important;min-width:0!important;width:0!important;}</style>', unsafe_allow_html=True)
     _render_nav("groundwater")
     st.markdown(
         '<div class="page-wrapper">'
@@ -965,6 +929,7 @@ elif page == "groundwater":
 # GUIDE PAGE
 # ══════════════════════════════════════════════════════════════════
 elif page == "guide":
+    st.markdown('<style>[data-testid="stSidebar"]{display:none!important;min-width:0!important;width:0!important;}</style>', unsafe_allow_html=True)
     _render_nav("guide")
     st.markdown(
         '<div class="page-wrapper">'
