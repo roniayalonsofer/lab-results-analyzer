@@ -109,27 +109,13 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800;900&display=swap');
 
-/* Sidebar — hidden everywhere; soil page overrides below */
-body:not(.soil-page) [data-testid="stSidebar"],
-[data-testid="stSidebar"] {
-    display: none !important;
-    width: 0 !important;
-    min-width: 0 !important;
-    max-width: 0 !important;
-    overflow: hidden !important;
-    visibility: hidden !important;
-}
-
-* { box-sizing: border-box; font-family: 'Heebo', sans-serif !important; }
+* { box-sizing: border-box; }
 html, body {
     direction: rtl;
     font-family: 'Heebo', sans-serif !important;
-    font-size: 18px;
     background: #f0f4f8;
     margin: 0;
 }
-
-p, label, div, span, input, select { font-size: inherit !important; }
 
 /* Hide Streamlit chrome */
 #MainMenu, footer, header { display: none !important; }
@@ -155,23 +141,23 @@ p, label, div, span, input, select { font-size: inherit !important; }
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: 72px;
+    height: 64px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
     position: sticky;
     top: 0;
     z-index: 999;
 }
-.nav-logo { display: flex; align-items: center; gap: 20px; }
+.nav-logo { display: flex; align-items: center; gap: 12px; }
 .nav-links { display: flex; gap: 4px; }
 .nav-link {
     color: #94b8c8 !important;
-    padding: 10px 20px;
+    padding: 8px 16px;
     border-radius: 6px;
-    font-size: 1.1rem;
+    font-size: 0.95rem;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s;
-    text-decoration: none !important;
+    text-decoration: none;
     border: none;
     background: transparent;
 }
@@ -199,7 +185,7 @@ p, label, div, span, input, select { font-size: inherit !important; }
     border: 1px solid #e8eef3;
 }
 .card-header {
-    font-size: 1.2rem;
+    font-size: 1rem;
     font-weight: 700;
     color: #1e3a4f;
     margin-bottom: 1rem;
@@ -215,8 +201,8 @@ p, label, div, span, input, select { font-size: inherit !important; }
     color: white;
     margin-bottom: 2rem;
 }
-.hero h1 { font-size: 3.2rem; font-weight: 900; margin: 0 0 0.5rem; }
-.hero p { font-size: 1.3rem; opacity: 0.85; margin: 0; font-weight: 300; }
+.hero h1 { font-size: 2.5rem; font-weight: 900; margin: 0 0 0.5rem; }
+.hero p { font-size: 1.1rem; opacity: 0.85; margin: 0; font-weight: 300; }
 
 /* Stat boxes */
 .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
@@ -228,8 +214,8 @@ p, label, div, span, input, select { font-size: inherit !important; }
     box-shadow: 0 1px 3px rgba(0,0,0,0.08);
     border-top: 3px solid #4a7a8a;
 }
-.stat-number { font-size: 2.8rem; font-weight: 800; color: #1e3a4f; }
-.stat-label { font-size: 1rem; color: #64748b; font-weight: 500; margin-top: 4px; }
+.stat-number { font-size: 2rem; font-weight: 800; color: #1e3a4f; }
+.stat-label { font-size: 0.85rem; color: #64748b; font-weight: 500; margin-top: 4px; }
 
 /* Step indicator */
 .steps { display: flex; gap: 1rem; margin-bottom: 1.5rem; }
@@ -251,8 +237,8 @@ p, label, div, span, input, select { font-size: inherit !important; }
     font-weight: 700; font-size: 1rem;
     margin: 0 auto 0.75rem;
 }
-.step-title { font-weight: 700; color: #1e3a4f; font-size: 1.1rem; }
-.step-desc { font-size: 0.95rem; color: #64748b; margin-top: 4px; }
+.step-title { font-weight: 700; color: #1e3a4f; font-size: 0.95rem; }
+.step-desc { font-size: 0.82rem; color: #64748b; margin-top: 4px; }
 
 /* Badge tags */
 .badge {
@@ -313,7 +299,7 @@ p, label, div, span, input, select { font-size: inherit !important; }
 }
 
 /* Table styling */
-.lab-table { width: 100%; border-collapse: collapse; font-size: 1rem; }
+.lab-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .lab-table th {
     background: #1e3a4f;
     color: white;
@@ -334,33 +320,14 @@ p, label, div, span, input, select { font-size: inherit !important; }
     color: #94b8c8;
     text-align: center;
     padding: 1.5rem;
-    font-size: 0.95rem;
+    font-size: 0.82rem;
     margin-top: 3rem;
 }
 .footer strong { color: white; }
 
-/* App layout — full-width main content */
-[data-testid="stAppViewContainer"] {
-    flex-direction: row-reverse !important;
-}
-[data-testid="stMain"] {
-    flex: 1 !important;
-    min-width: 0 !important;
-    margin-right: 0 !important;
-    padding-right: 0 !important;
-    width: 100% !important;
-}
-[data-testid="stMain"] .block-container {
-    max-width: 100% !important;
-    padding: 0 !important;
-}
-[data-testid="stAppViewContainer"] > section:first-child {
-    display: none !important;
-    width: 0 !important;
-    min-width: 0 !important;
-    max-width: 0 !important;
-    overflow: hidden !important;
-}
+/* Sidebar hidden on non-soil pages (override per-page below) */
+[data-testid="stSidebar"] { display: none !important; }
+section[data-testid="stSidebar"] { display: none !important; }
 
 /* RTL typography for Streamlit widgets */
 .stMarkdown p, .stMarkdown li,
@@ -788,37 +755,30 @@ def _preview_dialog(records, tm, project_name, client_name, rep_date,
 page = st.query_params.get("page", "home")
 
 
-# ── Navigation bar (HTML anchor tags, same-tab routing) ──────────
-def _render_nav(active: str):
-    _NAV_PAGES = [
-        ("soil",        "📊 ניתוח נתונים"),
-        ("groundwater", "💧 דוחות מי תהום"),
+# ── Navigation bar HTML ──────────────────────────────────────────
+def _nav_html(active: str) -> str:
+    _pages = [
+        ("home",        "🏠 דף בית"),
+        ("soil",        "🪨 ניתוח קרקע"),
+        ("groundwater", "💧 מי תהום"),
         ("guide",       "📖 מדריך"),
     ]
-    logo_html = (
-        f'<img src="data:image/png;base64,{LOGO_B64}" '
-        f'style="height:44px;vertical-align:middle;background:white;border-radius:6px;padding:4px 8px;">'
-        if LOGO_B64 else '<strong style="color:white;font-size:1.4rem;">אדמה</strong>'
+    links = "".join(
+        f'<a class="nav-link{" active" if p == active else ""}" href="?page={p}">{lbl}</a>'
+        for p, lbl in _pages
     )
-    links_html = ""
-    for p, lbl in _NAV_PAGES:
-        cls = "nav-link active" if p == active else "nav-link"
-        links_html += f'<a href="?page={p}" class="{cls}">{lbl}</a>'
-    st.markdown(
-        f'<div class="nav-bar" dir="rtl">'
-        f'<div class="nav-logo">'
-        f'{logo_html}'
-        f'<span style="color:rgba(255,255,255,0.55);font-size:1rem;font-family:Heebo,sans-serif;direction:rtl;">'
-        f'מערכת ניתוח תוצאות</span>'
+    return (
+        f'<div class="nav-bar">'
+        f'<div class="nav-logo">{LOGO_TAG}'
+        f'<span style="color:white;font-size:0.8rem;opacity:0.7;">מערכת ניתוח תוצאות</span>'
         f'</div>'
-        f'<div class="nav-links" dir="ltr">{links_html}</div>'
-        f'</div>',
-        unsafe_allow_html=True,
+        f'<div class="nav-links">{links}</div>'
+        f'</div>'
     )
 
 
 _FOOTER = (
-    '<div class="footer" dir="rtl"><strong>אדמה אפיון ושיקום אתרים בע"מ</strong>'
+    '<div class="footer"><strong>אדמה אפיון ושיקום אתרים בע"מ</strong>'
     ' · מערכת ניתוח תוצאות מעבדה · גרסה 2.0</div>'
 )
 
@@ -828,11 +788,9 @@ _FOOTER = (
 if page == "soil":
     # Un-hide sidebar for soil page (overrides global "display:none")
     st.markdown(
-        '<style>'
-        '[data-testid="stAppViewContainer"] > section[data-testid="stSidebar"]{'
+        '<style>[data-testid="stSidebar"],'
+        'section[data-testid="stSidebar"]{'
         'display:flex!important;'
-        'visibility:visible!important;'
-        'overflow:visible!important;'
         'background:#1e293b;'
         'min-width:15rem!important;max-width:16rem!important;width:15.5rem!important;'
         'flex-shrink:0!important;}'
@@ -905,37 +863,36 @@ if page == "soil":
 # HOME PAGE
 # ══════════════════════════════════════════════════════════════════
 if page == "home":
-    _render_nav("home")
+    st.markdown(_nav_html("home"), unsafe_allow_html=True)
     st.markdown(
-        '<div class="page-wrapper">'
-        '<div class="hero">'
-        '<h1>מערכת ניתוח נתוני קרקע</h1>'
-        '<p>ניתוח אוטומטי של דוחות מעבדה סביבתיים — זיהוי תרכובות, השוואה לערכי סף VSL ו-TIER1, והפקת דוחות Excel מקצועיים</p>'
-        '</div>'
-        '</div>',
+        f'<div class="page-wrapper">'
+        f'<div class="hero">'
+        f'<h1>🧪 מערכת ניתוח תוצאות מעבדה</h1>'
+        f'<p>פלטפורמה מתקדמת לניתוח אוטומטי של דוחות מעבדה סביבתיים — קרקע ומי תהום</p>'
+        f'</div>'
+        f'<div class="stat-grid">'
+        f'<div class="stat-box"><div class="stat-number">9</div><div class="stat-label">מעבדות נתמכות</div></div>'
+        f'<div class="stat-box"><div class="stat-number">VSL</div><div class="stat-label">ו-TIER1 אוטומטי</div></div>'
+        f'<div class="stat-box"><div class="stat-number">Excel</div><div class="stat-label">פלט מקצועי</div></div>'
+        f'</div>'
+        f'<div class="steps">'
+        f'<div class="step"><div class="step-num">1</div><div class="step-title">העלאת קבצים</div><div class="step-desc">PDF, Excel או CSV מהמעבדה</div></div>'
+        f'<div class="step"><div class="step-num">2</div><div class="step-title">עיבוד אוטומטי</div><div class="step-desc">זיהוי מעבדה, תרכובות וערכי סף</div></div>'
+        f'<div class="step"><div class="step-num">3</div><div class="step-title">הורדת דוח</div><div class="step-desc">Excel מקצועי עם צביעה אוטומטית</div></div>'
+        f'</div>'
+        f'</div>',
         unsafe_allow_html=True,
     )
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("📊 התחל ניתוח נתונים", use_container_width=True, type="primary"):
+        if st.button("🪨 התחל ניתוח קרקע", use_container_width=True, type="primary"):
             st.query_params["page"] = "soil"
             st.rerun()
     with col2:
-        if st.button("💧 דוחות מי תהום", use_container_width=True):
+        if st.button("💧 התחל ניתוח מי תהום", use_container_width=True):
             st.query_params["page"] = "groundwater"
             st.rerun()
-
-    st.markdown(
-        '<div class="page-wrapper">'
-        '<div class="steps">'
-        '<div class="step"><div class="step-num">1</div><div class="step-title">העלאת קבצים</div><div class="step-desc">PDF, Excel או CSV מהמעבדה</div></div>'
-        '<div class="step"><div class="step-num">2</div><div class="step-title">עיבוד אוטומטי</div><div class="step-desc">זיהוי מעבדה, תרכובות וערכי סף</div></div>'
-        '<div class="step"><div class="step-num">3</div><div class="step-title">הורדת דוח</div><div class="step-desc">Excel מקצועי עם צביעה אוטומטית</div></div>'
-        '</div>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
 
     st.markdown(_FOOTER, unsafe_allow_html=True)
 
@@ -944,7 +901,7 @@ if page == "home":
 # GROUNDWATER PAGE (placeholder)
 # ══════════════════════════════════════════════════════════════════
 elif page == "groundwater":
-    _render_nav("groundwater")
+    st.markdown(_nav_html("groundwater"), unsafe_allow_html=True)
     st.markdown(
         '<div class="page-wrapper">'
         '<div class="card">'
@@ -965,7 +922,7 @@ elif page == "groundwater":
 # GUIDE PAGE
 # ══════════════════════════════════════════════════════════════════
 elif page == "guide":
-    _render_nav("guide")
+    st.markdown(_nav_html("guide"), unsafe_allow_html=True)
     st.markdown(
         '<div class="page-wrapper">'
         '<div class="hero" style="padding:2rem 2.5rem;">'
@@ -1039,18 +996,18 @@ elif page == "guide":
         '</div>'
 
         '<div class="card">'
-        '<div class="card-header">מקרא צבעים בדוח הפלט</div>'
+        '<div class="card-header">🎨 מפתח צבעים בדוח Excel</div>'
         '<table class="lab-table">'
         '<thead><tr><th>צבע</th><th>משמעות</th></tr></thead>'
         '<tbody>'
         '<tr><td><span style="background:#FFFF00;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">צהוב</span></td>'
-        '<td>חריגה מ-VSL</td></tr>'
-        '<tr><td><span style="background:#ADD8E6;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">כחול</span></td>'
-        '<td>חריגה מ-TIER1 מגורים</td></tr>'
-        '<tr><td><span style="background:#FFB6C1;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">ורוד</span></td>'
-        '<td>חריגה מ-TIER1 תעשייה</td></tr>'
-        '<tr><td><span style="background:#D3D3D3;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">אפור</span></td>'
-        '<td>LOQ גבוה מסף</td></tr>'
+        '<td>ערך עולה על ערך ה-VSL (Soil Screening Value)</td></tr>'
+        '<tr><td><span style="background:#FFC000;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">כתום</span></td>'
+        '<td>ערך עולה על ערך TIER 1 (Risk-Based Threshold Level)</td></tr>'
+        '<tr><td><span style="background:#BDD7EE;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">כחול</span></td>'
+        '<td>ערך מתחת לגבול הכימות (LOQ / MRL)</td></tr>'
+        '<tr><td><span style="background:#E2EFDA;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">ירוק</span></td>'
+        '<td>כותרת ערך סף</td></tr>'
         '</tbody></table>'
         '</div>'
         '</div>',
@@ -1064,7 +1021,7 @@ elif page == "guide":
 # ══════════════════════════════════════════════════════════════════
 elif page == "soil":
     # nav bar
-    _render_nav("soil")
+    st.markdown(_nav_html("soil"), unsafe_allow_html=True)
 
     # ── UPLOAD ────────────────────────────────────────────────────
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
