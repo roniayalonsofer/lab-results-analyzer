@@ -328,22 +328,7 @@ p, label, div, span, input, select { font-size: inherit !important; }
 }
 .footer strong { color: white; }
 
-/* Sidebar — hidden globally, shown only on soil page via override below */
-[data-testid="stSidebar"],
-section[data-testid="stSidebar"] {
-    display: none !important;
-    width: 0 !important;
-    min-width: 0 !important;
-}
-[data-testid="stAppViewContainer"] > section:first-child {
-    display: none !important;
-    width: 0 !important;
-    min-width: 0 !important;
-}
-[data-testid="stAppViewContainer"] > section.main {
-    margin-right: 0 !important;
-    width: 100% !important;
-}
+
 section[data-testid="stMain"] {
     margin-right: 0 !important;
     padding-right: 0 !important;
