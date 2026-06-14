@@ -871,220 +871,7 @@ if page == "soil":
 
         st.markdown('<hr style="margin:1rem 0 0.5rem;">', unsafe_allow_html=True)
 
-
-# ══════════════════════════════════════════════════════════════════
-# HOME PAGE
-# ══════════════════════════════════════════════════════════════════
-if page == "home":
-    _render_nav("home")
-    st.markdown(
-        '<div class="page-wrapper">'
-        '<div class="hero">'
-        '<h1>מערכת ניתוח נתוני קרקע</h1>'
-        '<p>ניתוח אוטומטי של דוחות מעבדה סביבתיים — זיהוי תרכובות, השוואה לערכי סף VSL ו-TIER1, והפקת דוחות Excel מקצועיים</p>'
-        '</div>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("📊 התחל ניתוח נתונים", use_container_width=True, type="primary"):
-            st.query_params["page"] = "soil"
-            st.rerun()
-    with col2:
-        if st.button("💧 דוחות מי תהום", use_container_width=True):
-            st.query_params["page"] = "groundwater"
-            st.rerun()
-
-    st.markdown(
-        '<div class="page-wrapper">'
-        '<div class="steps">'
-        '<div class="step"><div class="step-num">1</div><div class="step-title">העלאת קבצים</div><div class="step-desc">PDF, Excel או CSV מהמעבדה</div></div>'
-        '<div class="step"><div class="step-num">2</div><div class="step-title">עיבוד אוטומטי</div><div class="step-desc">זיהוי מעבדה, תרכובות וערכי סף</div></div>'
-        '<div class="step"><div class="step-num">3</div><div class="step-title">הורדת דוח</div><div class="step-desc">Excel מקצועי עם צביעה אוטומטית</div></div>'
-        '</div>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(_FOOTER, unsafe_allow_html=True)
-
-
-# ══════════════════════════════════════════════════════════════════
-# GROUNDWATER PAGE
-# ══════════════════════════════════════════════════════════════════
-elif page == "groundwater":
-    _render_nav("groundwater")
-    from soil_lab_tool.gw_report_updater import run_update_bytes
-
-    st.markdown(
-        '<div class="page-wrapper">'
-        '<div class="hero" style="padding:1.5rem 2.5rem;">'
-        '<h1 style="font-size:2rem;">💧 עדכון דוח ניטור מי תהום</h1>'
-        '<p>העלה את הקבצים — המערכת תוסיף את הדיגום החדש לדוח ולגרפים אוטומטית</p>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-
-    col1, col2 = st.columns(2)
-    with col1:
-        word_file  = st.file_uploader("📄 דוח Word קודם (.docx)", type=["docx"], key="gw_word")
-        lab_file   = st.file_uploader("🧪 תוצאות מעבדה — בקטוכם (.pdf)", type=["pdf"], key="gw_lab")
-    with col2:
-        mk_file    = st.file_uploader("📊 Mann-Kendall (.xls)", type=["xls"], key="gw_mk")
-        field_file = st.file_uploader("📋 טופס ממצאי שדה (.pdf, אופציונלי)", type=["pdf"], key="gw_field")
-
-    if word_file and lab_file and mk_file:
-        if st.button("⚡ עדכן דוח", type="primary", use_container_width=True):
-            with st.spinner("מעבד... ⏳"):
-                try:
-                    out_word, out_mk = run_update_bytes(
-                        word_file.read(),
-                        lab_file.read(),
-                        mk_file.read(),
-                        field_pdf_bytes=field_file.read() if field_file else None,
-                    )
-                    st.success("✅ הדוח עודכן בהצלחה!")
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        st.download_button(
-                            "⬇️ הורד דוח Word מעודכן",
-                            data=out_word,
-                            file_name="דוח_ניטור_מעודכן.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            use_container_width=True,
-                        )
-                    with c2:
-                        st.download_button(
-                            "⬇️ הורד Mann-Kendall מעודכן",
-                            data=out_mk,
-                            file_name="mann_kendall_מעודכן.xls",
-                            mime="application/vnd.ms-excel",
-                            use_container_width=True,
-                        )
-                except Exception as e:
-                    st.error(f"שגיאה בעיבוד: {e}")
-    else:
-        st.markdown(
-            '<div class="card"><div class="card-header">📋 שלבי השימוש</div>'
-            '<div class="steps">'
-            '<div class="step"><div class="step-num">1</div><div class="step-title">דוח Word קודם</div><div class="step-desc">הדוח מהסבב הקודם (.docx)</div></div>'
-            '<div class="step"><div class="step-num">2</div><div class="step-title">תוצאות מעבדה</div><div class="step-desc">PDF של בקטוכם מהדיגום החדש</div></div>'
-            '<div class="step"><div class="step-num">3</div><div class="step-title">Mann-Kendall</div><div class="step-desc">קובץ XLS השמור לאתר זה</div></div>'
-            '<div class="step"><div class="step-num">4</div><div class="step-title">הורד</div><div class="step-desc">Word + XLS מעודכנים</div></div>'
-            '</div></div>',
-            unsafe_allow_html=True,
-        )
-
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown(_FOOTER, unsafe_allow_html=True)
-
-
-# ══════════════════════════════════════════════════════════════════
-# GUIDE PAGE
-# ══════════════════════════════════════════════════════════════════
-elif page == "guide":
-    _render_nav("guide")
-    st.markdown(
-        '<div class="page-wrapper">'
-        '<div class="hero" style="padding:2rem 2.5rem;">'
-        '<h1 style="font-size:2rem;">📖 מדריך למשתמש</h1>'
-        '<p>כל מה שצריך לדעת לניתוח תוצאות מעבדה סביבתיות</p>'
-        '</div>'
-
-        '<div class="card">'
-        '<div class="card-header">🚀 שלבי השימוש במערכת</div>'
-        '<div class="steps">'
-        '<div class="step">'
-        '<div class="step-num">1</div>'
-        '<div class="step-title">בחר מעבדה</div>'
-        '<div class="step-desc">בחר מתוך הרשימה או השתמש בזיהוי אוטומטי</div>'
-        '</div>'
-        '<div class="step">'
-        '<div class="step-num">2</div>'
-        '<div class="step-title">העלה קובץ</div>'
-        '<div class="step-desc">PDF, Excel (XLSX/XLS) או CSV</div>'
-        '</div>'
-        '<div class="step">'
-        '<div class="step-num">3</div>'
-        '<div class="step-title">בחר ערכי סף</div>'
-        '<div class="step-desc">VSL, TIER1, GW לפי סוג האתר</div>'
-        '</div>'
-        '<div class="step">'
-        '<div class="step-num">4</div>'
-        '<div class="step-title">הורד דוח</div>'
-        '<div class="step-desc">Excel + Word עם צביעה אוטומטית</div>'
-        '</div>'
-        '</div>'
-        '</div>'
-
-        '<div class="card">'
-        '<div class="card-header">🏭 מעבדות נתמכות</div>'
-        '<table class="lab-table">'
-        '<thead><tr>'
-        '<th>מעבדה</th>'
-        '<th>פורמטים נתמכים</th>'
-        '<th>סוגי ניתוח</th>'
-        '</tr></thead>'
-        '<tbody>'
-        '<tr><td><strong>Alchem</strong></td>'
-        '<td><span class="badge badge-blue">Excel</span><span class="badge badge-green">PDF</span></td>'
-        '<td>קרקע, VOC, SVOC, TPH, מתכות, גז קרקע</td></tr>'
-        '<tr><td><strong>KTE</strong></td>'
-        '<td><span class="badge badge-blue">Excel</span><span class="badge badge-gray">XML</span></td>'
-        '<td>קרקע, מי תהום, גז קרקע, PFAS</td></tr>'
-        '<tr><td><strong>מכון הנפט</strong></td>'
-        '<td><span class="badge badge-blue">Excel</span></td>'
-        '<td>קרקע (VOC, SVOC, מתכות)</td></tr>'
-        '<tr><td><strong>מכון האנרגיה</strong></td>'
-        '<td><span class="badge badge-blue">Excel</span></td>'
-        '<td>קרקע, גז קרקע</td></tr>'
-        '<tr><td><strong>בקטוכם</strong></td>'
-        '<td><span class="badge badge-green">PDF</span><span class="badge badge-gray">CSV</span></td>'
-        '<td>קרקע (SVOC, ICP, TPH), מי תהום</td></tr>'
-        '<tr><td><strong>ALS</strong></td>'
-        '<td><span class="badge badge-blue">Excel</span><span class="badge badge-green">PDF</span></td>'
-        '<td>קרקע, מי תהום, גרנולומטריה</td></tr>'
-        '<tr><td><strong>Aminolab</strong></td>'
-        '<td><span class="badge badge-green">PDF</span></td>'
-        '<td>מי תהום</td></tr>'
-        '<tr><td><strong>RJ Lee</strong></td>'
-        '<td><span class="badge badge-blue">Excel</span></td>'
-        '<td>PFAS (Method 1633)</td></tr>'
-        '<tr><td><strong>XRF (אלכם)</strong></td>'
-        '<td><span class="badge badge-blue">Excel</span><span class="badge badge-gray">CSV</span></td>'
-        '<td>קרקע — ניתוח מתכות XRF</td></tr>'
-        '</tbody></table>'
-        '</div>'
-
-        '<div class="card">'
-        '<div class="card-header">מקרא צבעים בדוח הפלט</div>'
-        '<table class="lab-table">'
-        '<thead><tr><th>צבע</th><th>משמעות</th></tr></thead>'
-        '<tbody>'
-        '<tr><td><span style="background:#FFFF00;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">צהוב</span></td>'
-        '<td>חריגה מ-VSL</td></tr>'
-        '<tr><td><span style="background:#ADD8E6;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">כחול</span></td>'
-        '<td>חריגה מ-TIER1 מגורים</td></tr>'
-        '<tr><td><span style="background:#FFB6C1;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">ורוד</span></td>'
-        '<td>חריגה מ-TIER1 תעשייה</td></tr>'
-        '<tr><td><span style="background:#D3D3D3;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">אפור</span></td>'
-        '<td>LOQ גבוה מסף</td></tr>'
-        '</tbody></table>'
-        '</div>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(_FOOTER, unsafe_allow_html=True)
-
-
-# ══════════════════════════════════════════════════════════════════
-# SOIL PAGE — existing analysis logic
-# ══════════════════════════════════════════════════════════════════
-if page == "soil":
-    # nav bar
-    _render_nav("soil")
+    # ══════════════════════════════════════════════════════════════════
 
     # ── UPLOAD ────────────────────────────────────────────────────
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
@@ -1580,4 +1367,211 @@ if page == "soil":
         unsafe_allow_html=True,
     )
 
+    st.markdown(_FOOTER, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════
+# HOME PAGE
+# ══════════════════════════════════════════════════════════════════
+if page == "home":
+    _render_nav("home")
+    st.markdown(
+        '<div class="page-wrapper">'
+        '<div class="hero">'
+        '<h1>מערכת ניתוח נתוני קרקע</h1>'
+        '<p>ניתוח אוטומטי של דוחות מעבדה סביבתיים — זיהוי תרכובות, השוואה לערכי סף VSL ו-TIER1, והפקת דוחות Excel מקצועיים</p>'
+        '</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("📊 התחל ניתוח נתונים", use_container_width=True, type="primary"):
+            st.query_params["page"] = "soil"
+            st.rerun()
+    with col2:
+        if st.button("💧 דוחות מי תהום", use_container_width=True):
+            st.query_params["page"] = "groundwater"
+            st.rerun()
+
+    st.markdown(
+        '<div class="page-wrapper">'
+        '<div class="steps">'
+        '<div class="step"><div class="step-num">1</div><div class="step-title">העלאת קבצים</div><div class="step-desc">PDF, Excel או CSV מהמעבדה</div></div>'
+        '<div class="step"><div class="step-num">2</div><div class="step-title">עיבוד אוטומטי</div><div class="step-desc">זיהוי מעבדה, תרכובות וערכי סף</div></div>'
+        '<div class="step"><div class="step-num">3</div><div class="step-title">הורדת דוח</div><div class="step-desc">Excel מקצועי עם צביעה אוטומטית</div></div>'
+        '</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(_FOOTER, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════
+# GROUNDWATER PAGE
+# ══════════════════════════════════════════════════════════════════
+elif page == "groundwater":
+    _render_nav("groundwater")
+    from soil_lab_tool.gw_report_updater import run_update_bytes
+
+    st.markdown(
+        '<div class="page-wrapper">'
+        '<div class="hero" style="padding:1.5rem 2.5rem;">'
+        '<h1 style="font-size:2rem;">💧 עדכון דוח ניטור מי תהום</h1>'
+        '<p>העלה את הקבצים — המערכת תוסיף את הדיגום החדש לדוח ולגרפים אוטומטית</p>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        word_file  = st.file_uploader("📄 דוח Word קודם (.docx)", type=["docx"], key="gw_word")
+        lab_file   = st.file_uploader("🧪 תוצאות מעבדה — בקטוכם (.pdf)", type=["pdf"], key="gw_lab")
+    with col2:
+        mk_file    = st.file_uploader("📊 Mann-Kendall (.xls)", type=["xls"], key="gw_mk")
+        field_file = st.file_uploader("📋 טופס ממצאי שדה (.pdf, אופציונלי)", type=["pdf"], key="gw_field")
+
+    if word_file and lab_file and mk_file:
+        if st.button("⚡ עדכן דוח", type="primary", use_container_width=True):
+            with st.spinner("מעבד... ⏳"):
+                try:
+                    out_word, out_mk = run_update_bytes(
+                        word_file.read(),
+                        lab_file.read(),
+                        mk_file.read(),
+                        field_pdf_bytes=field_file.read() if field_file else None,
+                    )
+                    st.success("✅ הדוח עודכן בהצלחה!")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.download_button(
+                            "⬇️ הורד דוח Word מעודכן",
+                            data=out_word,
+                            file_name="דוח_ניטור_מעודכן.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            use_container_width=True,
+                        )
+                    with c2:
+                        st.download_button(
+                            "⬇️ הורד Mann-Kendall מעודכן",
+                            data=out_mk,
+                            file_name="mann_kendall_מעודכן.xls",
+                            mime="application/vnd.ms-excel",
+                            use_container_width=True,
+                        )
+                except Exception as e:
+                    st.error(f"שגיאה בעיבוד: {e}")
+    else:
+        st.markdown(
+            '<div class="card"><div class="card-header">📋 שלבי השימוש</div>'
+            '<div class="steps">'
+            '<div class="step"><div class="step-num">1</div><div class="step-title">דוח Word קודם</div><div class="step-desc">הדוח מהסבב הקודם (.docx)</div></div>'
+            '<div class="step"><div class="step-num">2</div><div class="step-title">תוצאות מעבדה</div><div class="step-desc">PDF של בקטוכם מהדיגום החדש</div></div>'
+            '<div class="step"><div class="step-num">3</div><div class="step-title">Mann-Kendall</div><div class="step-desc">קובץ XLS השמור לאתר זה</div></div>'
+            '<div class="step"><div class="step-num">4</div><div class="step-title">הורד</div><div class="step-desc">Word + XLS מעודכנים</div></div>'
+            '</div></div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown(_FOOTER, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════
+# GUIDE PAGE
+# ══════════════════════════════════════════════════════════════════
+elif page == "guide":
+    _render_nav("guide")
+    st.markdown(
+        '<div class="page-wrapper">'
+        '<div class="hero" style="padding:2rem 2.5rem;">'
+        '<h1 style="font-size:2rem;">📖 מדריך למשתמש</h1>'
+        '<p>כל מה שצריך לדעת לניתוח תוצאות מעבדה סביבתיות</p>'
+        '</div>'
+
+        '<div class="card">'
+        '<div class="card-header">🚀 שלבי השימוש במערכת</div>'
+        '<div class="steps">'
+        '<div class="step">'
+        '<div class="step-num">1</div>'
+        '<div class="step-title">בחר מעבדה</div>'
+        '<div class="step-desc">בחר מתוך הרשימה או השתמש בזיהוי אוטומטי</div>'
+        '</div>'
+        '<div class="step">'
+        '<div class="step-num">2</div>'
+        '<div class="step-title">העלה קובץ</div>'
+        '<div class="step-desc">PDF, Excel (XLSX/XLS) או CSV</div>'
+        '</div>'
+        '<div class="step">'
+        '<div class="step-num">3</div>'
+        '<div class="step-title">בחר ערכי סף</div>'
+        '<div class="step-desc">VSL, TIER1, GW לפי סוג האתר</div>'
+        '</div>'
+        '<div class="step">'
+        '<div class="step-num">4</div>'
+        '<div class="step-title">הורד דוח</div>'
+        '<div class="step-desc">Excel + Word עם צביעה אוטומטית</div>'
+        '</div>'
+        '</div>'
+        '</div>'
+
+        '<div class="card">'
+        '<div class="card-header">🏭 מעבדות נתמכות</div>'
+        '<table class="lab-table">'
+        '<thead><tr>'
+        '<th>מעבדה</th>'
+        '<th>פורמטים נתמכים</th>'
+        '<th>סוגי ניתוח</th>'
+        '</tr></thead>'
+        '<tbody>'
+        '<tr><td><strong>Alchem</strong></td>'
+        '<td><span class="badge badge-blue">Excel</span><span class="badge badge-green">PDF</span></td>'
+        '<td>קרקע, VOC, SVOC, TPH, מתכות, גז קרקע</td></tr>'
+        '<tr><td><strong>KTE</strong></td>'
+        '<td><span class="badge badge-blue">Excel</span><span class="badge badge-gray">XML</span></td>'
+        '<td>קרקע, מי תהום, גז קרקע, PFAS</td></tr>'
+        '<tr><td><strong>מכון הנפט</strong></td>'
+        '<td><span class="badge badge-blue">Excel</span></td>'
+        '<td>קרקע (VOC, SVOC, מתכות)</td></tr>'
+        '<tr><td><strong>מכון האנרגיה</strong></td>'
+        '<td><span class="badge badge-blue">Excel</span></td>'
+        '<td>קרקע, גז קרקע</td></tr>'
+        '<tr><td><strong>בקטוכם</strong></td>'
+        '<td><span class="badge badge-green">PDF</span><span class="badge badge-gray">CSV</span></td>'
+        '<td>קרקע (SVOC, ICP, TPH), מי תהום</td></tr>'
+        '<tr><td><strong>ALS</strong></td>'
+        '<td><span class="badge badge-blue">Excel</span><span class="badge badge-green">PDF</span></td>'
+        '<td>קרקע, מי תהום, גרנולומטריה</td></tr>'
+        '<tr><td><strong>Aminolab</strong></td>'
+        '<td><span class="badge badge-green">PDF</span></td>'
+        '<td>מי תהום</td></tr>'
+        '<tr><td><strong>RJ Lee</strong></td>'
+        '<td><span class="badge badge-blue">Excel</span></td>'
+        '<td>PFAS (Method 1633)</td></tr>'
+        '<tr><td><strong>XRF (אלכם)</strong></td>'
+        '<td><span class="badge badge-blue">Excel</span><span class="badge badge-gray">CSV</span></td>'
+        '<td>קרקע — ניתוח מתכות XRF</td></tr>'
+        '</tbody></table>'
+        '</div>'
+
+        '<div class="card">'
+        '<div class="card-header">מקרא צבעים בדוח הפלט</div>'
+        '<table class="lab-table">'
+        '<thead><tr><th>צבע</th><th>משמעות</th></tr></thead>'
+        '<tbody>'
+        '<tr><td><span style="background:#FFFF00;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">צהוב</span></td>'
+        '<td>חריגה מ-VSL</td></tr>'
+        '<tr><td><span style="background:#ADD8E6;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">כחול</span></td>'
+        '<td>חריגה מ-TIER1 מגורים</td></tr>'
+        '<tr><td><span style="background:#FFB6C1;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">ורוד</span></td>'
+        '<td>חריגה מ-TIER1 תעשייה</td></tr>'
+        '<tr><td><span style="background:#D3D3D3;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">אפור</span></td>'
+        '<td>LOQ גבוה מסף</td></tr>'
+        '</tbody></table>'
+        '</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown(_FOOTER, unsafe_allow_html=True)
