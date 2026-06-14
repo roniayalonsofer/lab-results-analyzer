@@ -799,7 +799,15 @@ class LabReportExcel:
             row_data = [param, unit_map.get(param, "")]
             for sid in samples:
                 v, flag, _ = pivot.get(param, {}).get(sid, (None, "<LOQ", None))
-                row_data.append(v if v is not None else "")
+                if flag == "ND" or flag == "nd":
+                    row_data.append("-")
+                elif flag == "<LOQ":
+                    loq_val = loq_map.get(param)
+                    row_data.append(f"<{loq_val}" if loq_val is not None else "<LOQ")
+                elif v is not None:
+                    row_data.append(v)
+                else:
+                    row_data.append("-")
             for ci, val in enumerate(row_data, 1):
                 c = ws.cell(row=row_num, column=ci, value=val)
                 c.font      = _font(val)
