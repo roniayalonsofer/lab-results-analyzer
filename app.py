@@ -113,10 +113,12 @@ st.markdown("""
 html, body {
     direction: rtl;
     font-family: 'Heebo', sans-serif !important;
-    font-size: 16px;
+    font-size: 18px;
     background: #f0f4f8;
     margin: 0;
 }
+
+p, label, div, span, input, select { font-size: inherit !important; }
 
 /* Hide Streamlit chrome */
 #MainMenu, footer, header { display: none !important; }
@@ -142,23 +144,23 @@ html, body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: 64px;
+    height: 72px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
     position: sticky;
     top: 0;
     z-index: 999;
 }
-.nav-logo { display: flex; align-items: center; gap: 12px; }
+.nav-logo { display: flex; align-items: center; gap: 20px; }
 .nav-links { display: flex; gap: 4px; }
 .nav-link {
     color: #94b8c8 !important;
-    padding: 8px 16px;
+    padding: 10px 20px;
     border-radius: 6px;
-    font-size: 1rem;
+    font-size: 1.1rem;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s;
-    text-decoration: none;
+    text-decoration: none !important;
     border: none;
     background: transparent;
 }
@@ -186,7 +188,7 @@ html, body {
     border: 1px solid #e8eef3;
 }
 .card-header {
-    font-size: 1.1rem;
+    font-size: 1.2rem;
     font-weight: 700;
     color: #1e3a4f;
     margin-bottom: 1rem;
@@ -202,8 +204,8 @@ html, body {
     color: white;
     margin-bottom: 2rem;
 }
-.hero h1 { font-size: 3rem; font-weight: 900; margin: 0 0 0.5rem; }
-.hero p { font-size: 1.1rem; opacity: 0.85; margin: 0; font-weight: 300; }
+.hero h1 { font-size: 3.2rem; font-weight: 900; margin: 0 0 0.5rem; }
+.hero p { font-size: 1.3rem; opacity: 0.85; margin: 0; font-weight: 300; }
 
 /* Stat boxes */
 .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
@@ -215,8 +217,8 @@ html, body {
     box-shadow: 0 1px 3px rgba(0,0,0,0.08);
     border-top: 3px solid #4a7a8a;
 }
-.stat-number { font-size: 2.5rem; font-weight: 800; color: #1e3a4f; }
-.stat-label { font-size: 0.85rem; color: #64748b; font-weight: 500; margin-top: 4px; }
+.stat-number { font-size: 2.8rem; font-weight: 800; color: #1e3a4f; }
+.stat-label { font-size: 1rem; color: #64748b; font-weight: 500; margin-top: 4px; }
 
 /* Step indicator */
 .steps { display: flex; gap: 1rem; margin-bottom: 1.5rem; }
@@ -238,8 +240,8 @@ html, body {
     font-weight: 700; font-size: 1rem;
     margin: 0 auto 0.75rem;
 }
-.step-title { font-weight: 700; color: #1e3a4f; font-size: 1.05rem; }
-.step-desc { font-size: 0.82rem; color: #64748b; margin-top: 4px; }
+.step-title { font-weight: 700; color: #1e3a4f; font-size: 1.1rem; }
+.step-desc { font-size: 0.95rem; color: #64748b; margin-top: 4px; }
 
 /* Badge tags */
 .badge {
@@ -300,7 +302,7 @@ html, body {
 }
 
 /* Table styling */
-.lab-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.lab-table { width: 100%; border-collapse: collapse; font-size: 1rem; }
 .lab-table th {
     background: #1e3a4f;
     color: white;
@@ -321,14 +323,32 @@ html, body {
     color: #94b8c8;
     text-align: center;
     padding: 1.5rem;
-    font-size: 0.82rem;
+    font-size: 0.95rem;
     margin-top: 3rem;
 }
 .footer strong { color: white; }
 
-/* Sidebar hidden on non-soil pages (override per-page below) */
-[data-testid="stSidebar"] { display: none !important; }
-section[data-testid="stSidebar"] { display: none !important; }
+/* Sidebar — hidden globally, shown only on soil page via override below */
+[data-testid="stSidebar"],
+section[data-testid="stSidebar"] {
+    display: none !important;
+    width: 0 !important;
+    min-width: 0 !important;
+}
+[data-testid="stAppViewContainer"] > section:first-child {
+    display: none !important;
+    width: 0 !important;
+    min-width: 0 !important;
+}
+[data-testid="stAppViewContainer"] > section.main {
+    margin-right: 0 !important;
+    width: 100% !important;
+}
+section[data-testid="stMain"] {
+    margin-right: 0 !important;
+    padding-right: 0 !important;
+    width: 100% !important;
+}
 
 /* RTL typography for Streamlit widgets */
 .stMarkdown p, .stMarkdown li,
@@ -756,7 +776,7 @@ def _preview_dialog(records, tm, project_name, client_name, rep_date,
 page = st.query_params.get("page", "home")
 
 
-# ── Navigation bar (Streamlit-native, same-tab routing) ──────────
+# ── Navigation bar (HTML anchor tags, same-tab routing) ──────────
 def _render_nav(active: str):
     _NAV_PAGES = [
         ("soil",        "📊 ניתוח נתונים"),
@@ -764,28 +784,25 @@ def _render_nav(active: str):
         ("guide",       "📖 מדריך"),
     ]
     logo_html = (
-        f'<img src="data:image/png;base64,{LOGO_B64}" style="height:42px;vertical-align:middle;">'
+        f'<img src="data:image/png;base64,{LOGO_B64}" '
+        f'style="height:44px;vertical-align:middle;background:white;border-radius:6px;padding:4px 8px;">'
         if LOGO_B64 else '<strong style="color:white;font-size:1.4rem;">אדמה</strong>'
     )
-    # Logo strip
+    links_html = ""
+    for p, lbl in _NAV_PAGES:
+        cls = "nav-link active" if p == active else "nav-link"
+        links_html += f'<a href="?page={p}" class="{cls}">{lbl}</a>'
     st.markdown(
-        f'<div style="background:#1e3a4f;padding:0.75rem 2rem;display:flex;'
-        f'align-items:center;gap:14px;box-shadow:0 2px 8px rgba(0,0,0,0.15);">'
+        f'<div class="nav-bar">'
+        f'<div class="nav-logo">'
         f'{logo_html}'
-        f'<span style="color:rgba(255,255,255,0.55);font-size:0.85rem;'
-        f'font-family:Heebo,sans-serif;">מערכת ניתוח תוצאות</span>'
+        f'<span style="color:rgba(255,255,255,0.55);font-size:1rem;font-family:Heebo,sans-serif;">'
+        f'מערכת ניתוח תוצאות</span>'
+        f'</div>'
+        f'<div class="nav-links">{links_html}</div>'
         f'</div>',
         unsafe_allow_html=True,
     )
-    # Button row — spacer + 3 nav buttons
-    _sp, c1, c2, c3 = st.columns([5, 1.6, 1.7, 1.2])
-    for col, (p, lbl) in zip([c1, c2, c3], _NAV_PAGES):
-        with col:
-            if st.button(lbl, key=f"nav_{p}",
-                         type="primary" if p == active else "secondary",
-                         use_container_width=True):
-                st.query_params["page"] = p
-                st.rerun()
 
 
 _FOOTER = (
@@ -799,8 +816,8 @@ _FOOTER = (
 if page == "soil":
     # Un-hide sidebar for soil page (overrides global "display:none")
     st.markdown(
-        '<style>[data-testid="stSidebar"],'
-        'section[data-testid="stSidebar"]{'
+        '<style>'
+        '[data-testid="stAppViewContainer"] > section[data-testid="stSidebar"]{'
         'display:flex!important;'
         'background:#1e293b;'
         'min-width:15rem!important;max-width:16rem!important;width:15.5rem!important;'
