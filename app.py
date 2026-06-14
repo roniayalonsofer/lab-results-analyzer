@@ -111,7 +111,7 @@ st.markdown("""
 
 * { box-sizing: border-box; font-family: 'Heebo', sans-serif !important; }
 html, body {
-    direction: ltr !important;
+    direction: rtl;
     font-family: 'Heebo', sans-serif !important;
     font-size: 18px;
     background: #f0f4f8;
@@ -119,14 +119,6 @@ html, body {
 }
 
 p, label, div, span, input, select { font-size: inherit !important; }
-
-/* RTL content — keep Hebrew text right-aligned while body is LTR */
-[data-testid="stMain"] { direction: rtl; }
-[data-testid="stSidebarContent"] { direction: rtl; }
-.stMarkdown, .stTextInput, .stSelectbox, label, p, h1, h2, h3 {
-    direction: rtl;
-    text-align: right;
-}
 
 /* Hide Streamlit chrome */
 #MainMenu, footer, header { display: none !important; }
