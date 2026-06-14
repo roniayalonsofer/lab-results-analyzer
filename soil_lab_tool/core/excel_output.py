@@ -800,7 +800,7 @@ class LabReportExcel:
             for sid in samples:
                 v, flag, _ = pivot.get(param, {}).get(sid, (None, "<LOQ", None))
                 if flag == "ND" or flag == "nd":
-                    row_data.append("-")
+                    row_data.append("N.D.")
                 elif flag == "<LOQ":
                     loq_val = loq_map.get(param)
                     row_data.append(f"<{loq_val}" if loq_val is not None else "<LOQ")
