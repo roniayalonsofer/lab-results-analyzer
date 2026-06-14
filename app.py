@@ -875,7 +875,7 @@ if page == "soil":
 # ══════════════════════════════════════════════════════════════════
 # HOME PAGE
 # ══════════════════════════════════════════════════════════════════
-elif page == "home":
+if page == "home":
     _render_nav("home")
     st.markdown(
         '<div class="page-wrapper">'
