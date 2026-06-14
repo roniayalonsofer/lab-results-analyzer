@@ -873,6 +873,8 @@ if page == "soil":
 
     # ══════════════════════════════════════════════════════════════════
 
+    _render_nav("soil")
+
     # ── UPLOAD ────────────────────────────────────────────────────
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
 
