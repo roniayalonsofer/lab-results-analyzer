@@ -265,10 +265,10 @@ class AlchemSoilParser(BaseParser):
                 loq = loq_per_col.get(ci)
 
                 if raw_val.upper() in ("N.D.", "ND", "N/D"):
-                    value = loq
-                    flag  = "<LOQ"
+                    value = None
+                    flag  = "ND"
                 elif raw_val.lower() in ("<loq", "<mrl", "<rl"):
-                    value = None   # no numeric LOQ available in TPH sheet
+                    value = loq    # use per-column LOQ if available, else None
                     flag  = "<LOQ"
                 else:
                     try:
