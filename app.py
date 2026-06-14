@@ -122,11 +122,23 @@ html, body {
 [data-testid="stToolbar"] { display: none !important; }
 .stDeployButton { display: none !important; }
 
+/* Sidebar — left side */
+[data-testid="stSidebar"] {
+    right: auto !important;
+    left: 0 !important;
+    order: -1 !important;
+}
+[data-testid="stAppViewContainer"] {
+    flex-direction: row !important;
+}
+
 /* Main container */
 [data-testid="stMain"] {
     direction: rtl;
     background: #f0f4f8;
     padding: 0 !important;
+    margin-left: 16rem !important;
+    margin-right: 0 !important;
 }
 [data-testid="stMain"] .block-container {
     direction: rtl;
@@ -146,6 +158,8 @@ html, body {
     position: sticky;
     top: 0;
     z-index: 999;
+    margin-left: -16rem !important;
+    width: calc(100% + 16rem) !important;
 }
 .nav-logo { display: flex; align-items: center; gap: 12px; }
 .nav-links { display: flex; gap: 4px; }
