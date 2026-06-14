@@ -1387,15 +1387,13 @@ if page == "home":
         unsafe_allow_html=True,
     )
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("📊 התחל ניתוח נתונים", use_container_width=True, type="primary"):
-            st.query_params["page"] = "soil"
-            st.rerun()
-    with col2:
-        if st.button("💧 דוחות מי תהום", use_container_width=True):
-            st.query_params["page"] = "groundwater"
-            st.rerun()
+    st.markdown(
+        '<div style="display:flex;gap:1rem;justify-content:center;margin:1rem 0;">'
+        '<a href="?page=soil" target="_self" style="background:#1e3a4f;color:white;padding:0.75rem 2rem;border-radius:8px;text-decoration:none;font-size:1.1rem;font-weight:600;">📊 התחל ניתוח נתונים</a>'
+        '<a href="?page=groundwater" target="_self" style="background:#4a7a8a;color:white;padding:0.75rem 2rem;border-radius:8px;text-decoration:none;font-size:1.1rem;font-weight:600;">💧 דוחות מי תהום</a>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
     st.markdown(
         '<div class="page-wrapper">'
