@@ -1102,7 +1102,7 @@ class LabReportExcel:
                 elif flag == "<":
                     display = f"<{v}" if isinstance(v, float) else f"<{v}"
                 elif flag == "ND":
-                    display = "-"
+                    display = "N.D."
                 else:
                     display = v
                 sample_vals.append((display, v, flag, lod))
@@ -1343,7 +1343,7 @@ class LabReportExcel:
                     loq_ref = loq_val or v
                     display = f"<{loq_ref}" if isinstance(loq_ref, float) else f"<{loq_ref}"
                 elif flag == "ND":
-                    display = "-"
+                    display = "N.D."
                 else:
                     display = v
                 col_vals.append(display)
