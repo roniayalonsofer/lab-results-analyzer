@@ -109,10 +109,11 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800;900&display=swap');
 
-* { box-sizing: border-box; }
+* { box-sizing: border-box; font-family: 'Heebo', sans-serif !important; }
 html, body {
     direction: rtl;
     font-family: 'Heebo', sans-serif !important;
+    font-size: 16px;
     background: #f0f4f8;
     margin: 0;
 }
@@ -153,7 +154,7 @@ html, body {
     color: #94b8c8 !important;
     padding: 8px 16px;
     border-radius: 6px;
-    font-size: 0.95rem;
+    font-size: 1rem;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s;
@@ -185,7 +186,7 @@ html, body {
     border: 1px solid #e8eef3;
 }
 .card-header {
-    font-size: 1rem;
+    font-size: 1.1rem;
     font-weight: 700;
     color: #1e3a4f;
     margin-bottom: 1rem;
@@ -201,7 +202,7 @@ html, body {
     color: white;
     margin-bottom: 2rem;
 }
-.hero h1 { font-size: 2.5rem; font-weight: 900; margin: 0 0 0.5rem; }
+.hero h1 { font-size: 3rem; font-weight: 900; margin: 0 0 0.5rem; }
 .hero p { font-size: 1.1rem; opacity: 0.85; margin: 0; font-weight: 300; }
 
 /* Stat boxes */
@@ -214,7 +215,7 @@ html, body {
     box-shadow: 0 1px 3px rgba(0,0,0,0.08);
     border-top: 3px solid #4a7a8a;
 }
-.stat-number { font-size: 2rem; font-weight: 800; color: #1e3a4f; }
+.stat-number { font-size: 2.5rem; font-weight: 800; color: #1e3a4f; }
 .stat-label { font-size: 0.85rem; color: #64748b; font-weight: 500; margin-top: 4px; }
 
 /* Step indicator */
@@ -237,7 +238,7 @@ html, body {
     font-weight: 700; font-size: 1rem;
     margin: 0 auto 0.75rem;
 }
-.step-title { font-weight: 700; color: #1e3a4f; font-size: 0.95rem; }
+.step-title { font-weight: 700; color: #1e3a4f; font-size: 1.05rem; }
 .step-desc { font-size: 0.82rem; color: #64748b; margin-top: 4px; }
 
 /* Badge tags */
@@ -755,26 +756,36 @@ def _preview_dialog(records, tm, project_name, client_name, rep_date,
 page = st.query_params.get("page", "home")
 
 
-# ── Navigation bar HTML ──────────────────────────────────────────
-def _nav_html(active: str) -> str:
-    _pages = [
-        ("home",        "🏠 דף בית"),
-        ("soil",        "🪨 ניתוח קרקע"),
-        ("groundwater", "💧 מי תהום"),
+# ── Navigation bar (Streamlit-native, same-tab routing) ──────────
+def _render_nav(active: str):
+    _NAV_PAGES = [
+        ("soil",        "📊 ניתוח נתונים"),
+        ("groundwater", "💧 דוחות מי תהום"),
         ("guide",       "📖 מדריך"),
     ]
-    links = "".join(
-        f'<a class="nav-link{" active" if p == active else ""}" href="?page={p}">{lbl}</a>'
-        for p, lbl in _pages
+    logo_html = (
+        f'<img src="data:image/png;base64,{LOGO_B64}" style="height:42px;vertical-align:middle;">'
+        if LOGO_B64 else '<strong style="color:white;font-size:1.4rem;">אדמה</strong>'
     )
-    return (
-        f'<div class="nav-bar">'
-        f'<div class="nav-logo">{LOGO_TAG}'
-        f'<span style="color:white;font-size:0.8rem;opacity:0.7;">מערכת ניתוח תוצאות</span>'
-        f'</div>'
-        f'<div class="nav-links">{links}</div>'
-        f'</div>'
+    # Logo strip
+    st.markdown(
+        f'<div style="background:#1e3a4f;padding:0.75rem 2rem;display:flex;'
+        f'align-items:center;gap:14px;box-shadow:0 2px 8px rgba(0,0,0,0.15);">'
+        f'{logo_html}'
+        f'<span style="color:rgba(255,255,255,0.55);font-size:0.85rem;'
+        f'font-family:Heebo,sans-serif;">מערכת ניתוח תוצאות</span>'
+        f'</div>',
+        unsafe_allow_html=True,
     )
+    # Button row — spacer + 3 nav buttons
+    _sp, c1, c2, c3 = st.columns([5, 1.6, 1.7, 1.2])
+    for col, (p, lbl) in zip([c1, c2, c3], _NAV_PAGES):
+        with col:
+            if st.button(lbl, key=f"nav_{p}",
+                         type="primary" if p == active else "secondary",
+                         use_container_width=True):
+                st.query_params["page"] = p
+                st.rerun()
 
 
 _FOOTER = (
@@ -863,36 +874,37 @@ if page == "soil":
 # HOME PAGE
 # ══════════════════════════════════════════════════════════════════
 if page == "home":
-    st.markdown(_nav_html("home"), unsafe_allow_html=True)
+    _render_nav("home")
     st.markdown(
-        f'<div class="page-wrapper">'
-        f'<div class="hero">'
-        f'<h1>🧪 מערכת ניתוח תוצאות מעבדה</h1>'
-        f'<p>פלטפורמה מתקדמת לניתוח אוטומטי של דוחות מעבדה סביבתיים — קרקע ומי תהום</p>'
-        f'</div>'
-        f'<div class="stat-grid">'
-        f'<div class="stat-box"><div class="stat-number">9</div><div class="stat-label">מעבדות נתמכות</div></div>'
-        f'<div class="stat-box"><div class="stat-number">VSL</div><div class="stat-label">ו-TIER1 אוטומטי</div></div>'
-        f'<div class="stat-box"><div class="stat-number">Excel</div><div class="stat-label">פלט מקצועי</div></div>'
-        f'</div>'
-        f'<div class="steps">'
-        f'<div class="step"><div class="step-num">1</div><div class="step-title">העלאת קבצים</div><div class="step-desc">PDF, Excel או CSV מהמעבדה</div></div>'
-        f'<div class="step"><div class="step-num">2</div><div class="step-title">עיבוד אוטומטי</div><div class="step-desc">זיהוי מעבדה, תרכובות וערכי סף</div></div>'
-        f'<div class="step"><div class="step-num">3</div><div class="step-title">הורדת דוח</div><div class="step-desc">Excel מקצועי עם צביעה אוטומטית</div></div>'
-        f'</div>'
-        f'</div>',
+        '<div class="page-wrapper">'
+        '<div class="hero">'
+        '<h1>מערכת ניתוח נתוני קרקע</h1>'
+        '<p>ניתוח אוטומטי של דוחות מעבדה סביבתיים — זיהוי תרכובות, השוואה לערכי סף VSL ו-TIER1, והפקת דוחות Excel מקצועיים</p>'
+        '</div>'
+        '</div>',
         unsafe_allow_html=True,
     )
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🪨 התחל ניתוח קרקע", use_container_width=True, type="primary"):
+        if st.button("📊 התחל ניתוח נתונים", use_container_width=True, type="primary"):
             st.query_params["page"] = "soil"
             st.rerun()
     with col2:
-        if st.button("💧 התחל ניתוח מי תהום", use_container_width=True):
+        if st.button("💧 דוחות מי תהום", use_container_width=True):
             st.query_params["page"] = "groundwater"
             st.rerun()
+
+    st.markdown(
+        '<div class="page-wrapper">'
+        '<div class="steps">'
+        '<div class="step"><div class="step-num">1</div><div class="step-title">העלאת קבצים</div><div class="step-desc">PDF, Excel או CSV מהמעבדה</div></div>'
+        '<div class="step"><div class="step-num">2</div><div class="step-title">עיבוד אוטומטי</div><div class="step-desc">זיהוי מעבדה, תרכובות וערכי סף</div></div>'
+        '<div class="step"><div class="step-num">3</div><div class="step-title">הורדת דוח</div><div class="step-desc">Excel מקצועי עם צביעה אוטומטית</div></div>'
+        '</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
     st.markdown(_FOOTER, unsafe_allow_html=True)
 
@@ -901,7 +913,7 @@ if page == "home":
 # GROUNDWATER PAGE (placeholder)
 # ══════════════════════════════════════════════════════════════════
 elif page == "groundwater":
-    st.markdown(_nav_html("groundwater"), unsafe_allow_html=True)
+    _render_nav("groundwater")
     st.markdown(
         '<div class="page-wrapper">'
         '<div class="card">'
@@ -922,7 +934,7 @@ elif page == "groundwater":
 # GUIDE PAGE
 # ══════════════════════════════════════════════════════════════════
 elif page == "guide":
-    st.markdown(_nav_html("guide"), unsafe_allow_html=True)
+    _render_nav("guide")
     st.markdown(
         '<div class="page-wrapper">'
         '<div class="hero" style="padding:2rem 2.5rem;">'
@@ -996,18 +1008,18 @@ elif page == "guide":
         '</div>'
 
         '<div class="card">'
-        '<div class="card-header">🎨 מפתח צבעים בדוח Excel</div>'
+        '<div class="card-header">מקרא צבעים בדוח הפלט</div>'
         '<table class="lab-table">'
         '<thead><tr><th>צבע</th><th>משמעות</th></tr></thead>'
         '<tbody>'
         '<tr><td><span style="background:#FFFF00;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">צהוב</span></td>'
-        '<td>ערך עולה על ערך ה-VSL (Soil Screening Value)</td></tr>'
-        '<tr><td><span style="background:#FFC000;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">כתום</span></td>'
-        '<td>ערך עולה על ערך TIER 1 (Risk-Based Threshold Level)</td></tr>'
-        '<tr><td><span style="background:#BDD7EE;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">כחול</span></td>'
-        '<td>ערך מתחת לגבול הכימות (LOQ / MRL)</td></tr>'
-        '<tr><td><span style="background:#E2EFDA;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">ירוק</span></td>'
-        '<td>כותרת ערך סף</td></tr>'
+        '<td>חריגה מ-VSL</td></tr>'
+        '<tr><td><span style="background:#ADD8E6;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">כחול</span></td>'
+        '<td>חריגה מ-TIER1 מגורים</td></tr>'
+        '<tr><td><span style="background:#FFB6C1;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">ורוד</span></td>'
+        '<td>חריגה מ-TIER1 תעשייה</td></tr>'
+        '<tr><td><span style="background:#D3D3D3;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">אפור</span></td>'
+        '<td>LOQ גבוה מסף</td></tr>'
         '</tbody></table>'
         '</div>'
         '</div>',
@@ -1021,7 +1033,7 @@ elif page == "guide":
 # ══════════════════════════════════════════════════════════════════
 elif page == "soil":
     # nav bar
-    st.markdown(_nav_html("soil"), unsafe_allow_html=True)
+    _render_nav("soil")
 
     # ── UPLOAD ────────────────────────────────────────────────────
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
