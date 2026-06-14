@@ -4,3 +4,7 @@ streamlit
 python-docx
 pdfplumber
 pymupdf
+xlrd
+xlwt
+scipy
+matplotlib

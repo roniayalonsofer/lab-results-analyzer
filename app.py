@@ -805,52 +805,60 @@ _FOOTER = (
 )
 
 # ══════════════════════════════════════════════════════════════════
-# SIDEBAR — always visible
+# SIDEBAR — soil analysis page only
 # ══════════════════════════════════════════════════════════════════
 _nav_logo_small = (
     f'<img src="data:image/png;base64,{LOGO_B64}" style="height:34px;display:block;">'
     if LOGO_B64 else '<span style="font-size:1.3rem;">🧪</span>'
 )
 
-with st.sidebar:
-    st.markdown(
-        f'<div style="text-align:center;padding:0.5rem 0 0.75rem;">'
-        f'<div style="background:white;border-radius:2px;padding:0.6rem 0.8rem;'
-        f'margin-bottom:0.5rem;display:inline-block;width:90%;">'
-        f'{_nav_logo_small}</div>'
-        f'<div style="font-size:0.7rem;color:#94a3b8;margin-top:4px;">Lab Results Analyzer</div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown('<hr style="margin:0.5rem 0 1rem;">', unsafe_allow_html=True)
+# Default values for sidebar variables (used when sidebar not shown)
+client_name = ""
+project_name = ""
+lab = None
+category = None
+rep_date = ""
 
-    st.markdown('<div class="sidebar-label">📋 פרטי פרויקט</div>', unsafe_allow_html=True)
-    client_name  = st.text_input("שם לקוח",  value="", label_visibility="collapsed",
-                                  placeholder="שם לקוח (לדוג׳: סונול)")
-    project_name = st.text_input("שם האתר",  value="", label_visibility="collapsed",
-                                  placeholder="שם האתר (לדוג׳: צומת שמשון)")
+if page == "soil":
+    with st.sidebar:
+        st.markdown(
+            f'<div style="text-align:center;padding:0.5rem 0 0.75rem;">'
+            f'<div style="background:white;border-radius:2px;padding:0.6rem 0.8rem;'
+            f'margin-bottom:0.5rem;display:inline-block;width:90%;">'
+            f'{_nav_logo_small}</div>'
+            f'<div style="font-size:0.7rem;color:#94a3b8;margin-top:4px;">Lab Results Analyzer</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown('<hr style="margin:0.5rem 0 1rem;">', unsafe_allow_html=True)
 
-    st.markdown('<div class="sidebar-label">🏭 מעבדה וקטגוריה</div>', unsafe_allow_html=True)
-    lab = st.selectbox(
-        "מעבדה",
-        ["🔍 זיהוי אוטומטי", "KTE", "מכון הנפט", "מכון האנרגיה", "בקטוכם",
-         "Alchem", "ALS", "Aminolab", "RJ Lee", "אלכם (XRF)"],
-        label_visibility="collapsed",
-    )
-    category_display = {
-        "🔍 זיהוי אוטומטי":           "auto",
-        "🪨 קרקע (soil)":             "soil",
-        "💧 מי תהום (groundwater)":   "groundwater",
-        "🧬 PFAS":                    "pfas",
-        "📊 PR format (KTE מתכות)":   "pr",
-        "💨 גז קרקע (soil_gas)":      "soil_gas",
-        "🪨 גרנולומטריה (grain_size)": "grain_size",
-    }
-    cat_label    = st.selectbox("קטגוריה", list(category_display.keys()),
-                                label_visibility="collapsed")
-    category_raw = category_display[cat_label]
+        st.markdown('<div class="sidebar-label">📋 פרטי פרויקט</div>', unsafe_allow_html=True)
+        client_name  = st.text_input("שם לקוח",  value="", label_visibility="collapsed",
+                                      placeholder="שם לקוח (לדוג׳: סונול)")
+        project_name = st.text_input("שם האתר",  value="", label_visibility="collapsed",
+                                      placeholder="שם האתר (לדוג׳: צומת שמשון)")
 
-    st.markdown('<hr style="margin:1rem 0 0.5rem;">', unsafe_allow_html=True)
+        st.markdown('<div class="sidebar-label">🏭 מעבדה וקטגוריה</div>', unsafe_allow_html=True)
+        lab = st.selectbox(
+            "מעבדה",
+            ["🔍 זיהוי אוטומטי", "KTE", "מכון הנפט", "מכון האנרגיה", "בקטוכם",
+             "Alchem", "ALS", "Aminolab", "RJ Lee", "אלכם (XRF)"],
+            label_visibility="collapsed",
+        )
+        category_display = {
+            "🔍 זיהוי אוטומטי":           "auto",
+            "🪨 קרקע (soil)":             "soil",
+            "💧 מי תהום (groundwater)":   "groundwater",
+            "🧬 PFAS":                    "pfas",
+            "📊 PR format (KTE מתכות)":   "pr",
+            "💨 גז קרקע (soil_gas)":      "soil_gas",
+            "🪨 גרנולומטריה (grain_size)": "grain_size",
+        }
+        cat_label    = st.selectbox("קטגוריה", list(category_display.keys()),
+                                    label_visibility="collapsed")
+        category_raw = category_display[cat_label]
+
+        st.markdown('<hr style="margin:1rem 0 0.5rem;">', unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -893,23 +901,72 @@ if page == "home":
 
 
 # ══════════════════════════════════════════════════════════════════
-# GROUNDWATER PAGE (placeholder)
+# GROUNDWATER PAGE
 # ══════════════════════════════════════════════════════════════════
 elif page == "groundwater":
     _render_nav("groundwater")
+    from soil_lab_tool.gw_report_updater import run_update_bytes
+
     st.markdown(
         '<div class="page-wrapper">'
-        '<div class="card">'
-        '<div class="card-header">💧 ניתוח מי תהום</div>'
-        '<p style="color:#64748b;font-size:1.05rem;">עמוד זה בפיתוח — בקרוב!</p>'
-        '<p style="color:#94a3b8;font-size:0.9rem;">בינתיים ניתן לנתח קבצי מי תהום דרך עמוד ניתוח הקרקע — '
-        'בחר קטגוריה <strong>מי תהום (groundwater)</strong> בסרגל הצד.</p>'
-        '</div></div>',
+        '<div class="hero" style="padding:1.5rem 2.5rem;">'
+        '<h1 style="font-size:2rem;">💧 עדכון דוח ניטור מי תהום</h1>'
+        '<p>העלה את ארבעת הקבצים — המערכת תוסיף את הדיגום החדש לדוח ולגרפים אוטומטית</p>'
+        '</div>',
         unsafe_allow_html=True,
     )
-    if st.button("← עבור לניתוח קרקע"):
-        st.query_params["page"] = "soil"
-        st.rerun()
+
+    col1, col2 = st.columns(2)
+    with col1:
+        word_file = st.file_uploader("📄 דוח Word קודם (.docx)", type=["docx"], key="gw_word")
+        lab_file  = st.file_uploader("🧪 תוצאות מעבדה — בקטוכם (.pdf)", type=["pdf"], key="gw_lab")
+    with col2:
+        mk_file   = st.file_uploader("📊 Mann-Kendall (.xls)", type=["xls"], key="gw_mk")
+        st.markdown('<div style="height:1.5rem"></div>', unsafe_allow_html=True)
+        st.info("טופס שדה (PDF סרוק) — לצפייה בלבד, לא נדרש להעלאה", icon="📋")
+
+    if word_file and lab_file and mk_file:
+        if st.button("⚡ עדכן דוח", type="primary", use_container_width=True):
+            with st.spinner("מעבד... ⏳"):
+                try:
+                    out_word, out_mk = run_update_bytes(
+                        word_file.read(),
+                        lab_file.read(),
+                        mk_file.read(),
+                    )
+                    st.success("✅ הדוח עודכן בהצלחה!")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.download_button(
+                            "⬇️ הורד דוח Word מעודכן",
+                            data=out_word,
+                            file_name="דוח_ניטור_מעודכן.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            use_container_width=True,
+                        )
+                    with c2:
+                        st.download_button(
+                            "⬇️ הורד Mann-Kendall מעודכן",
+                            data=out_mk,
+                            file_name="mann_kendall_מעודכן.xls",
+                            mime="application/vnd.ms-excel",
+                            use_container_width=True,
+                        )
+                except Exception as e:
+                    st.error(f"שגיאה בעיבוד: {e}")
+    else:
+        st.markdown(
+            '<div class="card"><div class="card-header">📋 שלבי השימוש</div>'
+            '<div class="steps">'
+            '<div class="step"><div class="step-num">1</div><div class="step-title">דוח Word קודם</div><div class="step-desc">הדוח מהסבב הקודם (.docx)</div></div>'
+            '<div class="step"><div class="step-num">2</div><div class="step-title">תוצאות מעבדה</div><div class="step-desc">PDF של בקטוכם מהדיגום החדש</div></div>'
+            '<div class="step"><div class="step-num">3</div><div class="step-title">Mann-Kendall</div><div class="step-desc">קובץ XLS השמור לאתר זה</div></div>'
+            '<div class="step"><div class="step-num">4</div><div class="step-title">הורד</div><div class="step-desc">Word + XLS מעודכנים</div></div>'
+            '</div></div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown('</div>', unsafe_allow_html=True)
     st.markdown(_FOOTER, unsafe_allow_html=True)
 
 
