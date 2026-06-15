@@ -573,6 +573,14 @@ class LabReportExcel:
         # Only create directories when out_path is a real filesystem path (not BytesIO)
         if isinstance(self.out_path, (str, os.PathLike)):
             os.makedirs(os.path.dirname(self.out_path) or ".", exist_ok=True)
+        # Add fuzzy threshold warnings at the bottom of each sheet
+        if hasattr(self.tm, '_fuzzy_warnings') and self.tm._fuzzy_warnings:
+            for ws in wb.worksheets:
+                last_row = ws.max_row + 2
+                for i, warning in enumerate(self.tm._fuzzy_warnings):
+                    ws.cell(row=last_row + i, column=1, value=warning)
+                    ws.cell(row=last_row + i, column=1).font = Font(italic=True, color="FF8C00")
+
         wb.save(self.out_path)
         return self.out_path
 

@@ -209,6 +209,7 @@ class ThresholdManager:
         self._pfas: dict[str, pd.DataFrame] = {}
         if pfas_path:
             self._pfas = self._load_pfas(pfas_path)
+        self._fuzzy_warnings: list[str] = []
 
     # ------------------------------------------------------------------
     # Loaders
@@ -546,6 +547,19 @@ class ThresholdManager:
             _fuzzy_cas = fuzzy_name_to_cas(compound_name)
             if _fuzzy_cas and _fuzzy_cas != cas:
                 val = self.get_threshold(_fuzzy_cas, threshold_key)
+                if val is not None:
+                    # Store fuzzy match info for output flagging
+                    from soil_lab_tool.core import cas_lookup as _cl
+                    _matched_name = next(
+                        (k for k, v in _cl.CHEMICAL_MAP.items() if v == _fuzzy_cas and not any('֐' <= c <= '׿' for c in k)),
+                        _fuzzy_cas
+                    )
+                    if not hasattr(self, '_fuzzy_warnings'):
+                        self._fuzzy_warnings = []
+                    self._fuzzy_warnings.append(
+                        f"* חוסר וודאות — ערך סף של {_matched_name} ({_fuzzy_cas}) שימש עבור {compound_name} ({cas})"
+                    )
+                    val = f"{val} *"
         if val is not None or not compound_name:
             return val
         # CAS lookup failed — try by compound name
