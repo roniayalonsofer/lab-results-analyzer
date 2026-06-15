@@ -453,8 +453,17 @@ class ALSSoilParser(BaseParser):
 
         return records
 
-    def _analysis_type(self, compound: str) -> str:
+    def _analysis_type(self, compound: str, cas: str = "", method: str = "") -> str:
         c = compound.upper()
+        m = method.upper()
+        # ALS method codes are reliable indicators
+        if "METAXHB" in m or "ICP" in m:
+            return "SOIL_METALS"
+        if "TPHFID" in m or "TPH" in m:
+            return "SOIL_TPH"
+        if "VOCGMS" in m or "VOC" in m:
+            return "SOIL_VOC"
+        # Fall back to compound/CAS based detection
         if any(k in c for k in self._METALS):
             return "SOIL_METALS"
         if any(k in c for k in self._VOC):
@@ -469,12 +478,6 @@ class ALSSoilParser(BaseParser):
             return "SOIL_PFAS"
         if any(k in c for k in ("TPH", "PETROLEUM", "DRO", "GRO")) or re.search(r'\bORO\b', c):
             return "SOIL_TPH"
-        if any(k in c for k in (
-            "BENZO", "ANTHRACENE", "PYRENE", "FLUORENE", "ACENAPHTH", "CHRYSENE",
-            "PHENANTHRENE", "FLUORANTHENE", "INDENO", "DIBENZ", "PERYLENE",
-            "PCB", "NAPHTHALENE",
-        )):
-            return "SOIL_SVOC"
         return "SOIL_SVOC"
 
     def _parse_water_pdf(self, file_obj) -> list[dict]:
