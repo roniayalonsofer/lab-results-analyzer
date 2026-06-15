@@ -562,6 +562,8 @@ class ThresholdManager:
         if threshold_key in _rbtl_map:
             return self._lookup_rbtl_by_name(_rbtl_map[threshold_key], name)
         if threshold_key in _MAIN_COL_MAP:
+            if str(cas).strip() in _NO_VSL_CAS:
+                return None
             return self._lookup_main_by_name(name, _MAIN_COL_MAP[threshold_key])
         _pfas_sheet_map = {
             "PFAS_VSL":       "vsl",
