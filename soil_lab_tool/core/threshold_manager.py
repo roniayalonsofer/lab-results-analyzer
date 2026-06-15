@@ -613,18 +613,26 @@ class ThresholdManager:
                         return val
 
         # ── Pass 2: partial / contains match ─────────────────────────────────
+        # VSL name must be no more than 20% longer than input to prevent
+        # "Calcium" from matching "Calcium Cyanide"
         for df, cas_col, col_lower in df_info:
+            name_col = next((c for c in df.columns if any(k in c.lower() for k in ("name", "compound", "chemical"))), None)
+            if not name_col:
+                continue
             for variant in candidates:
                 if len(variant) < 4:
                     continue
                 try:
-                    row = df[col_lower.str.contains(re.escape(variant.lower()), na=False)]
+                    mask = col_lower.str.contains(re.escape(variant.lower()), na=False)
+                    rows = df[mask]
                 except Exception:
                     continue
-                if not row.empty:
-                    val = str(row.iloc[0][cas_col]).strip()
-                    if val and val.lower() != "nan":
-                        return val
+                for _, r in rows.iterrows():
+                    vsl_name = str(r[name_col]).strip()
+                    if len(vsl_name) <= len(variant) * 1.2:
+                        val = str(r[cas_col]).strip()
+                        if val and val.lower() != "nan":
+                            return val
 
         return None
 

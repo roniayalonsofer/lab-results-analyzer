@@ -427,6 +427,8 @@ class ALSSoilParser(BaseParser):
                 atype = self._analysis_type(compound)
                 if "WATER" in sheet:
                     atype = self._WATER_ATYPE_MAP.get(atype, "GW_VOC")
+                if atype == "SKIP":
+                    continue
                 # µg/kg DW == ng/g numerically — normalise unit label for PFAS
                 norm_unit = "ng/g" if atype == "SOIL_PFAS" else unit
                 for ci, raw_val in sample_vals.items():
@@ -456,8 +458,10 @@ class ALSSoilParser(BaseParser):
     def _analysis_type(self, compound: str, cas: str = "", method: str = "") -> str:
         m = method.upper()
         c = compound.upper()
-        if "METAXHB" in m or "DRY" in m:
+        if "METAXHB" in m:
             return "SOIL_METALS"
+        if "DRY" in m:
+            return "SKIP"
         if "TPHFID" in m:
             return "SOIL_TPH"
         if "VOCGMS" in m or "VOC" in m:
