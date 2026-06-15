@@ -863,6 +863,19 @@ class ALSSoilPDFParser(BaseParser):
                 first    = re.sub(r'\s+S-[A-Z0-9]+$', '', cells[0]).strip()
                 first_lo = first.lower()
 
+                # PDF merges section header + first data row into one cell with \n
+                # Split them and process header first, then continue with data row
+                if "\n" in first and all(
+                    not cells[i] or cells[i] in ("-", "nan")
+                    for i in range(1, min(4, len(cells)))
+                ):
+                    header_part, data_part = first.split("\n", 1)
+                    current_atype = self._section_to_atype(header_part)
+                    # Reconstruct cells with just the data part
+                    cells[0] = data_part.strip()
+                    first = cells[0]
+                    first_lo = first.lower()
+
                 # ── Sample ID header row ──────────────────────────────────
                 # Format: cells[0] empty, sample names start at cells[3]
                 if (not first and
