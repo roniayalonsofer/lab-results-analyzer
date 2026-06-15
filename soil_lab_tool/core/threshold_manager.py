@@ -535,6 +535,10 @@ class ThresholdManager:
         if name_lo in self._TPH_ALIASES or cas_lo in self._TPH_ALIASES:
             cas = "C10-C40"
 
+        # Elements without VSL — return None immediately, skip all fallbacks
+        if threshold_key == "VSL_SOIL" and str(cas).strip() in _NO_VSL_CAS:
+            return None
+
         val = self.get_threshold(cas, threshold_key)
         # Fuzzy CAS resolve: if direct CAS lookup missed, try matching compound name
         # to a known CAS via cas_lookup, then re-run the threshold lookup.
