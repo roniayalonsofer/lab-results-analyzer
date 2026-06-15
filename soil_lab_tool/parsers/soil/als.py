@@ -457,11 +457,18 @@ class ALSSoilParser(BaseParser):
         c = compound.upper()
         m = method.upper()
         # ALS method codes are reliable indicators
-        if "METAXHB" in m or "ICP" in m:
+        if "METAXHB" in m or "ICP" in m or "METAXHB2" in m:
             return "SOIL_METALS"
         if "TPHFID" in m or "TPH" in m:
             return "SOIL_TPH"
         if "VOCGMS" in m or "VOC" in m:
+            # PAH compounds go to SVOC even with VOC method
+            _PAH_NAMES = {"naphthalene", "anthracene", "pyrene", "fluorene",
+                          "phenanthrene", "chrysene", "fluoranthene", "acenaphthylene",
+                          "acenaphthene", "benzo", "indeno", "dibenz", "perylene"}
+            compound_lower = compound.lower()
+            if any(p in compound_lower for p in _PAH_NAMES):
+                return "SOIL_SVOC"
             return "SOIL_VOC"
         # Fall back to compound/CAS based detection
         if any(k in c for k in self._METALS):
