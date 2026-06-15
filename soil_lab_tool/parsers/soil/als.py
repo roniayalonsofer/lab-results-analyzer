@@ -454,37 +454,30 @@ class ALSSoilParser(BaseParser):
         return records
 
     def _analysis_type(self, compound: str, cas: str = "", method: str = "") -> str:
-        c = compound.upper()
         m = method.upper()
-        # ALS method codes are reliable indicators
-        if "METAXHB" in m or "ICP" in m or "METAXHB2" in m:
+        c = compound.upper()
+        if "METAXHB" in m or "DRY" in m:
             return "SOIL_METALS"
-        if "TPHFID" in m or "TPH" in m:
+        if "TPHFID" in m:
             return "SOIL_TPH"
         if "VOCGMS" in m or "VOC" in m:
-            # PAH compounds go to SVOC even with VOC method
-            _PAH_NAMES = {"naphthalene", "anthracene", "pyrene", "fluorene",
-                          "phenanthrene", "chrysene", "fluoranthene", "acenaphthylene",
-                          "acenaphthene", "benzo", "indeno", "dibenz", "perylene"}
-            compound_lower = compound.lower()
-            if any(p in compound_lower for p in _PAH_NAMES):
+            _PAH = {"naphthalene", "anthracene", "pyrene", "fluorene", "phenanthrene",
+                    "chrysene", "fluoranthene", "acenaphthylene", "acenaphthene",
+                    "benzo", "indeno", "dibenz", "perylene"}
+            if any(p in compound.lower() for p in _PAH):
+                return "SOIL_SVOC"
+            _SVOC_NAMES = {"1.2-dibromoethane", "dibromoethane"}
+            if any(p in compound.lower() for p in _SVOC_NAMES):
                 return "SOIL_SVOC"
             return "SOIL_VOC"
-        # Fall back to compound/CAS based detection
         if any(k in c for k in self._METALS):
             return "SOIL_METALS"
         if any(k in c for k in self._VOC):
             return "SOIL_VOC"
-        # PFAS must be checked before TPH: "ORO" (Oil Range Organics keyword)
-        # is a substring of "PERFLUORO", so TPH would wrongly claim all PFAS.
-        if any(k in c for k in (
-            "PFAS", "PFOA", "PFOS", "PFBS", "PFBA", "PFNA", "PFDA", "PFUA",
-            "PFHX", "PFPE", "PFDO", "PFDE", "FOSA", "HFPO",
-            "PERFLUORO", "FLUOROTELOMER", "SULFONAMIDE",
-        )):
-            return "SOIL_PFAS"
-        if any(k in c for k in ("TPH", "PETROLEUM", "DRO", "GRO")) or re.search(r'\bORO\b', c):
+        if "TPH" in c or "PETROLEUM" in c or "DRO" in c or "ORO" in c:
             return "SOIL_TPH"
+        if "PFAS" in c or "PFOA" in c or "PFOS" in c:
+            return "SOIL_PFAS"
         return "SOIL_SVOC"
 
     def _parse_water_pdf(self, file_obj) -> list[dict]:
@@ -997,6 +990,13 @@ class ALSSoilPDFParser(BaseParser):
             return float(v), None
         except ValueError:
             return loq, "<LOQ"
+
+    _SECTION_MAP = [
+        (["extractable metals", "major cations", "physical parameter"], "SOIL_METALS"),
+        (["total petroleum", "petroleum hydrocarbon", "c10 -", "c24 -"], "SOIL_TPH"),
+        (["btex", "halogenated volatile", "non-halogenated volatile", "volatile organic"], "SOIL_VOC"),
+        (["polycyclic", "pah"], "SOIL_SVOC"),
+    ]
 
     def _section_to_atype(self, header: str) -> str:
         lo = header.lower()
