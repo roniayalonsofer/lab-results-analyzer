@@ -931,9 +931,16 @@ class ALSSoilPDFParser(BaseParser):
                 if not first:
                     continue
 
-                # ── Section header: Method/LOR/Unit all empty ─────────────
-                if not any(len(cells) > i and cells[i] for i in (1, 2, 3)):
-                    current_atype = self._section_to_atype(first)
+                # ── Section header: LOR/Unit/results all empty or "-" ─────
+                def _is_empty(v):
+                    return not v or str(v).strip() in ("-", "nan", "")
+                if all(_is_empty(cells[i]) if len(cells) > i else True for i in (1, 2, 3)):
+                    new_atype = self._section_to_atype(first)
+                    current_atype = new_atype
+                    continue
+
+                # Skip records when current section is SKIP (e.g. Physical Parameters)
+                if current_atype == "SKIP":
                     continue
 
                 # ── Normal multi-cell data row ────────────────────────────
@@ -992,10 +999,12 @@ class ALSSoilPDFParser(BaseParser):
             return loq, "<LOQ"
 
     _SECTION_MAP = [
-        (["extractable metals", "major cations", "physical parameter"], "SOIL_METALS"),
-        (["total petroleum", "petroleum hydrocarbon", "c10 -", "c24 -"], "SOIL_TPH"),
-        (["btex", "halogenated volatile", "non-halogenated volatile", "volatile organic"], "SOIL_VOC"),
-        (["polycyclic", "pah"], "SOIL_SVOC"),
+        (["extractable metals", "major cations"], "SOIL_METALS"),
+        (["physical parameter"], "SKIP"),
+        (["total petroleum", "petroleum hydrocarbon"], "SOIL_TPH"),
+        (["btex", "halogenated volatile", "non-halogenated volatile",
+          "volatile organic", "non-halogenated"], "SOIL_VOC"),
+        (["polycyclic", "pah", "semi-volatile", "svoc"], "SOIL_SVOC"),
     ]
 
     def _section_to_atype(self, header: str) -> str:

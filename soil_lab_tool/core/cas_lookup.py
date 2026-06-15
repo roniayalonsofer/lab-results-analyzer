@@ -258,11 +258,19 @@ def fuzzy_name_to_cas(name: str) -> str | None:
         if _cas_norm(map_key) == name_norm:
             return cas
 
-    # Step 3: substring match (≥5 chars to avoid short-abbreviation false positives)
+    # Step 3: substring match — require BOTH sides to be ≥5 chars to prevent
+    # single-letter element symbols ("b", "al", "co") from matching any compound
+    # Also require the shorter string to be ≥85% the length of the longer one
     if len(name_norm) >= 5:
         for map_key, cas in CHEMICAL_MAP.items():
             mk_norm = _cas_norm(map_key)
-            if name_norm in mk_norm or mk_norm in name_norm:
+            if len(mk_norm) < 5:
+                continue  # skip short keys like "b", "al", "co", "fe"
+            if name_norm == mk_norm:
+                return cas
+            if name_norm in mk_norm and len(name_norm) >= len(mk_norm) * 0.85:
+                return cas
+            if mk_norm in name_norm and len(mk_norm) >= len(name_norm) * 0.85:
                 return cas
 
     # Step 4: difflib similarity > 0.85
