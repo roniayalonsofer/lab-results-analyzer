@@ -104,6 +104,26 @@ _CAS_VSL_OVERRIDES: dict[str, float | None] = {
     "ORO": 350.0,
 }
 
+# CAS numbers for elements/compounds that do NOT have a VSL threshold.
+# These are excluded to prevent false matches in the VSL table
+# (e.g. Calcium CAS 7440-70-2 should not get the value of Calcium Cyanide).
+_NO_VSL_CAS: frozenset[str] = frozenset({
+    "7440-70-2",   # Calcium
+    "7440-21-3",   # Silicon
+    "7440-23-5",   # Sodium
+    "7440-09-7",   # Potassium
+    "7439-95-4",   # Magnesium
+    "7723-14-0",   # Phosphorus
+    "7704-34-9",   # Sulphur / Sulfur
+    "7440-42-8",   # Boron
+    "7440-24-6",   # Strontium
+    "7550-45-0",   # Titanium
+    "13494-80-9",  # Tellurium
+    "7440-67-7",   # Zirconium
+    "7440-69-9",   # Bismuth
+    "7439-93-2",   # Lithium
+})
+
 # VSL_SOIL thresholds for TPH pseudo-CAS identifiers (mg/kg).
 _TPH_STANDARDS: dict[str, float] = {
     "DRO":     350.0,
@@ -424,6 +444,10 @@ class ThresholdManager:
         """
         cas = str(cas).strip() if cas is not None else ""
         if not cas or cas == "None":
+            return None
+
+        # Elements/compounds without a VSL threshold — return None immediately
+        if threshold_key == "VSL_SOIL" and cas in _NO_VSL_CAS:
             return None
 
         if threshold_key == "VSL_SOIL" and cas.upper() in _TPH_STANDARDS:
