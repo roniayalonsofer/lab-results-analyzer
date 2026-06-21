@@ -28,6 +28,7 @@ import pdfplumber
 from docx import Document
 from docx.oxml.ns import qn
 from docx.shared import RGBColor
+from docx.enum.text import WD_COLOR_INDEX
 
 # ──────────────────────────────────────────────────────────────────────────────
 # BACTOCHEM PDF PARSER
@@ -69,9 +70,15 @@ def parse_aminolab_pdf(pdf_path: str) -> dict:
     date_re = re.compile(r'^(\d{2}/\d{2}/\d{4})\s*:םוגידה ךיראת$')
     ph_re   = re.compile(r'^-\s*([\d.]+)\s*-\s*pH הבגה$')
     ec_re   = re.compile(r'^-\s*([\d,]+)\s*[¥µu]S/cm תוכילומ$')
+    temp_re = re.compile(r'^-\s*([\d.]+)\s*.C\s*הרוטרפמט$')
+    do_re   = re.compile(r'^-\s*([\d.]+)\s*mg/L\s*DO\s*-\s*סמומ\s*ןצמח$')
+    turb_re = re.compile(r'^-\s*([\d.]+)\s*NTU\s*תוריכע$')
+    redox_re = re.compile(r'^-\s*([\d.]+)\s*mv\s*סקודר$')
     wl_re   = re.compile(r'^-\s*([\d.]+)\s*M\s+םימה ינפ קמוע\s*$')
     td_re   = re.compile(r'^-\s*([\d.]+)\s*M\s+חודיק קמוע\s*$')
+    samp_d_re = re.compile(r'^-\s*([\d.]+)\s*M\s*חודיקב\s*םימה\s*ינפמ\s*םוגידה\s*קמוע$')
     floating_re = re.compile(r'הפצ הבכש')
+    sampler_re = re.compile(r'(\S+)\s+(\S+)\s+-באלונימא\s+:י"ע\s+םגדנ$')
 
     # Lines like: "* Toluene 108-88-3 35 84" / "Xylene's - 40 -" / "Benzene 71 -43 -2 <10 -"
     compound_re = re.compile(
@@ -81,6 +88,7 @@ def parse_aminolab_pdf(pdf_path: str) -> dict:
 
     well_id = None
     sample_date = None
+    sampler_name = None
     field = {}
     water_level = None
     total_depth = None
@@ -109,6 +117,12 @@ def parse_aminolab_pdf(pdf_path: str) -> dict:
                             pass
                         continue
 
+                if sampler_name is None:
+                    m = sampler_re.search(line)
+                    if m:
+                        sampler_name = f"{m.group(2)[::-1]} {m.group(1)[::-1]}"
+                        continue
+
                 m = ph_re.match(line)
                 if m:
                     field["pH"] = float(m.group(1))
@@ -117,6 +131,26 @@ def parse_aminolab_pdf(pdf_path: str) -> dict:
                 m = ec_re.match(line)
                 if m:
                     field["EC"] = float(m.group(1).replace(",", ""))
+                    continue
+
+                m = temp_re.match(line)
+                if m:
+                    field["טמפרטורה"] = float(m.group(1))
+                    continue
+
+                m = do_re.match(line)
+                if m:
+                    field["חמצן מומס"] = float(m.group(1))
+                    continue
+
+                m = turb_re.match(line)
+                if m:
+                    field["עכירות"] = float(m.group(1))
+                    continue
+
+                m = redox_re.match(line)
+                if m:
+                    field["רדוקס"] = float(m.group(1))
                     continue
 
                 m = wl_re.match(line)
@@ -128,6 +162,12 @@ def parse_aminolab_pdf(pdf_path: str) -> dict:
                 m = td_re.match(line)
                 if m:
                     total_depth = float(m.group(1))
+                    field["עומק כללי של הקידוח"] = total_depth
+                    continue
+
+                m = samp_d_re.match(line)
+                if m:
+                    field["עומק דגימה מפני המים"] = float(m.group(1))
                     continue
 
                 if floating_re.search(line):
@@ -154,6 +194,7 @@ def parse_aminolab_pdf(pdf_path: str) -> dict:
 
     sample = {
         "date": sample_date,
+        "sampler_name": sampler_name,
         "results": results,
         "field": field,
         "water_level": water_level,
@@ -520,16 +561,32 @@ THRESH = {
 COL_PARAMS = ["MTBE", "בנזן", "טולואן", "אתיל בנזן", "קסילן"]
 
 
-def _set_cell(cell, text, bold=False, color=None):
-    """Replace cell content with a single run."""
-    for para in cell.paragraphs:
-        for child in list(para._element):
-            if child.tag.endswith("}r"):
-                para._element.remove(child)
-    run = cell.paragraphs[0].add_run(str(text))
-    run.bold = bold
+def _set_cell(cell, text, bold=False, color=None, highlight=False):
+    """
+    Replace cell text. Reuses the cell's existing first run (if any) so the
+    original font/size formatting is preserved, instead of creating a brand
+    new run with Word's default formatting.
+    """
+    para = cell.paragraphs[0]
+    runs = para.runs
+    if runs:
+        keep = runs[0]
+        keep.text = str(text)
+        for extra in runs[1:]:
+            extra._element.getparent().remove(extra._element)
+    else:
+        keep = para.add_run(str(text))
+
+    # Remove any extra paragraphs beyond the first (keep cell single-paragraph)
+    for p in cell.paragraphs[1:]:
+        p._element.getparent().remove(p._element)
+
+    if bold:
+        keep.bold = True
     if color:
-        run.font.color.rgb = color
+        keep.font.color.rgb = color
+    if highlight:
+        keep.font.highlight_color = WD_COLOR_INDEX.YELLOW
 
 
 def _insert_row_after(table, after_idx: int, tmpl_idx: int):
@@ -542,25 +599,59 @@ def _insert_row_after(table, after_idx: int, tmpl_idx: int):
 
 
 def _last_row_for_well(table, well_id: str) -> int:
+    """
+    Find the last data row in this well's table. Matches on column 1
+    holding a real DD.MM.YY date rather than column 0 (well name), since
+    column 0 is often a vertically-merged cell that doesn't reliably read
+    back per-row, and some rows may legitimately have a blank well-name
+    cell while still holding real historical data.
+    """
+    date_pat = re.compile(r'^\d{2}\.\d{2}\.\d{2}$')
     last = -1
     for i, row in enumerate(table.rows):
-        if row.cells[0].text.strip() == well_id:
+        if len(row.cells) < 2:
+            continue
+        if date_pat.match(row.cells[1].text.strip()):
             last = i
     return last
 
 
 def _update_field_table(doc: Document, field_data: dict, wells: list):
+    """
+    Update the field-findings table (doc.tables[1]).
+
+    Two layouts are supported:
+      - Single well: each data row is [param name, unit, value] — the value
+        is always the LAST cell, no column matching needed.
+      - Multiple wells: row 0 holds well names as column headers, used to
+        find which column belongs to which well.
+    """
     tbl = doc.tables[1]
+    FIELD_ROWS = {
+        "pH": 1, "EC": 2, "טמפרטורה": 3, "חמצן מומס": 4,
+        "עכירות": 5, "רדוקס": 6, "עומק פני המים": 7,
+        "עומק כללי של הקידוח": 8, "עומק דגימה מפני המים": 9,
+    }
+
+    if len(wells) == 1:
+        well = wells[0]
+        well_field = field_data.get(well, {}).get("field", {})
+        for field, ri in FIELD_ROWS.items():
+            if ri >= len(tbl.rows):
+                continue
+            val = well_field.get(field)
+            if val is None:
+                continue
+            txt = str(int(val)) if isinstance(val, float) and val == int(val) else str(val)
+            row_cells = tbl.rows[ri].cells
+            _set_cell(row_cells[-1], txt, highlight=True)
+        return
+
     header = tbl.rows[0]
     well_col = {
         c.text.strip(): ci
         for ci, c in enumerate(header.cells)
         if c.text.strip() in wells
-    }
-    FIELD_ROWS = {
-        "pH": 1, "EC": 2, "טמפרטורה": 3, "חמצן מומס": 4,
-        "עכירות": 5, "רדוקס": 6, "עומק פני המים": 7,
-        "עומק כללי של הקידוח": 8, "עומק דגימה מפני המים": 9,
     }
     for field, ri in FIELD_ROWS.items():
         if ri >= len(tbl.rows):
@@ -570,7 +661,7 @@ def _update_field_table(doc: Document, field_data: dict, wells: list):
             val = field_data.get(well, {}).get("field", {}).get(field)
             if val is not None:
                 txt = str(int(val)) if isinstance(val, float) and val == int(val) else str(val)
-                _set_cell(row.cells[ci], txt)
+                _set_cell(row.cells[ci], txt, highlight=True)
 
 
 def _update_historical_tables(doc: Document, new_date: str,
@@ -603,11 +694,11 @@ def _update_historical_tables(doc: Document, new_date: str,
         # NOTE: cells[0] (well name) is often a vertically-merged cell shared
         # across the whole table — do NOT write to it here, or it will wipe
         # out the merge-origin text for every row in the table.
-        _set_cell(cells[1], new_date)
+        _set_cell(cells[1], new_date, highlight=True)
         _set_cell(cells[2], "")
 
         if floating:
-            _set_cell(cells[3], "לא נדגם עקב שכבה צפה")
+            _set_cell(cells[3], "לא נדגם עקב שכבה צפה", highlight=True)
             for ci in range(4, min(8, len(cells))):
                 _set_cell(cells[ci], "")
         else:
@@ -622,7 +713,104 @@ def _update_historical_tables(doc: Document, new_date: str,
                     exceeds = thresh is not None and val > thresh
                     txt = str(val)
                 color = RGBColor(0xC0, 0x00, 0x00) if exceeds else None
-                _set_cell(cells[3 + ci], txt, bold=exceeds, color=color)
+                _set_cell(cells[3 + ci], txt, bold=exceeds, color=color, highlight=True)
+
+
+HEBREW_MONTHS = ["ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני",
+                  "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר"]
+
+
+def _heb_join_words(items):
+    if len(items) == 1:
+        return items[0]
+    return ", ".join(items[:-1]) + f" ו{items[-1]}"
+
+
+def _heb_join_values(items):
+    if len(items) == 1:
+        return items[0]
+    return ", ".join(items[:-1]) + f" ו-{items[-1]}"
+
+
+def _update_title_month_year(doc: Document, new_dt: datetime) -> bool:
+    """Update the report title's month + year (e.g. 'פברואר' -> 'יוני 2026')."""
+    month_name = HEBREW_MONTHS[new_dt.month - 1]
+    year = new_dt.year
+    updated = False
+    for p in doc.paragraphs:
+        if "ניטור מי תהום תקופתי" not in p.text:
+            continue
+        runs = p.runs
+        for i, run in enumerate(runs):
+            if run.text.strip() in HEBREW_MONTHS:
+                run.text = f" {month_name}"
+                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                if i + 1 < len(runs):
+                    nxt = runs[i + 1]
+                    if nxt.text.strip() == "" or re.match(r'^\d{4}$', nxt.text.strip()):
+                        nxt.text = f" {year}"
+                        nxt.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                updated = True
+    return updated
+
+
+def _update_narrative_placeholders(doc: Document, date_str: str, sampler_name: str):
+    """
+    Replace the date and sampler-name VALUE runs found throughout the
+    narrative text (intro sentence, summary section, etc) — these runs
+    hold the previous round's date/name and need to be overwritten.
+    """
+    for p in doc.paragraphs:
+        runs = p.runs
+        for i, run in enumerate(runs):
+            if i > 0 and runs[i - 1].text.rstrip().endswith("בתאריך"):
+                run.text = date_str
+                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+            if sampler_name and run.text.strip() == "מר" and i + 1 < len(runs):
+                runs[i + 1].text = sampler_name
+                runs[i + 1].font.highlight_color = WD_COLOR_INDEX.YELLOW
+
+
+def _update_concentration_summary(doc: Document, results: dict):
+    """
+    Rebuild the BTEX concentration summary sentence
+    ('בדיגום שנערך אותרו X, Y בריכוזים של ... בהתאמה') based on which
+    compounds were actually detected this round.
+    """
+    ordered = [("MTBE", results.get("MTBE")), ("בנזן", results.get("בנזן")),
+               ("טולואן", results.get("טולואן")), ("אתיל בנזן", results.get("אתיל בנזן")),
+               ("קסילן", results.get("קסילן"))]
+    detected = [(n, v) for n, v in ordered if v is not None]
+
+    for p in doc.paragraphs:
+        if "בדיגום שנערך" not in p.text:
+            continue
+        runs = p.runs
+        start_idx = end_idx = None
+        for i, r in enumerate(runs):
+            if r.text.strip() == "בדיגום שנערך":
+                start_idx = i + 1
+            elif start_idx is not None and "בהתאמה" in r.text:
+                end_idx = i
+                break
+        if start_idx is None or end_idx is None:
+            continue
+
+        if not detected:
+            sentence = "לא אותרו מרכיבי BTEX בריכוזים מעל סף הזיהוי"
+        elif len(detected) == 1:
+            name, val = detected[0]
+            sentence = f'אותר {name} בריכוז של {val} מ"ג/ליטר'
+        else:
+            names = _heb_join_words([n for n, _ in detected])
+            vals = _heb_join_values([f'{v} מ"ג/ליטר' for _, v in detected])
+            sentence = f'אותרו {names} בריכוזים של {vals} בהתאמה'
+
+        runs[start_idx].text = sentence
+        runs[start_idx].font.highlight_color = WD_COLOR_INDEX.YELLOW
+        for j in range(start_idx + 1, end_idx + 1):
+            runs[j].text = ""
+        return
 
 
 def _replace_chart_image(doc: Document, shape_idx: int, img_path: str):
@@ -707,13 +895,13 @@ def run_update_bytes(
             if not samples:
                 raise ValueError("לא נמצאו דגימות ב-PDF. ודא שהקובץ הוא דוח בקטוכם לדיגום מי תהום.")
 
+        new_dt = datetime.strptime(new_date, "%d.%m.%y")
         chart_paths = {}
         out_mk_bytes = None
 
         if has_mk:
             # ── Update Mann-Kendall ────────────────────────────────────
             mk_data = _read_mann_kendall(str(mk_path))
-            new_dt = datetime.strptime(new_date, "%d.%m.%y")
             mk_new = {}
             for well, s in samples.items():
                 for param, val in s.get("results", {}).items():
@@ -771,6 +959,19 @@ def run_update_bytes(
 
         _update_field_table(doc, samples, wells_order)
         _update_historical_tables(doc, new_date, samples, wells_order)
+
+        # ── Update narrative text (title month/year, date/sampler gaps,
+        #    BTEX concentration summary sentence) ────────────────────────
+        full_date_str = new_dt.strftime("%d.%m.%Y")
+        first_sample = next(iter(samples.values()), {})
+        sampler_name = first_sample.get("sampler_name")
+        combined_results = {}
+        for s in samples.values():
+            combined_results.update(s.get("results", {}))
+
+        _update_title_month_year(doc, new_dt)
+        _update_narrative_placeholders(doc, full_date_str, sampler_name)
+        _update_concentration_summary(doc, combined_results)
 
         # Replace chart images (shape 1 = Benzene, shape 2 = MTBE)
         for chart_idx, sh_name in enumerate(["בנזן", "MTBE"]):
