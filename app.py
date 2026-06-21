@@ -1444,7 +1444,7 @@ elif page == "groundwater":
                 type=["pdf"], accept_multiple_files=True, key="gw_lab_multi",
             )
     with col2:
-        mk_file    = st.file_uploader("📊 Mann-Kendall (.xls)", type=["xls"], key="gw_mk")
+        mk_file    = st.file_uploader("📊 Mann-Kendall (.xls, אופציונלי)", type=["xls"], key="gw_mk")
         field_file = st.file_uploader("📋 טופס ממצאי שדה (.pdf, אופציונלי)", type=["pdf"], key="gw_field")
 
     if lab_type_code == "bactochem":
@@ -1452,7 +1452,9 @@ elif page == "groundwater":
     else:
         lab_ready = bool(lab_files)
 
-    if word_file and lab_ready and mk_file:
+    if word_file and lab_ready:
+        if not mk_file:
+            st.info("⚠️ לא הועלה קובץ Mann-Kendall — הדוח יעודכן, אבל ללא עדכון מגמות/גרפים וללא קובץ XLS מעודכן.")
         if st.button("⚡ עדכן דוח", type="primary", use_container_width=True):
             with st.spinner("מעבד... ⏳"):
                 try:
@@ -1463,12 +1465,15 @@ elif page == "groundwater":
                     out_word, out_mk = run_update_bytes(
                         word_file.read(),
                         lab_pdf_bytes,
-                        mk_file.read(),
+                        mk_file.read() if mk_file else None,
                         field_pdf_bytes=field_file.read() if field_file else None,
                         lab_type=lab_type_code,
                     )
                     st.success("✅ הדוח עודכן בהצלחה!")
-                    c1, c2 = st.columns(2)
+                    if out_mk is not None:
+                        c1, c2 = st.columns(2)
+                    else:
+                        c1, = st.columns(1)
                     with c1:
                         st.download_button(
                             "⬇️ הורד דוח Word מעודכן",
@@ -1477,14 +1482,15 @@ elif page == "groundwater":
                             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                             use_container_width=True,
                         )
-                    with c2:
-                        st.download_button(
-                            "⬇️ הורד Mann-Kendall מעודכן",
-                            data=out_mk,
-                            file_name="mann_kendall_מעודכן.xls",
-                            mime="application/vnd.ms-excel",
-                            use_container_width=True,
-                        )
+                    if out_mk is not None:
+                        with c2:
+                            st.download_button(
+                                "⬇️ הורד Mann-Kendall מעודכן",
+                                data=out_mk,
+                                file_name="mann_kendall_מעודכן.xls",
+                                mime="application/vnd.ms-excel",
+                                use_container_width=True,
+                            )
                 except Exception as e:
                     st.error(f"שגיאה בעיבוד: {e}")
     else:
@@ -1492,9 +1498,9 @@ elif page == "groundwater":
             '<div class="card"><div class="card-header">📋 שלבי השימוש</div>'
             '<div class="steps">'
             '<div class="step"><div class="step-num">1</div><div class="step-title">דוח Word קודם</div><div class="step-desc">הדוח מהסבב הקודם (.docx)</div></div>'
-            '<div class="step"><div class="step-num">2</div><div class="step-title">תוצאות מעבדה</div><div class="step-desc">PDF של בקטוכם מהדיגום החדש</div></div>'
-            '<div class="step"><div class="step-num">3</div><div class="step-title">Mann-Kendall</div><div class="step-desc">קובץ XLS השמור לאתר זה</div></div>'
-            '<div class="step"><div class="step-num">4</div><div class="step-title">הורד</div><div class="step-desc">Word + XLS מעודכנים</div></div>'
+            '<div class="step"><div class="step-num">2</div><div class="step-title">תוצאות מעבדה</div><div class="step-desc">PDF של בקטוכם או אמינולאב מהדיגום החדש</div></div>'
+            '<div class="step"><div class="step-num">3</div><div class="step-title">Mann-Kendall</div><div class="step-desc">קובץ XLS — אופציונלי</div></div>'
+            '<div class="step"><div class="step-num">4</div><div class="step-title">הורד</div><div class="step-desc">דוח Word מעודכן (ו-XLS אם הועלה)</div></div>'
             '</div></div>',
             unsafe_allow_html=True,
         )

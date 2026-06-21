@@ -650,12 +650,13 @@ def _replace_chart_image(doc: Document, shape_idx: int, img_path: str):
 def run_update_bytes(
     word_bytes: bytes,
     lab_pdf_bytes,
-    mk_xls_bytes: bytes,
+    mk_xls_bytes: bytes = None,
     field_pdf_bytes: bytes = None,   # reserved for future OCR use
     lab_type: str = "bactochem",     # "bactochem" or "aminolab"
 ) -> tuple:
     """
     Process all inputs in memory and return (updated_word_bytes, updated_mk_xls_bytes).
+    updated_mk_xls_bytes is None if mk_xls_bytes was not provided.
 
     lab_pdf_bytes:
       - "bactochem": a single PDF's bytes (one PDF covers all wells).
@@ -669,12 +670,15 @@ def run_update_bytes(
 
         # Write inputs to temp files
         word_path = tmp / "report.docx"
-        mk_path   = tmp / "mk.xls"
         out_word  = tmp / "updated_report.docx"
         out_mk    = tmp / "updated_mk.xls"
 
         word_path.write_bytes(word_bytes)
-        mk_path.write_bytes(mk_xls_bytes)
+
+        has_mk = mk_xls_bytes is not None
+        if has_mk:
+            mk_path = tmp / "mk.xls"
+            mk_path.write_bytes(mk_xls_bytes)
 
         # ── Parse lab results ──────────────────────────────────────
         if lab_type == "aminolab":
@@ -703,20 +707,25 @@ def run_update_bytes(
             if not samples:
                 raise ValueError("לא נמצאו דגימות ב-PDF. ודא שהקובץ הוא דוח בקטוכם לדיגום מי תהום.")
 
-        # ── Update Mann-Kendall ────────────────────────────────────
-        mk_data = _read_mann_kendall(str(mk_path))
-        new_dt = datetime.strptime(new_date, "%d.%m.%y")
-        mk_new = {}
-        for well, s in samples.items():
-            for param, val in s.get("results", {}).items():
-                mk_new.setdefault(param, {})[well] = val
-        mk_data = _update_mann_kendall(mk_data, new_dt, mk_new)
+        chart_paths = {}
+        out_mk_bytes = None
 
-        # ── Generate charts ────────────────────────────────────────
-        chart_paths = _generate_charts(mk_data, tmp / "charts")
+        if has_mk:
+            # ── Update Mann-Kendall ────────────────────────────────────
+            mk_data = _read_mann_kendall(str(mk_path))
+            new_dt = datetime.strptime(new_date, "%d.%m.%y")
+            mk_new = {}
+            for well, s in samples.items():
+                for param, val in s.get("results", {}).items():
+                    mk_new.setdefault(param, {})[well] = val
+            mk_data = _update_mann_kendall(mk_data, new_dt, mk_new)
 
-        # ── Write updated MK XLS ──────────────────────────────────
-        _write_mann_kendall(mk_data, str(mk_path), str(out_mk))
+            # ── Generate charts ────────────────────────────────────────
+            chart_paths = _generate_charts(mk_data, tmp / "charts")
+
+            # ── Write updated MK XLS ──────────────────────────────────
+            _write_mann_kendall(mk_data, str(mk_path), str(out_mk))
+            out_mk_bytes = out_mk.read_bytes()
 
         # ── Update Word document ──────────────────────────────────
         doc = Document(str(word_path))
@@ -770,4 +779,4 @@ def run_update_bytes(
 
         doc.save(str(out_word))
 
-        return out_word.read_bytes(), out_mk.read_bytes()
+        return out_word.read_bytes(), out_mk_bytes
