@@ -756,11 +756,14 @@ def _update_title_month_year(doc: Document, new_dt: datetime) -> bool:
 
 def _update_narrative_placeholders(doc: Document, date_str: str, sampler_name: str):
     """
-    Replace the date and sampler-name VALUE runs found throughout the
-    narrative text (intro sentence, summary section, etc) — these runs
-    hold the previous round's date/name and need to be overwritten.
+    Replace the date and sampler-name VALUE runs in the CURRENT-ROUND
+    sampling sentences only (identified by the anchor phrase 'נערך דיגום').
+    This must NOT touch unrelated mentions of dates/'מר X' elsewhere in the
+    document (e.g. historical references in the background section).
     """
     for p in doc.paragraphs:
+        if "נערך דיגום" not in p.text:
+            continue
         runs = p.runs
         for i, run in enumerate(runs):
             if i > 0 and runs[i - 1].text.rstrip().endswith("בתאריך"):
@@ -769,6 +772,25 @@ def _update_narrative_placeholders(doc: Document, date_str: str, sampler_name: s
             if sampler_name and run.text.strip() == "מר" and i + 1 < len(runs):
                 runs[i + 1].text = sampler_name
                 runs[i + 1].font.highlight_color = WD_COLOR_INDEX.YELLOW
+
+
+def _update_cover_page_date(doc: Document, new_dt: datetime) -> bool:
+    """Update the standalone cover-page '<month> <year>' line."""
+    month_name = HEBREW_MONTHS[new_dt.month - 1]
+    year = new_dt.year
+    pat = re.compile(r'^(' + "|".join(HEBREW_MONTHS) + r')\s+\d{4}$')
+    for p in doc.paragraphs:
+        if not pat.match(p.text.strip()):
+            continue
+        runs = p.runs
+        if not runs:
+            continue
+        runs[0].text = f"{month_name} {year}"
+        for extra in runs[1:]:
+            extra.text = ""
+        runs[0].font.highlight_color = WD_COLOR_INDEX.YELLOW
+        return True
+    return False
 
 
 def _update_concentration_summary(doc: Document, results: dict):
@@ -970,6 +992,7 @@ def run_update_bytes(
             combined_results.update(s.get("results", {}))
 
         _update_title_month_year(doc, new_dt)
+        _update_cover_page_date(doc, new_dt)
         _update_narrative_placeholders(doc, full_date_str, sampler_name)
         _update_concentration_summary(doc, combined_results)
 
