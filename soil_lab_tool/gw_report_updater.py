@@ -42,6 +42,148 @@ CAS_TO_HEB = {
 }
 
 
+def parse_aminolab_pdf(pdf_path: str) -> dict:
+    """
+    Parse a single Aminolab groundwater monitoring certificate PDF.
+
+    NOTE: unlike Bactochem, one Aminolab PDF certificate covers a SINGLE
+    well/sample. Use parse_aminolab_pdfs() to merge several certificates
+    (one per well) from one sampling round.
+
+    Returns the same shape as parse_bactochem_pdf():
+        {
+          "sampling_date": "09.06.26",
+          "samples": {
+            "מת-1": {
+              "date": "09.06.26",
+              "results": {"בנזן": None, "MTBE": None, "טולואן": 0.035, ...},
+              "field": {"pH": 6.6, "EC": 1388.0, "עומק פני המים": 54.25, ...},
+              "water_level": 54.25,
+              "total_depth": 57.15,
+              "floating_layer": False,
+            },
+          }
+        }
+    """
+    well_re = re.compile(r'^(\d+)\s*-\s*םוהת\s*ימ\s*:\s*המגודה\s*רואת$')
+    date_re = re.compile(r'^(\d{2}/\d{2}/\d{4})\s*:םוגידה ךיראת$')
+    ph_re   = re.compile(r'^-\s*([\d.]+)\s*-\s*pH הבגה$')
+    ec_re   = re.compile(r'^-\s*([\d,]+)\s*[¥µu]S/cm תוכילומ$')
+    wl_re   = re.compile(r'^-\s*([\d.]+)\s*M\s+םימה ינפ קמוע\s*$')
+    td_re   = re.compile(r'^-\s*([\d.]+)\s*M\s+חודיק קמוע\s*$')
+    floating_re = re.compile(r'הפצ הבכש')
+
+    # Lines like: "* Toluene 108-88-3 35 84" / "Xylene's - 40 -" / "Benzene 71 -43 -2 <10 -"
+    compound_re = re.compile(
+        r'^\*?\s*(?P<name>.+?)\s*\*?\s+(?P<cas>[\d][\d\s\-]*\d|-)\s+'
+        r'(?P<result><?\d+(?:\.\d+)?)\s+(?P<qual>-|\d+(?:\.\d+)?)\s*$'
+    )
+
+    well_id = None
+    sample_date = None
+    field = {}
+    water_level = None
+    total_depth = None
+    floating_layer = False
+    results = {}
+
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text() or ""
+            for raw_line in text.splitlines():
+                line = raw_line.strip()
+
+                if well_id is None:
+                    m = well_re.match(line)
+                    if m:
+                        well_id = f"מת-{m.group(1)}"
+                        continue
+
+                if sample_date is None:
+                    m = date_re.match(line)
+                    if m:
+                        try:
+                            dt = datetime.strptime(m.group(1), "%d/%m/%Y")
+                            sample_date = dt.strftime("%d.%m.%y")
+                        except ValueError:
+                            pass
+                        continue
+
+                m = ph_re.match(line)
+                if m:
+                    field["pH"] = float(m.group(1))
+                    continue
+
+                m = ec_re.match(line)
+                if m:
+                    field["EC"] = float(m.group(1).replace(",", ""))
+                    continue
+
+                m = wl_re.match(line)
+                if m:
+                    water_level = float(m.group(1))
+                    field["עומק פני המים"] = water_level
+                    continue
+
+                m = td_re.match(line)
+                if m:
+                    total_depth = float(m.group(1))
+                    continue
+
+                if floating_re.search(line):
+                    floating_layer = True
+                    continue
+
+                # VOC compound rows (BTEX) — only on pages with "Compound"/"CAS No."
+                m = compound_re.match(line)
+                if m:
+                    name = m.group("name").strip()
+                    cas = re.sub(r'\s*-\s*', '-', m.group("cas").strip())
+                    heb = CAS_TO_HEB.get(cas)
+                    if not heb and "xylen" in name.lower():
+                        heb = "קסילן"
+                    if heb:
+                        raw_result = m.group("result")
+                        val = None if raw_result.startswith("<") else float(raw_result)
+                        if val is not None:
+                            val = val / 1000.0  # ppb -> mg/L
+                        results[heb] = val
+
+    if well_id is None:
+        well_id = "מת-?"
+
+    sample = {
+        "date": sample_date,
+        "results": results,
+        "field": field,
+        "water_level": water_level,
+        "total_depth": total_depth,
+        "floating_layer": floating_layer,
+    }
+
+    return {
+        "sampling_date": sample_date,
+        "samples": {well_id: sample},
+    }
+
+
+def parse_aminolab_pdfs(pdf_paths: list) -> dict:
+    """
+    Parse and merge several Aminolab certificates (one per well) from the
+    same sampling round into the combined {"sampling_date", "samples"} shape.
+    """
+    combined_samples = {}
+    sampling_date = None
+
+    for pdf_path in pdf_paths:
+        lab = parse_aminolab_pdf(pdf_path)
+        if sampling_date is None:
+            sampling_date = lab["sampling_date"]
+        combined_samples.update(lab["samples"])
+
+    return {"sampling_date": sampling_date, "samples": combined_samples}
+
+
 def parse_bactochem_pdf(pdf_path: str) -> dict:
     """
     Parse a Bactochem groundwater monitoring PDF.
@@ -438,7 +580,7 @@ def _update_historical_tables(doc: Document, new_date: str,
     for ti, tbl in enumerate(doc.tables[2:], 2):
         for row in tbl.rows:
             w = row.cells[0].text.strip()
-            if w.startswith("מת-"):
+            if w in wells_order:
                 well_table[w] = ti
 
     for well in wells_order:
@@ -458,7 +600,9 @@ def _update_historical_tables(doc: Document, new_date: str,
 
         new_row = _insert_row_after(tbl, last, last)
         cells = new_row.cells
-        _set_cell(cells[0], "")
+        # NOTE: cells[0] (well name) is often a vertically-merged cell shared
+        # across the whole table — do NOT write to it here, or it will wipe
+        # out the merge-origin text for every row in the table.
         _set_cell(cells[1], new_date)
         _set_cell(cells[2], "")
 
@@ -505,12 +649,18 @@ def _replace_chart_image(doc: Document, shape_idx: int, img_path: str):
 
 def run_update_bytes(
     word_bytes: bytes,
-    lab_pdf_bytes: bytes,
+    lab_pdf_bytes,
     mk_xls_bytes: bytes,
     field_pdf_bytes: bytes = None,   # reserved for future OCR use
+    lab_type: str = "bactochem",     # "bactochem" or "aminolab"
 ) -> tuple:
     """
     Process all inputs in memory and return (updated_word_bytes, updated_mk_xls_bytes).
+
+    lab_pdf_bytes:
+      - "bactochem": a single PDF's bytes (one PDF covers all wells).
+      - "aminolab":  bytes of ONE PDF, or a list/tuple of bytes — one per
+        well/certificate — since each Aminolab certificate covers a single well.
     """
     import os
 
@@ -519,22 +669,39 @@ def run_update_bytes(
 
         # Write inputs to temp files
         word_path = tmp / "report.docx"
-        lab_path  = tmp / "lab.pdf"
         mk_path   = tmp / "mk.xls"
         out_word  = tmp / "updated_report.docx"
         out_mk    = tmp / "updated_mk.xls"
 
         word_path.write_bytes(word_bytes)
-        lab_path.write_bytes(lab_pdf_bytes)
         mk_path.write_bytes(mk_xls_bytes)
 
         # ── Parse lab results ──────────────────────────────────────
-        lab = parse_bactochem_pdf(str(lab_path))
-        samples, new_date = lab["samples"], lab["sampling_date"]
-        if not new_date:
-            raise ValueError("לא ניתן לחלץ תאריך דיגום מה-PDF. ודא שהקובץ הוא דוח בקטוכם תקני.")
-        if not samples:
-            raise ValueError("לא נמצאו דגימות ב-PDF. ודא שהקובץ הוא דוח בקטוכם לדיגום מי תהום.")
+        if lab_type == "aminolab":
+            pdf_bytes_list = (
+                lab_pdf_bytes if isinstance(lab_pdf_bytes, (list, tuple))
+                else [lab_pdf_bytes]
+            )
+            lab_paths = []
+            for i, pdf_bytes in enumerate(pdf_bytes_list):
+                p = tmp / f"lab_{i}.pdf"
+                p.write_bytes(pdf_bytes)
+                lab_paths.append(str(p))
+            lab = parse_aminolab_pdfs(lab_paths)
+            samples, new_date = lab["samples"], lab["sampling_date"]
+            if not new_date:
+                raise ValueError("לא ניתן לחלץ תאריך דיגום מה-PDF. ודא שהקובץ הוא תעודת אמינולאב תקנית.")
+            if not samples:
+                raise ValueError("לא נמצאו דגימות ב-PDF. ודא שהקובץ הוא תעודת אמינולאב לדיגום מי תהום.")
+        else:
+            lab_path = tmp / "lab.pdf"
+            lab_path.write_bytes(lab_pdf_bytes)
+            lab = parse_bactochem_pdf(str(lab_path))
+            samples, new_date = lab["samples"], lab["sampling_date"]
+            if not new_date:
+                raise ValueError("לא ניתן לחלץ תאריך דיגום מה-PDF. ודא שהקובץ הוא דוח בקטוכם תקני.")
+            if not samples:
+                raise ValueError("לא נמצאו דגימות ב-PDF. ודא שהקובץ הוא דוח בקטוכם לדיגום מי תהום.")
 
         # ── Update Mann-Kendall ────────────────────────────────────
         mk_data = _read_mann_kendall(str(mk_path))
@@ -553,8 +720,45 @@ def run_update_bytes(
 
         # ── Update Word document ──────────────────────────────────
         doc = Document(str(word_path))
-        header_cells = [c.text.strip() for c in doc.tables[1].rows[0].cells]
-        wells_order = [c for c in header_cells if c.startswith("מת-")]
+
+        # Detect the well-naming convention actually used in THIS document
+        # (different sites use different prefixes, e.g. "מת-1" or "צא - 1"),
+        # then remap the parsed sample keys (always "מת-N") onto it by well number.
+        doc_wells = set()
+        for tbl in doc.tables:
+            for row in tbl.rows:
+                if not row.cells:
+                    continue
+                w = row.cells[0].text.strip()
+                if w and re.search(r'\d', w) and len(w) < 20:
+                    doc_wells.add(w)
+
+        num_to_doc_well = {}
+        for w in doc_wells:
+            m = re.search(r'(\d+)\s*$', w)
+            if m:
+                num_to_doc_well.setdefault(m.group(1), w)
+
+        remapped_samples = {}
+        unmatched = []
+        for well_key, sample in samples.items():
+            m = re.search(r'(\d+)$', well_key)
+            num = m.group(1) if m else None
+            doc_well = num_to_doc_well.get(num)
+            if doc_well:
+                remapped_samples[doc_well] = sample
+            else:
+                remapped_samples[well_key] = sample
+                unmatched.append(well_key)
+        samples = remapped_samples
+        wells_order = list(samples.keys())
+
+        if unmatched:
+            raise ValueError(
+                "לא נמצאה בדוח ה-Word התאמה לבארות הבאות מה-PDF: "
+                + ", ".join(unmatched)
+                + ". ודא שמספרי הבארות בדוח ה-PDF תואמים לבארות בדוח ה-Word."
+            )
 
         _update_field_table(doc, samples, wells_order)
         _update_historical_tables(doc, new_date, samples, wells_order)

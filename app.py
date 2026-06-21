@@ -1425,23 +1425,47 @@ elif page == "groundwater":
         unsafe_allow_html=True,
     )
 
+    gw_lab_type = st.radio(
+        "🧪 מעבדה",
+        ["בקטוכם", "אמינולאב"],
+        horizontal=True,
+        key="gw_lab_type",
+    )
+    lab_type_code = "bactochem" if gw_lab_type == "בקטוכם" else "aminolab"
+
     col1, col2 = st.columns(2)
     with col1:
-        word_file  = st.file_uploader("📄 דוח Word קודם (.docx)", type=["docx"], key="gw_word")
-        lab_file   = st.file_uploader("🧪 תוצאות מעבדה — בקטוכם (.pdf)", type=["pdf"], key="gw_lab")
+        word_file = st.file_uploader("📄 דוח Word קודם (.docx)", type=["docx"], key="gw_word")
+        if lab_type_code == "bactochem":
+            lab_file = st.file_uploader("🧪 תוצאות מעבדה — בקטוכם (.pdf)", type=["pdf"], key="gw_lab")
+        else:
+            lab_files = st.file_uploader(
+                "🧪 תעודות מעבדה — אמינולאב (.pdf, קובץ אחד לכל באר)",
+                type=["pdf"], accept_multiple_files=True, key="gw_lab_multi",
+            )
     with col2:
         mk_file    = st.file_uploader("📊 Mann-Kendall (.xls)", type=["xls"], key="gw_mk")
         field_file = st.file_uploader("📋 טופס ממצאי שדה (.pdf, אופציונלי)", type=["pdf"], key="gw_field")
 
-    if word_file and lab_file and mk_file:
+    if lab_type_code == "bactochem":
+        lab_ready = bool(lab_file)
+    else:
+        lab_ready = bool(lab_files)
+
+    if word_file and lab_ready and mk_file:
         if st.button("⚡ עדכן דוח", type="primary", use_container_width=True):
             with st.spinner("מעבד... ⏳"):
                 try:
+                    lab_pdf_bytes = (
+                        lab_file.read() if lab_type_code == "bactochem"
+                        else [f.read() for f in lab_files]
+                    )
                     out_word, out_mk = run_update_bytes(
                         word_file.read(),
-                        lab_file.read(),
+                        lab_pdf_bytes,
                         mk_file.read(),
                         field_pdf_bytes=field_file.read() if field_file else None,
+                        lab_type=lab_type_code,
                     )
                     st.success("✅ הדוח עודכן בהצלחה!")
                     c1, c2 = st.columns(2)
