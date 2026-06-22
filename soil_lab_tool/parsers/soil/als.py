@@ -478,7 +478,7 @@ class ALSSoilParser(BaseParser):
             return "SOIL_METALS"
         if any(k in c for k in self._VOC):
             return "SOIL_VOC"
-        if "TPH" in c or "PETROLEUM" in c or "DRO" in c or "ORO" in c:
+        if "TPH" in c or "PETROLEUM" in c or re.search(r'\bDRO\b', c) or re.search(r'\bORO\b', c):
             return "SOIL_TPH"
         if "PFAS" in c or "PFOA" in c or "PFOS" in c:
             return "SOIL_PFAS"
