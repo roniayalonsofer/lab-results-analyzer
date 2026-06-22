@@ -727,8 +727,13 @@ class ThresholdManager:
         mask = df[name_col].str.strip().str.lower() == name_lo
         row  = df[mask]
         if row.empty:
-            # Try partial / contains match
-            mask = df[name_col].str.strip().str.lower().apply(lambda x: name_lo in str(x) if x else False)
+            # Try partial / contains match, but only if the RBTL name is no more
+            # than 20% longer than the query — prevents "Calcium" matching
+            # "Calcium Cyanide", "Chloroform" matching "Trichlorofluoromethane", etc.
+            def _contains_safe(x):
+                x = str(x).strip() if x else ""
+                return name_lo in x.lower() and len(x) <= len(name_lo) * 1.2
+            mask = df[name_col].apply(_contains_safe)
             row  = df[mask]
         if row.empty:
             return None
@@ -750,8 +755,15 @@ class ThresholdManager:
             mask = df[name_col].str.strip().str.lower() == name_lo
             row  = df[mask]
             if row.empty and len(name_lo) > 4:
-                # Only partial-match for names longer than 4 chars to avoid abbreviation collisions
-                mask = df[name_col].apply(lambda x: name_lo in str(x).strip().lower() if x is not None else False)
+                # Only partial-match for names longer than 4 chars, and only
+                # when the table name is no more than 20% longer than input —
+                # prevents "Calcium" matching "Calcium Cyanide".
+                mask = df[name_col].apply(
+                    lambda x: (
+                        name_lo in str(x).strip().lower()
+                        and len(str(x).strip()) <= len(name_lo) * 1.2
+                    ) if x is not None else False
+                )
                 row  = df[mask]
             if not row.empty:
                 val = self._to_float(row.iloc[0][col_name])
