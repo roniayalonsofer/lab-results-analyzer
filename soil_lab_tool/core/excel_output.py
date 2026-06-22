@@ -734,6 +734,7 @@ class LabReportExcel:
             "unit":    cfg["unit"],
         }
 
+        self._current_sheet_records = records
         if portrait:
             self._write_portrait(ws, compounds, samples, pivot, cas_map,
                                  lod_map, loq_map,
@@ -1192,7 +1193,74 @@ class LabReportExcel:
 
             data_row += 1
 
-        # ── Legend ────────────────────────────────────────────────────
+        # ── TOTAL TPH row (DRO + ORO, only for TPH sheets) ────────────
+        is_tph_sheet = (
+            cfg.get("analysis_type") == "SOIL_TPH"
+            or all(r.get("analysis_type") == "SOIL_TPH" for r in self._current_sheet_records)
+        )
+        DRO_NAMES = {"c10 - c28 fraction (dro)", "dro", "c10-c28 (dro)"}
+        ORO_NAMES = {"c24 - c40 fraction (oro)", "oro", "c24-c40 (oro)"}
+        has_dro = any(c.lower() in DRO_NAMES for c in compounds)
+        has_oro = any(c.lower() in ORO_NAMES for c in compounds)
+        # Only add if input doesn't already contain a "total" TPH compound
+        has_total_already = any("total" in c.lower() and "tph" in c.lower() or
+                                "total petroleum" in c.lower() for c in compounds)
+
+        if is_tph_sheet and (has_dro or has_oro) and not has_total_already:
+            dro_key = next((c for c in compounds if c.lower() in DRO_NAMES), None)
+            oro_key = next((c for c in compounds if c.lower() in ORO_NAMES), None)
+            dro_loq = loq_map.get(dro_key) or 0
+            oro_loq = loq_map.get(oro_key) or 0
+            total_loq = dro_loq + oro_loq
+
+            n_fixed_cols = len(fixed_vals) if compounds else (N_COMPOUND + N_LOD_LOQ + N_THRESH)
+
+            # VSL threshold for Total TPH (350 mg/kg standard)
+            TPH_THRESH = 350.0
+
+            total_sample_vals = []
+            for sid in samples:
+                dro_v, dro_f, _ = pivot.get(dro_key, {}).get(sid, (None, "<LOQ", None)) if dro_key else (None, "<LOQ", None)
+                oro_v, oro_f, _ = pivot.get(oro_key, {}).get(sid, (None, "<LOQ", None)) if oro_key else (None, "<LOQ", None)
+
+                dro_num = dro_v if isinstance(dro_v, (int, float)) else (dro_loq if dro_key else 0)
+                oro_num = oro_v if isinstance(oro_v, (int, float)) else (oro_loq if oro_key else 0)
+                both_below = dro_f in ("<LOQ", "<LOD", "<") and oro_f in ("<LOQ", "<LOD", "<")
+
+                total_num = dro_num + oro_num
+                if both_below:
+                    display = total_num  # will be formatted as "<X"
+                    flag = "<LOQ"
+                else:
+                    display = total_num
+                    flag = ""
+                total_sample_vals.append((display, total_num, flag))
+
+            # Build row
+            if lod_loq_mode == "loq":
+                row_data = ["Total TPH", "DRO+ORO", _round_sf(total_loq)]
+            elif include_lod_loq or lod_loq_mode == "both":
+                row_data = ["Total TPH", "DRO+ORO", "", _round_sf(total_loq)]
+            else:
+                row_data = ["Total TPH", "DRO+ORO"]
+
+            # Threshold placeholders
+            row_data += ["לא קיים"] * N_THRESH
+            row_data += [sv[0] for sv in total_sample_vals]
+
+            for ci, val in enumerate(row_data, 1):
+                c = ws.cell(row=data_row, column=ci, value=val)
+                c.font      = Font(**FHE, bold=True)
+                c.alignment = WRAP_C if ci == 1 else CENTER
+                c.border    = THIN
+                if ci > N_FIXED:
+                    si = ci - N_FIXED - 1
+                    display, total_num, flag = total_sample_vals[si]
+                    if flag == "<LOQ" and isinstance(val, (int, float)):
+                        c.number_format = '"<"0.0##'
+                    elif isinstance(total_num, (int, float)) and total_num > TPH_THRESH:
+                        c.fill = YELLOW
+            data_row += 1
         n_legend = self._write_legend(ws, data_row + 1, include_gray=has_gray,
                                       thresh_keys=thresh_keys)
         # ── Threshold source footnotes (only for keys with ≥1 defined value) ──
