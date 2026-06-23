@@ -1310,16 +1310,42 @@ def run_update_bytes(
             if sh_name in chart_paths:
                 _replace_chart_image(doc, 1 + chart_idx, chart_paths[sh_name])
 
-        # ── Yellow reminder note about charts ────────────────────────
-        from docx.oxml.ns import qn as _qn
-        from docx.oxml import OxmlElement as _OxmlEl
-        reminder_para = doc.add_paragraph()
-        run = reminder_para.add_run(
-            "⚠️ שים לב: יש לעדכן את הגרפים בקובץ Mann-Kendall בתיקייה "
-            "ולהדביק את הגרפים המעודכנים לדוח זה."
+        # ── Yellow reminder note about charts — inserted before the charts ──
+        # Find the first paragraph that contains a drawing/chart image
+        _chart_para = None
+        for _pi, _p in enumerate(doc.paragraphs):
+            if _pi > 40 and _p._p.findall('.//' + qn('w:drawing')):
+                _chart_para = _p
+                break
+
+        _reminder_text = (
+            "⚠️ שים לב: יש לעדכן את קובץ Mann-Kendall בתיקייה "
+            "ולהדביק את הגרפים המעודכנים לדוח."
         )
-        run.bold = True
-        run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+
+        if _chart_para is not None:
+            # Insert a new paragraph immediately before the first chart paragraph
+            from docx.oxml import OxmlElement as _OxmlEl
+            _new_p = _OxmlEl('w:p')
+            _new_r = _OxmlEl('w:r')
+            _new_rpr = _OxmlEl('w:rPr')
+            _b = _OxmlEl('w:b')
+            _highlight = _OxmlEl('w:highlight')
+            _highlight.set(qn('w:val'), 'yellow')
+            _new_rpr.append(_b)
+            _new_rpr.append(_highlight)
+            _new_r.append(_new_rpr)
+            _new_t = _OxmlEl('w:t')
+            _new_t.text = _reminder_text
+            _new_r.append(_new_t)
+            _new_p.append(_new_r)
+            _chart_para._p.addprevious(_new_p)
+        else:
+            # Fallback: append at end
+            _rp = doc.add_paragraph()
+            _run = _rp.add_run(_reminder_text)
+            _run.bold = True
+            _run.font.highlight_color = WD_COLOR_INDEX.YELLOW
 
         doc.save(str(out_word))
 
