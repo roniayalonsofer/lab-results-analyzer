@@ -640,15 +640,31 @@ class LabReportExcel:
                         cas_map[cmp] = resolved
 
         # Get thresholds per compound (with confidence tracking)
+        # uncertain_compounds: maps compound_name → threshold_table_name (for the note)
         thresh_vals: dict[str, dict[str, float | None]] = {}
-        uncertain_compounds: set[str] = set()  # compounds with uncertain threshold match
+        uncertain_compounds: dict[str, str] = {}  # cmp → thresh name in table
         for cmp, cas in cas_map.items():
             row_thresh = {}
+            cmp_uncertain = False
             for k in thresh_keys:
                 val, conf = self.tm.get_threshold_with_confidence(cas, k, compound_name=cmp)
-                row_thresh[k] = val
                 if conf == 'uncertain' and val is not None:
-                    uncertain_compounds.add(cmp)
+                    cmp_uncertain = True
+                    row_thresh[k] = None  # treat as "no threshold" for display/coloring
+                else:
+                    row_thresh[k] = val
+            if cmp_uncertain:
+                # Look up the threshold table name for this CAS for the note
+                thresh_name = getattr(self.tm, '_cas_to_thresh_name', {}).get(
+                    str(cas).strip(), ""
+                )
+                if not thresh_name:
+                    # init the cache if not yet done
+                    self.tm.get_threshold_with_confidence(cas, thresh_keys[0], compound_name=cmp)
+                    thresh_name = getattr(self.tm, '_cas_to_thresh_name', {}).get(
+                        str(cas).strip(), ""
+                    )
+                uncertain_compounds[cmp] = thresh_name
             thresh_vals[cmp] = row_thresh
 
         # Optional: remove compounds that are ND everywhere AND LOD ≤ strictest threshold
@@ -920,7 +936,7 @@ class LabReportExcel:
                         uncertain_compounds=None):
         cfg         = cfg or {}
         sample_meta = sample_meta or {}
-        uncertain_compounds = uncertain_compounds or set()
+        uncertain_compounds = uncertain_compounds or {}
         unit            = hinfo["unit"]
         include_lod_loq = cfg.get("include_lod_loq", False)   # gas sheet: full LOD+LOQ mode
         lod_loq_mode    = cfg.get("lod_loq_mode", False)       # soil: "both" or "loq"
@@ -1104,17 +1120,12 @@ class LabReportExcel:
             lod_disp = _round_sf(lod_val) if isinstance(lod_val, float) else (lod_val if lod_val is not None else "")
             loq_disp = _round_sf(loq_val) if isinstance(loq_val, float) else (loq_val if loq_val is not None else "")
 
-            # Threshold values — mark uncertain matches so user knows to verify
-            is_uncertain = cmp in uncertain_compounds
-            thresh_row = []
-            for k in thresh_keys:
-                raw = _round_thresh(t_vals.get(k))
-                if is_uncertain and raw is not None:
-                    thresh_row.append("לא ברור ⚠️")
-                elif raw is not None:
-                    thresh_row.append(raw)
-                else:
-                    thresh_row.append("לא קיים")
+            # Threshold values — uncertain ones already set to None in thresh_vals
+            thresh_row = [
+                _round_thresh(t_vals.get(k)) if _round_thresh(t_vals.get(k)) is not None
+                else "לא קיים"
+                for k in thresh_keys
+            ]
 
             # Sample values — build display strings + keep raw for colouring
             sample_vals: list = []
@@ -1167,54 +1178,61 @@ class LabReportExcel:
                     display, num_v, flag, lod = sample_vals[si]
                     if flag == "<LOQ" and isinstance(val, (int, float)):
                         c.number_format = '"<"0.0##'
-                    vsl_lim      = self._vsl_limit(t_vals)
-                    tier1_ind    = self._tier1_ind_limit(t_vals)
-                    tier1_res    = self._tier1_res_limit(t_vals)
-                    any_lim      = self._strictest(t_vals)
-                    if any_lim is not None:
-                        _nd_at_loq = flag == "ND"
-                        # GREY first: ND is a non-detection regardless of stored value
-                        if _nd_at_loq:
-                            if loq_val is not None and loq_val > any_lim:
-                                c.fill = GRAY
-                                c.font = _font(display, bold=True)
-                                c.number_format = '"<"0.0##'
-                                has_gray = True
-                        # GREY: threshold < LOD/LOQ → uncertain exclusion
-                        elif flag in ("<LOD", "<LOQ", "<"):
-                            lod_num = (
-                                lod     if lod     is not None else
-                                lod_val if lod_val is not None else
-                                loq_val if loq_val is not None else
-                                (num_v  if isinstance(num_v, (int, float)) else None)
-                            )
-                            if lod_num is not None and lod_num > any_lim:
-                                c.fill = GRAY
-                                c.font = _font(display, bold=True)
-                                has_gray = True
-                        # COLOUR: real detection vs threshold
-                        elif isinstance(num_v, (int, float)):
-                            if tier1_ind is not None and num_v > tier1_ind:
-                                c.fill = PINK      # exceeds Tier 1 Industrial
-                                c.font = Font(**FHE, bold=True)
-                            elif tier1_res is not None and num_v > tier1_res:
-                                c.fill = L_BLUE    # exceeds Tier 1 Residential
-                                c.font = Font(**FHE, bold=True)
-                            elif vsl_lim is not None and num_v > vsl_lim:
-                                c.fill = YELLOW    # exceeds VSL only
-                                c.font = Font(**FHE, bold=True)
+                    # If threshold is uncertain, skip exceedance colouring entirely
+                    if cmp not in uncertain_compounds:
+                        vsl_lim      = self._vsl_limit(t_vals)
+                        tier1_ind    = self._tier1_ind_limit(t_vals)
+                        tier1_res    = self._tier1_res_limit(t_vals)
+                        any_lim      = self._strictest(t_vals)
+                        if any_lim is not None:
+                            _nd_at_loq = flag == "ND"
+                            # GREY first: ND is a non-detection regardless of stored value
+                            if _nd_at_loq:
+                                if loq_val is not None and loq_val > any_lim:
+                                    c.fill = GRAY
+                                    c.font = _font(display, bold=True)
+                                    c.number_format = '"<"0.0##'
+                                    has_gray = True
+                            # GREY: threshold < LOD/LOQ → uncertain exclusion
+                            elif flag in ("<LOD", "<LOQ", "<"):
+                                lod_num = (
+                                    lod     if lod     is not None else
+                                    lod_val if lod_val is not None else
+                                    loq_val if loq_val is not None else
+                                    (num_v  if isinstance(num_v, (int, float)) else None)
+                                )
+                                if lod_num is not None and lod_num > any_lim:
+                                    c.fill = GRAY
+                                    c.font = _font(display, bold=True)
+                                    has_gray = True
+                            # COLOUR: real detection vs threshold
+                            elif isinstance(num_v, (int, float)):
+                                if tier1_ind is not None and num_v > tier1_ind:
+                                    c.fill = PINK      # exceeds Tier 1 Industrial
+                                    c.font = Font(**FHE, bold=True)
+                                elif tier1_res is not None and num_v > tier1_res:
+                                    c.fill = L_BLUE    # exceeds Tier 1 Residential
+                                    c.font = Font(**FHE, bold=True)
+                                elif vsl_lim is not None and num_v > vsl_lim:
+                                    c.fill = YELLOW    # exceeds VSL only
+                                    c.font = Font(**FHE, bold=True)
 
-            # ── Uncertain threshold: red text on compound name + note ──
-            if is_uncertain:
-                # Only colour the TEXT red — do NOT fill the cell
-                # (red fill is reserved for sample-value exceedances)
+            # ── Uncertain threshold: asterisk in compound name + note ──
+            if cmp in uncertain_compounds:
+                # Append asterisk to the compound name cell
                 name_cell = ws.cell(row=data_row, column=1)
-                name_cell.font = Font(**FHE, color="CC0000", bold=True)
+                if name_cell.value and not str(name_cell.value).endswith(' *'):
+                    name_cell.value = str(name_cell.value) + ' *'
                 # Write the note in the first column after all data
                 note_col = N_FIXED + len(samples) + 1
-                note_cell = ws.cell(row=data_row, column=note_col,
-                                    value="ערך סף לא ברור — נדרש לבדוק בטבלת ערכי הסף")
-                note_cell.font = Font(**FHE, color="CC0000", italic=True)
+                thresh_name = uncertain_compounds[cmp]
+                note_text = (
+                    f"קיים ערך סף לתרכובת דומה בשם: {thresh_name}"
+                    if thresh_name else
+                    "קיים ערך סף לתרכובת דומה — נדרש לבדוק בטבלת ערכי הסף"
+                )
+                note_cell = ws.cell(row=data_row, column=note_col, value=note_text)
+                note_cell.font = Font(**FHE, italic=True)
                 note_cell.alignment = CENTER
                 note_cell.border = THIN
 
@@ -1316,7 +1334,7 @@ class LabReportExcel:
                          uncertain_compounds=None):
         cfg      = cfg or {}
         unit_map = unit_map or {}
-        uncertain_compounds = uncertain_compounds or set()
+        uncertain_compounds = uncertain_compounds or {}
 
         # ── Depth detection & sample sorting ────────────────────────────
         # Split each sample_id into (borehole, depth_str) for display.
@@ -1355,11 +1373,15 @@ class LabReportExcel:
         _pid_hdr = ["PID [ppm]"] if has_pid else []
         _pid_pad = [""]         if has_pid else []
         if has_depth:
-            row2_data = ["שם קידוח", "עומק [מ']"] + _pid_hdr + compounds
+            row2_data = ["שם קידוח", "עומק [מ']"] + _pid_hdr + [
+                (c + ' *' if c in uncertain_compounds else c) for c in compounds
+            ]
             row3_data = ["CAS Number", ""]          + _pid_pad + [cas_map.get(c, "") for c in compounds]
             row4_data = ["יחידות", ""]              + _pid_pad + [unit_map.get(c, hinfo["unit"]) for c in compounds]
         else:
-            row2_data = ["שם קידוח"] + _pid_hdr + compounds
+            row2_data = ["שם קידוח"] + _pid_hdr + [
+                (c + ' *' if c in uncertain_compounds else c) for c in compounds
+            ]
             row3_data = ["CAS Number"] + _pid_pad + [cas_map.get(c, "") for c in compounds]
             row4_data = ["יחידות"]     + _pid_pad + [unit_map.get(c, hinfo["unit"]) for c in compounds]
 
@@ -1419,8 +1441,8 @@ class LabReportExcel:
                     c.font      = UNDEF_FONT
                     c.alignment = CENTER
                 elif is_uncertain_cmp:
-                    c.value     = "לא ברור ⚠️"
-                    c.font      = Font(**FHE, color="CC0000", bold=True)
+                    c.value     = "לא קיים"
+                    c.font      = UNDEF_FONT
                     c.alignment = CENTER
                 else:
                     c.value         = tval
@@ -1485,43 +1507,47 @@ class LabReportExcel:
                     cmp_name               = compounds[comp_idx]
                     num_v, flag_cell, lod_cell = row_meta[comp_idx]
                     t_vals                 = thresh_vals.get(cmp_name, {})
-                    vsl_lim   = self._vsl_limit(t_vals)
-                    tier1_ind = self._tier1_ind_limit(t_vals)
-                    tier1_res = self._tier1_res_limit(t_vals)
-                    any_lim   = self._strictest(t_vals)
-                    if any_lim is not None:
-                        _loq_cmp = loq_map.get(cmp_name)
-                        _nd_at_loq = flag_cell == "ND"
-                        # GREY first: ND is a non-detection regardless of stored value
-                        if _nd_at_loq:
-                            if _loq_cmp is not None and _loq_cmp > any_lim:
-                                c.fill = GRAY
-                                c.font = _font(val, bold=True)
-                                c.number_format = '"<"0.0##'
-                                has_gray = True
-                        # GREY: threshold < LOD/LOQ → uncertain exclusion
-                        elif flag_cell in ("<LOD", "<LOQ", "<"):
-                            lod_num = (
-                                lod_cell              if lod_cell              is not None else
-                                lod_map.get(cmp_name) if lod_map.get(cmp_name) is not None else
-                                loq_map.get(cmp_name) if loq_map.get(cmp_name) is not None else
-                                (num_v if isinstance(num_v, (int, float)) else None)
-                            )
-                            if lod_num is not None and lod_num > any_lim:
-                                c.fill = GRAY
-                                c.font = _font(val, bold=True)
-                                has_gray = True
-                        # COLOUR: real detection vs threshold
-                        elif isinstance(num_v, (int, float)):
-                            if tier1_ind is not None and num_v > tier1_ind:
-                                c.fill = PINK      # exceeds Tier 1 Industrial
-                                c.font = Font(**FHE, bold=True)
-                            elif tier1_res is not None and num_v > tier1_res:
-                                c.fill = L_BLUE    # exceeds Tier 1 Residential
-                                c.font = Font(**FHE, bold=True)
-                            elif vsl_lim is not None and num_v > vsl_lim:
-                                c.fill = YELLOW    # exceeds VSL only
-                                c.font = Font(**FHE, bold=True)
+                    # Skip exceedance colouring for uncertain compounds
+                    if cmp_name in uncertain_compounds:
+                        pass
+                    else:
+                        vsl_lim   = self._vsl_limit(t_vals)
+                        tier1_ind = self._tier1_ind_limit(t_vals)
+                        tier1_res = self._tier1_res_limit(t_vals)
+                        any_lim   = self._strictest(t_vals)
+                        if any_lim is not None:
+                            _loq_cmp = loq_map.get(cmp_name)
+                            _nd_at_loq = flag_cell == "ND"
+                            # GREY first: ND is a non-detection regardless of stored value
+                            if _nd_at_loq:
+                                if _loq_cmp is not None and _loq_cmp > any_lim:
+                                    c.fill = GRAY
+                                    c.font = _font(val, bold=True)
+                                    c.number_format = '"<"0.0##'
+                                    has_gray = True
+                            # GREY: threshold < LOD/LOQ → uncertain exclusion
+                            elif flag_cell in ("<LOD", "<LOQ", "<"):
+                                lod_num = (
+                                    lod_cell              if lod_cell              is not None else
+                                    lod_map.get(cmp_name) if lod_map.get(cmp_name) is not None else
+                                    loq_map.get(cmp_name) if loq_map.get(cmp_name) is not None else
+                                    (num_v if isinstance(num_v, (int, float)) else None)
+                                )
+                                if lod_num is not None and lod_num > any_lim:
+                                    c.fill = GRAY
+                                    c.font = _font(val, bold=True)
+                                    has_gray = True
+                            # COLOUR: real detection vs threshold
+                            elif isinstance(num_v, (int, float)):
+                                if tier1_ind is not None and num_v > tier1_ind:
+                                    c.fill = PINK
+                                    c.font = Font(**FHE, bold=True)
+                                elif tier1_res is not None and num_v > tier1_res:
+                                    c.fill = L_BLUE
+                                    c.font = Font(**FHE, bold=True)
+                                elif vsl_lim is not None and num_v > vsl_lim:
+                                    c.fill = YELLOW
+                                    c.font = Font(**FHE, bold=True)
             data_row += 1
 
         # ── Merge borehole column cells vertically ───────────────────────
@@ -1565,6 +1591,20 @@ class LabReportExcel:
             c.font = Font(**FEN, italic=True, color="808080")
             c.fill = WHITE
             note_row += 1
+
+        # ── Uncertain compound notes ────────────────────────────────────
+        for cmp, thresh_name in uncertain_compounds.items():
+            if cmp in compounds:
+                note_text = (
+                    f"* {cmp}: קיים ערך סף לתרכובת דומה בשם: {thresh_name}"
+                    if thresh_name else
+                    f"* {cmp}: קיים ערך סף לתרכובת דומה — נדרש לבדוק בטבלת ערכי הסף"
+                )
+                c = ws.cell(row=note_row, column=1, value=note_text)
+                c.font = Font(**FEN, italic=True, color="808080")
+                c.fill = WHITE
+                note_row += 1
+
         self._auto_width(ws, total_cols)
 
     # ------------------------------------------------------------------
