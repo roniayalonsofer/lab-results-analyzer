@@ -625,10 +625,36 @@ class ThresholdManager:
         "di n butyl phthalate":             "dibutyl phthalate",
         "n propylbenzene":                  "propyl benzene",
         "6 caprolactam":                    "caprolactam",
+        # Positional: ortho=2, meta=3, para=4 → handles all o-/m-/p- names
         "4 chloroaniline":                  "chloroaniline p",
         "2 chloroaniline":                  "chloroaniline o",
         "3 chloroaniline":                  "chloroaniline m",
+        "2 chlorotoluene":                  "chlorotoluene o",
+        "4 chlorotoluene":                  "chlorotoluene p",
+        "ortho xylene":                     "xylene o",
+        "meta xylene":                      "xylene m",
+        "para xylene":                      "xylene p",
+        "2 xylene":                         "xylene o",
+        "3 xylene":                         "xylene m",
+        "4 xylene":                         "xylene p",
     }
+
+    # Safe qualifier words appended to threshold names that do NOT change
+    # compound identity for environmental monitoring purposes:
+    #  - "and Compounds"   → threshold for total element covers all its compounds
+    #  - "Inorganic"       → applied to total metal ICP-MS measurements
+    #  - "And Borates Only"→ Boron measurement = Boron + borates
+    #  - "(Diet)"/"Source: Soil" → exposure-pathway labels, not compound identity
+    #  - "Non-diet"/"Total"→ measurement basis labels
+    #  - "(Metallic)"/"(elemental)" → total element
+    #  - "(Water)"/"(Air)" → source labels in threshold derivation
+    _SAFE_QUALIFIER_WORDS = frozenset({
+        "and", "compounds", "compound", "inorganic",
+        "and borates only", "borates", "only",
+        "diet", "non diet",
+        "source", "soil", "water", "air",
+        "total", "metallic", "elemental",
+    })
 
     @staticmethod
     def _norm_name(s: str) -> str:
@@ -664,15 +690,11 @@ class ThresholdManager:
         """
         Compare a lab compound name with a threshold-table name.
 
-        Returns
-        -------
-        'exact'     : names represent the same compound — threshold is safe to use.
-        'uncertain' : names differ in a way that may indicate different compounds.
+        Returns 'exact' or 'uncertain'.
         """
         ln = self._norm_name(lab_name)
         tn = self._norm_name(thresh_name)
 
-        # Direct equality after normalisation
         if ln == tn:
             return 'exact'
 
@@ -682,33 +704,42 @@ class ThresholdManager:
         if lns == tns or lns == tn or ln == tns:
             return 'exact'
 
-        # Same words in different order (handles cis/trans position reordering)
-        # Safe only when both sides have more than 1 token (single tokens must match exactly)
+        # Same words in different order
         ln_tokens = set(ln.split())
         tn_tokens = set(tn.split())
         if len(ln_tokens) > 1 and ln_tokens == tn_tokens:
             return 'exact'
-        # Also check after synonym mapping
         lns_tokens = set(lns.split())
         tns_tokens = set(tns.split())
         if len(lns_tokens) > 1 and (lns_tokens == tn_tokens or ln_tokens == tns_tokens):
             return 'exact'
 
-        # Allow very minor spelling differences (1 char edit distance)
+        # Allow 1-char edit distance
         if abs(len(ln) - len(tn)) <= 1:
             diffs = sum(a != b for a, b in zip(ln.ljust(len(tn)), tn.ljust(len(ln))))
             if diffs <= 1:
                 return 'exact'
 
-        # Lab name is a prefix of threshold name → uncertain
-        # (e.g. "Phosphorus" → "Phosphorus, White"; "Titanium" → "Titanium Tetrachloride")
+        # Strip safe qualifier words from the threshold name and re-compare.
+        # e.g. "Lead and Compounds" → "lead", "Arsenic, Inorganic" → "arsenic"
+        # This handles regulatory conventions where the threshold is labelled
+        # with qualifiers that do NOT change the compound identity for the
+        # measurement in question.
+        tn_words = tn.split()
+        ln_words = set(ln.split())
+        tn_stripped = ' '.join(
+            w for w in tn_words if w.rstrip(':.,') not in self._SAFE_QUALIFIER_WORDS
+        ).strip()
+        if tn_stripped and (tn_stripped == ln or tn_stripped == lns or
+                            set(tn_stripped.split()) == ln_words):
+            return 'exact'
+
+        # If the threshold name is a prefix/subset of the lab name (or vice versa)
+        # AND the extra words are NOT safe qualifiers → uncertain
         if tn.startswith(ln) and len(tn) > len(ln) + 1:
             return 'uncertain'
         if ln.startswith(tn) and len(ln) > len(tn) + 1:
             return 'uncertain'
-
-        # Threshold name has extra qualifier words that change compound identity
-        # e.g. "Arsenic" vs "Arsenic, Inorganic" / "Nickel Soluble Salts"
         if ln in tn or tn in ln:
             return 'uncertain'
 

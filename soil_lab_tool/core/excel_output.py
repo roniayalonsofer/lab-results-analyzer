@@ -1204,19 +1204,17 @@ class LabReportExcel:
                                 c.fill = YELLOW    # exceeds VSL only
                                 c.font = Font(**FHE, bold=True)
 
-            # ── Uncertain threshold: mark compound name cell red + note ──
+            # ── Uncertain threshold: red text on compound name + note ──
             if is_uncertain:
-                from openpyxl.styles import PatternFill
-                LIGHT_RED = PatternFill(fill_type='solid', fgColor='FFCCCC')
-                # Red fill on compound name cell (col 1)
+                # Only colour the TEXT red — do NOT fill the cell
+                # (red fill is reserved for sample-value exceedances)
                 name_cell = ws.cell(row=data_row, column=1)
-                name_cell.fill = LIGHT_RED
-                # Write the note in the first empty column after all data
+                name_cell.font = Font(**FHE, color="CC0000", bold=True)
+                # Write the note in the first column after all data
                 note_col = N_FIXED + len(samples) + 1
                 note_cell = ws.cell(row=data_row, column=note_col,
                                     value="ערך סף לא ברור — נדרש לבדוק בטבלת ערכי הסף")
                 note_cell.font = Font(**FHE, color="CC0000", italic=True)
-                note_cell.fill = LIGHT_RED
                 note_cell.alignment = CENTER
                 note_cell.border = THIN
 
@@ -1422,7 +1420,7 @@ class LabReportExcel:
                     c.alignment = CENTER
                 elif is_uncertain_cmp:
                     c.value     = "לא ברור ⚠️"
-                    c.font      = Font(**FHE, color="CC0000", italic=True)
+                    c.font      = Font(**FHE, color="CC0000", bold=True)
                     c.alignment = CENTER
                 else:
                     c.value         = tval
