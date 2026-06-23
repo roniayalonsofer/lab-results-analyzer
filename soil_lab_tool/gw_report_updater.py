@@ -660,12 +660,19 @@ def _update_field_table(doc: Document, field_data: dict, wells: list):
     if len(wells) == 1:
         well = wells[0]
         well_field = field_data.get(well, {}).get("field", {})
+        sample_date = field_data.get(well, {}).get("date")
+
         # Detect rows dynamically by matching parameter name in col 0,
         # to handle docs where there's an extra "תאריך" row at index 1.
         name_to_row = {}
         for ri, row in enumerate(tbl.rows):
             row_name = row.cells[0].text.strip().rstrip("*")
             name_to_row[row_name] = ri
+
+        # Update the date row if present
+        if sample_date and "תאריך" in name_to_row:
+            ri = name_to_row["תאריך"]
+            _set_cell(tbl.rows[ri].cells[-1], sample_date, highlight=True)
 
         FIELD_ROWS_ALT = {
             "pH":   "pH",
@@ -971,25 +978,33 @@ def _update_narrative_layout_b(doc: Document, date_str: str, results: dict):
                         run.text = run.text.rstrip() + " " + date_str + " "
                         run.font.highlight_color = WD_COLOR_INDEX.YELLOW
 
-        # Update the BTEX concentration sentence
-        # The value runs are the numeric/non-Hebrew runs between the fixed
-        # label phrases. Identify them by: they follow a "של " or ", " run
-        # and precede a "מ\"ג" run.
+        # Update the BTEX concentration sentence by rebuilding it from scratch.
+        # We replace the entire paragraph content so we don't rely on fragile
+        # slot detection. Only detected (non-null) compounds are listed,
+        # with no threshold-exceedance parentheses (user adds those manually).
         if "בדיגום" in text and "MTBE" in text and "בריכוזים" in text:
-            value_run_indices = []
-            for i, run in enumerate(runs):
-                t = run.text.strip()
-                # A numeric value run: contains only digits, dots, "<"
-                if re.match(r'^<?[\d.]+$', t) and i + 1 < len(runs):
-                    nxt = runs[i + 1].text
-                    if 'מ"ג' in nxt or "מ\"ג" in nxt or 'מ' in nxt:
-                        value_run_indices.append(i)
+            ORDERED = [("MTBE", "MTBE"), ("בנזן", "בנזן"), ("אתיל בנזן", "אתיל בנזן"),
+                       ("טולואן", "טולואן"), ("קסילן", "קסילן")]
+            detected = [(name_en, results.get(heb)) for name_en, heb in ORDERED
+                        if results.get(heb) is not None]
 
-            for slot_idx, param in zip(value_run_indices, ORDERED):
-                val = results.get(param)
-                txt = str(val) if val is not None else "<0.001"
-                runs[slot_idx].text = txt
-                runs[slot_idx].font.highlight_color = WD_COLOR_INDEX.YELLOW
+            if detected:
+                if len(detected) == 1:
+                    name, val = detected[0]
+                    new_sentence = f'בדיגום אותר {name} בריכוז של {val} מ"ג/ליטר.'
+                else:
+                    names = ", ".join(n for n, _ in detected[:-1]) + f" ו-{detected[-1][0]}"
+                    vals = ", ".join(str(v) for _, v in detected[:-1]) + f" ו-{detected[-1][1]}"
+                    new_sentence = f'בדיגום אותרו {names} בריכוזים של {vals} מ"ג/ליטר בהתאמה.'
+            else:
+                new_sentence = 'בדיגום לא אותרו מרכיבי BTEX/MTBE בריכוזים מעל סף הזיהוי.'
+
+            # Clear all runs and write the new sentence into the first run
+            if runs:
+                runs[0].text = new_sentence
+                runs[0].font.highlight_color = WD_COLOR_INDEX.YELLOW
+                for extra in runs[1:]:
+                    extra.text = ""
 
 
 def _heb_join_words(items):
@@ -1005,23 +1020,26 @@ def _heb_join_values(items):
 
 
 def _update_title_month_year(doc: Document, new_dt: datetime) -> bool:
-    """Update the report title's month + year (e.g. 'פברואר' -> 'יוני 2026')."""
+    """Update the report title's month + year wherever it appears in a title paragraph."""
     month_name = HEBREW_MONTHS[new_dt.month - 1]
     year = new_dt.year
     updated = False
+    month_pat = re.compile(r'^(' + '|'.join(HEBREW_MONTHS) + r')(\s+\d{4})?$')
+
     for p in doc.paragraphs:
-        if "ניטור מי תהום תקופתי" not in p.text:
+        if "ניטור מי תהום" not in p.text:
             continue
         runs = p.runs
         for i, run in enumerate(runs):
-            if run.text.strip() in HEBREW_MONTHS:
-                run.text = f" {month_name}"
+            m = month_pat.match(run.text.strip())
+            if m:
+                # Preserve any leading whitespace/punctuation
+                leading = run.text[: len(run.text) - len(run.text.lstrip())]
+                run.text = f"{leading}{month_name} {year}"
                 run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                if i + 1 < len(runs):
-                    nxt = runs[i + 1]
-                    if nxt.text.strip() == "" or re.match(r'^\d{4}$', nxt.text.strip()):
-                        nxt.text = f" {year}"
-                        nxt.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                # If next run held only a standalone year, clear it
+                if i + 1 < len(runs) and re.match(r'^\s*\d{4}\s*$', runs[i + 1].text):
+                    runs[i + 1].text = ""
                 updated = True
     return updated
 
@@ -1291,6 +1309,17 @@ def run_update_bytes(
         for chart_idx, sh_name in enumerate(["בנזן", "MTBE"]):
             if sh_name in chart_paths:
                 _replace_chart_image(doc, 1 + chart_idx, chart_paths[sh_name])
+
+        # ── Yellow reminder note about charts ────────────────────────
+        from docx.oxml.ns import qn as _qn
+        from docx.oxml import OxmlElement as _OxmlEl
+        reminder_para = doc.add_paragraph()
+        run = reminder_para.add_run(
+            "⚠️ שים לב: יש לעדכן את הגרפים בקובץ Mann-Kendall בתיקייה "
+            "ולהדביק את הגרפים המעודכנים לדוח זה."
+        )
+        run.bold = True
+        run.font.highlight_color = WD_COLOR_INDEX.YELLOW
 
         doc.save(str(out_word))
 
