@@ -602,6 +602,165 @@ class ThresholdManager:
             )
         return None
 
+    # ── Name-match confidence ──────────────────────────────────────────────────
+
+    # Known safe synonym pairs (lab_name_lower → thresh_name_lower).
+    # These are names that differ in format/language but represent the same compound.
+    _SAFE_SYNONYMS: dict[str, str] = {
+        "aluminium":                        "aluminum",
+        "tetrachloroethene":                "tetrachloroethylene",
+        "trichloroethene":                  "trichloroethylene",
+        "dichloroethene":                   "dichloroethylene",
+        "1 1 dichloroethene":               "1 1 dichloroethylene",
+        "cis 1 2 dichloroethene":           "1 2 cis dichloroethylene",
+        "trans 1 2 dichloroethene":         "1 2 trans dichloroethylene",
+        "dichloromethane":                  "methylene chloride",
+        "tetrachloromethane":               "carbon tetrachloride",
+        "chloroethane":                     "ethyl chloride",
+        "isopropylbenzene":                 "cumene",
+        "dibromomethane":                   "methylene bromide",
+        "2 methylphenol":                   "cresol o",
+        "3 methylphenol":                   "cresol m",
+        "4 methylphenol":                   "cresol p",
+        "di n butyl phthalate":             "dibutyl phthalate",
+        "n propylbenzene":                  "propyl benzene",
+        "6 caprolactam":                    "caprolactam",
+        "4 chloroaniline":                  "chloroaniline p",
+        "2 chloroaniline":                  "chloroaniline o",
+        "3 chloroaniline":                  "chloroaniline m",
+    }
+
+    @staticmethod
+    def _norm_name(s: str) -> str:
+        """Normalise a compound name for comparison."""
+        s = s.lower().strip()
+        # Normalise backtick/prime to apostrophe (e.g. 1,1`-Biphenyl)
+        s = s.replace('`', "'")
+        # Remove parenthetical AND square-bracket descriptors: "(a)", "[a]", "(PCE)"
+        s = re.sub(r'\s*[\(\[][^\)\]]+[\)\]]', '', s)
+        # Normalise dot-separated numbers to comma: "1.1-" → "1,1-"
+        s = re.sub(r'(\d)\.(\d)', r'\1,\2', s)
+        # Remove @ sign (mixture notation like "2.4@2.5")
+        s = s.replace('@', ' ')
+        # Structural comma reorder: "Dichloroethane, 1,1-" → "1 1 dichloroethane"
+        # ONLY when part before comma is pure letters/spaces (no digits)
+        m = re.match(r'^([a-z][a-z\s]+),\s*([\d,]+)[-\s]*([\w\']*)\s*-?\s*$', s)
+        if m:
+            main  = m.group(1).strip()
+            nums  = re.sub(r'[,\s]+', ' ', m.group(2)).strip()
+            descr = m.group(3).strip()
+            parts = [p for p in [nums, descr, main] if p]
+            s = ' '.join(parts)
+        # Normalise all separators to single space
+        s = re.sub(r'[-–,\s]+', ' ', s).strip()
+        s = s.replace('aluminium', 'aluminum')
+        # Remove apostrophes (positional notation like 1,1'- adds no compound info)
+        s = s.replace("'", "")
+        s = re.sub(r'\s+', ' ', s).strip()
+        s = s.rstrip(".,; ")
+        return s
+
+    def name_match_confidence(self, lab_name: str, thresh_name: str) -> str:
+        """
+        Compare a lab compound name with a threshold-table name.
+
+        Returns
+        -------
+        'exact'     : names represent the same compound — threshold is safe to use.
+        'uncertain' : names differ in a way that may indicate different compounds.
+        """
+        ln = self._norm_name(lab_name)
+        tn = self._norm_name(thresh_name)
+
+        # Direct equality after normalisation
+        if ln == tn:
+            return 'exact'
+
+        # Known safe synonyms
+        lns = self._SAFE_SYNONYMS.get(ln, ln)
+        tns = self._SAFE_SYNONYMS.get(tn, tn)
+        if lns == tns or lns == tn or ln == tns:
+            return 'exact'
+
+        # Same words in different order (handles cis/trans position reordering)
+        # Safe only when both sides have more than 1 token (single tokens must match exactly)
+        ln_tokens = set(ln.split())
+        tn_tokens = set(tn.split())
+        if len(ln_tokens) > 1 and ln_tokens == tn_tokens:
+            return 'exact'
+        # Also check after synonym mapping
+        lns_tokens = set(lns.split())
+        tns_tokens = set(tns.split())
+        if len(lns_tokens) > 1 and (lns_tokens == tn_tokens or ln_tokens == tns_tokens):
+            return 'exact'
+
+        # Allow very minor spelling differences (1 char edit distance)
+        if abs(len(ln) - len(tn)) <= 1:
+            diffs = sum(a != b for a, b in zip(ln.ljust(len(tn)), tn.ljust(len(ln))))
+            if diffs <= 1:
+                return 'exact'
+
+        # Lab name is a prefix of threshold name → uncertain
+        # (e.g. "Phosphorus" → "Phosphorus, White"; "Titanium" → "Titanium Tetrachloride")
+        if tn.startswith(ln) and len(tn) > len(ln) + 1:
+            return 'uncertain'
+        if ln.startswith(tn) and len(ln) > len(tn) + 1:
+            return 'uncertain'
+
+        # Threshold name has extra qualifier words that change compound identity
+        # e.g. "Arsenic" vs "Arsenic, Inorganic" / "Nickel Soluble Salts"
+        if ln in tn or tn in ln:
+            return 'uncertain'
+
+        return 'uncertain'
+
+    def get_threshold_with_confidence(
+        self, cas: str, threshold_key: str, compound_name: str = ""
+    ) -> tuple[float | None, str]:
+        """
+        Like get_threshold_with_name but also returns a confidence string.
+
+        Returns
+        -------
+        (value, confidence) where confidence is 'exact', 'uncertain', or 'none'.
+        - 'exact'     : threshold is reliable for this compound.
+        - 'uncertain' : CAS or name matched but compound identity may differ.
+        - 'none'      : no threshold found.
+        """
+        # Build name→cas reverse map from the loaded dataframes (cached)
+        if not hasattr(self, '_cas_to_thresh_name'):
+            self._cas_to_thresh_name: dict[str, str] = {}
+            for df in ([self._vsl_full] if self._vsl_full is not None else []) + [self._main]:
+                if df is None:
+                    continue
+                cas_col = next((c for c in df.columns if 'cas' in c.lower()), None)
+                name_col = next((c for c in df.columns
+                                 if any(k in c.lower() for k in ('chemical', 'compound', 'name'))), None)
+                if cas_col and name_col:
+                    for _, row in df.iterrows():
+                        c = str(row[cas_col]).strip()
+                        n = str(row[name_col]).strip()
+                        if c and c != 'nan' and n and n != 'nan':
+                            self._cas_to_thresh_name.setdefault(c, n)
+
+        val = self.get_threshold_with_name(cas, threshold_key, compound_name)
+        if val is None:
+            return (None, 'none')
+
+        # Strip the " *" suffix if present (fuzzy warning marker)
+        val_clean = val
+        if isinstance(val, str) and val.endswith(' *'):
+            return (float(val[:-2]), 'uncertain')
+
+        # Look up what name the threshold table uses for this CAS
+        thresh_name = self._cas_to_thresh_name.get(str(cas).strip())
+        if thresh_name and compound_name:
+            conf = self.name_match_confidence(compound_name, thresh_name)
+            return (val_clean, conf)
+
+        # No CAS→name mapping found (was probably a name-based lookup) → exact
+        return (val_clean, 'exact')
+
     def get_cas_by_name(self, compound_name: str) -> str | None:
         """Return the CAS number for a compound looked up by name.
 

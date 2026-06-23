@@ -1357,6 +1357,34 @@ if page == "soil":
                 key       = "word_dl_btn",
             )
 
+        # ── Uncertain threshold notice + download link ─────────────────
+        _thresh_path = os.path.join(THRESH_DIR, 'soil_vsl_tier1_v7_2024.xlsx')
+        _vsl_path    = os.path.join(THRESH_DIR, 'soil_vsl_v7_full.xlsx')
+        st.info(
+            "⚠️ **שים לב:** תרכובות המסומנות **באדום** בדוח ובהן **'לא ברור ⚠️'** בעמודת ערך הסף — "
+            "ההתאמה לשם בטבלת ערכי הסף לא הייתה חד-משמעית. יש לבדוק ידנית את ערך הסף המתאים "
+            "בטבלת ערכי הסף הרשמית ולהזינו ידנית בדוח."
+        )
+        _thresh_cols = st.columns(2)
+        if os.path.exists(_thresh_path):
+            with open(_thresh_path, 'rb') as _f:
+                _thresh_cols[0].download_button(
+                    "⬇️ הורד טבלת ערכי סף (TIER1 + VSL)",
+                    data=_f.read(),
+                    file_name="soil_vsl_tier1_v7_2024.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="thresh_dl_btn",
+                )
+        if os.path.exists(_vsl_path):
+            with open(_vsl_path, 'rb') as _f:
+                _thresh_cols[1].download_button(
+                    "⬇️ הורד טבלת VSL המלאה",
+                    data=_f.read(),
+                    file_name="soil_vsl_v7_full.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="vsl_full_dl_btn",
+                )
+
     st.markdown('</div>', unsafe_allow_html=True)
 
     # ── file info footer ──────────────────────────────────────────

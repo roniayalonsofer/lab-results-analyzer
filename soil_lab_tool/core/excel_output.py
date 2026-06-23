@@ -639,13 +639,17 @@ class LabReportExcel:
                     if resolved:
                         cas_map[cmp] = resolved
 
-        # Get thresholds per compound
+        # Get thresholds per compound (with confidence tracking)
         thresh_vals: dict[str, dict[str, float | None]] = {}
+        uncertain_compounds: set[str] = set()  # compounds with uncertain threshold match
         for cmp, cas in cas_map.items():
-            thresh_vals[cmp] = {
-                k: self.tm.get_threshold_with_name(cas, k, compound_name=cmp)
-                for k in thresh_keys
-            }
+            row_thresh = {}
+            for k in thresh_keys:
+                val, conf = self.tm.get_threshold_with_confidence(cas, k, compound_name=cmp)
+                row_thresh[k] = val
+                if conf == 'uncertain' and val is not None:
+                    uncertain_compounds.add(cmp)
+            thresh_vals[cmp] = row_thresh
 
         # Optional: remove compounds that are ND everywhere AND LOD ≤ strictest threshold
         # (safe to exclude — cannot possibly exceed threshold)
@@ -740,13 +744,15 @@ class LabReportExcel:
                                  lod_map, loq_map,
                                  thresh_keys, thresh_vals, header_info, cfg,
                                  sample_meta=sample_meta, unit_map=unit_map,
-                                 depth_map=depth_map, pid_map=self.pid_map)
+                                 depth_map=depth_map, pid_map=self.pid_map,
+                                 uncertain_compounds=uncertain_compounds)
         else:
             self._write_landscape(ws, compounds, samples, pivot, cas_map,
                                   lod_map, loq_map,
                                   thresh_keys, thresh_vals, header_info, cfg,
                                   sample_meta=sample_meta, unit_map=unit_map,
-                                  depth_map=depth_map, pid_map=self.pid_map)
+                                  depth_map=depth_map, pid_map=self.pid_map,
+                                  uncertain_compounds=uncertain_compounds)
         return True
 
     def _write_lowflow_sheet(self, ws, records, cfg):
@@ -910,9 +916,11 @@ class LabReportExcel:
     def _write_portrait(self, ws, compounds, samples, pivot, cas_map,
                         lod_map, loq_map,
                         thresh_keys, thresh_vals, hinfo, cfg=None, sample_meta=None,
-                        unit_map=None, depth_map=None, pid_map=None):
+                        unit_map=None, depth_map=None, pid_map=None,
+                        uncertain_compounds=None):
         cfg         = cfg or {}
         sample_meta = sample_meta or {}
+        uncertain_compounds = uncertain_compounds or set()
         unit            = hinfo["unit"]
         include_lod_loq = cfg.get("include_lod_loq", False)   # gas sheet: full LOD+LOQ mode
         lod_loq_mode    = cfg.get("lod_loq_mode", False)       # soil: "both" or "loq"
@@ -1096,12 +1104,17 @@ class LabReportExcel:
             lod_disp = _round_sf(lod_val) if isinstance(lod_val, float) else (lod_val if lod_val is not None else "")
             loq_disp = _round_sf(loq_val) if isinstance(loq_val, float) else (loq_val if loq_val is not None else "")
 
-            # Threshold values (one per selected threshold key)
-            thresh_row = [
-                _round_thresh(t_vals.get(k)) if _round_thresh(t_vals.get(k)) is not None
-                else "לא קיים"
-                for k in thresh_keys
-            ]
+            # Threshold values — mark uncertain matches so user knows to verify
+            is_uncertain = cmp in uncertain_compounds
+            thresh_row = []
+            for k in thresh_keys:
+                raw = _round_thresh(t_vals.get(k))
+                if is_uncertain and raw is not None:
+                    thresh_row.append("לא ברור ⚠️")
+                elif raw is not None:
+                    thresh_row.append(raw)
+                else:
+                    thresh_row.append("לא קיים")
 
             # Sample values — build display strings + keep raw for colouring
             sample_vals: list = []
@@ -1190,6 +1203,22 @@ class LabReportExcel:
                             elif vsl_lim is not None and num_v > vsl_lim:
                                 c.fill = YELLOW    # exceeds VSL only
                                 c.font = Font(**FHE, bold=True)
+
+            # ── Uncertain threshold: mark compound name cell red + note ──
+            if is_uncertain:
+                from openpyxl.styles import PatternFill
+                LIGHT_RED = PatternFill(fill_type='solid', fgColor='FFCCCC')
+                # Red fill on compound name cell (col 1)
+                name_cell = ws.cell(row=data_row, column=1)
+                name_cell.fill = LIGHT_RED
+                # Write the note in the first empty column after all data
+                note_col = N_FIXED + len(samples) + 1
+                note_cell = ws.cell(row=data_row, column=note_col,
+                                    value="ערך סף לא ברור — נדרש לבדוק בטבלת ערכי הסף")
+                note_cell.font = Font(**FHE, color="CC0000", italic=True)
+                note_cell.fill = LIGHT_RED
+                note_cell.alignment = CENTER
+                note_cell.border = THIN
 
             data_row += 1
 
@@ -1285,9 +1314,11 @@ class LabReportExcel:
     def _write_landscape(self, ws, compounds, samples, pivot, cas_map,
                          lod_map, loq_map,
                          thresh_keys, thresh_vals, hinfo, cfg=None, sample_meta=None,
-                         unit_map=None, depth_map=None, pid_map=None):
+                         unit_map=None, depth_map=None, pid_map=None,
+                         uncertain_compounds=None):
         cfg      = cfg or {}
         unit_map = unit_map or {}
+        uncertain_compounds = uncertain_compounds or set()
 
         # ── Depth detection & sample sorting ────────────────────────────
         # Split each sample_id into (borehole, depth_str) for display.
@@ -1381,16 +1412,21 @@ class LabReportExcel:
                 ws.cell(row=data_row, column=fc).border = THIN
             for ci, cmp in enumerate(compounds, cmp_col_start):
                 cas  = cas_map.get(cmp, "")
-                tval = _round_thresh(self.tm.get_threshold_with_name(cas, tk, compound_name=cmp))
+                tval = _round_thresh(thresh_vals.get(cmp, {}).get(tk))
                 c = ws.cell(row=data_row, column=ci)
                 c.border = THIN
+                is_uncertain_cmp = cmp in uncertain_compounds
                 if tval is None:
                     c.value     = "לא קיים"
                     c.font      = UNDEF_FONT
                     c.alignment = CENTER
+                elif is_uncertain_cmp:
+                    c.value     = "לא ברור ⚠️"
+                    c.font      = Font(**FHE, color="CC0000", italic=True)
+                    c.alignment = CENTER
                 else:
                     c.value         = tval
-                    c.font          = Font(**FHE)   # David 9, not bold
+                    c.font          = Font(**FHE)
                     c.number_format = _num_fmt_thresh(tval)
                     c.alignment     = CENTER
             data_row += 1
