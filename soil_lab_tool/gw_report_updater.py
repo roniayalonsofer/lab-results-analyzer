@@ -660,11 +660,36 @@ def _update_field_table(doc: Document, field_data: dict, wells: list):
     if len(wells) == 1:
         well = wells[0]
         well_field = field_data.get(well, {}).get("field", {})
-        for field, ri in FIELD_ROWS.items():
-            if ri >= len(tbl.rows):
-                continue
+        # Detect rows dynamically by matching parameter name in col 0,
+        # to handle docs where there's an extra "תאריך" row at index 1.
+        name_to_row = {}
+        for ri, row in enumerate(tbl.rows):
+            row_name = row.cells[0].text.strip().rstrip("*")
+            name_to_row[row_name] = ri
+
+        FIELD_ROWS_ALT = {
+            "pH":   "pH",
+            "EC":   "EC",
+            "טמפרטורה":  "טמפרטורה",
+            "חמצן מומס": "חמצן מומס",
+            "עכירות":    "עכירות",
+            "רדוקס":     "רדוקס",
+            "עומק פני המים":           "עומק פני המים",
+            "עומק כללי של הקידוח":     "עומק כללי של הקידוח",
+            "עומק דגימה מפני המים":    "עומק דגימה מפני המים",
+        }
+
+        for field, row_label in FIELD_ROWS_ALT.items():
             val = well_field.get(field)
             if val is None:
+                continue
+            ri = name_to_row.get(row_label)
+            if ri is None:
+                # fallback: hardcoded indices for the simple layout
+                ri = {"pH": 1, "EC": 2, "טמפרטורה": 3, "חמצן מומס": 4,
+                      "עכירות": 5, "רדוקס": 6, "עומק פני המים": 7,
+                      "עומק כללי של הקידוח": 8, "עומק דגימה מפני המים": 9}.get(field)
+            if ri is None or ri >= len(tbl.rows):
                 continue
             txt = str(int(val)) if isinstance(val, float) and val == int(val) else str(val)
             row_cells = tbl.rows[ri].cells
@@ -795,16 +820,18 @@ def _update_chem_table_layout_b(doc: Document, new_date: str, water_level, resul
     """
     tbl = doc.tables[3]
 
-    CHEM_COLS = ["MTBE", "בנזן", "טולואן", "אתיל בנזן", "קסילן"]
+    CHEM_COLS = ["MTBE", "בנזן", "טולואן", "אתיל בנזן", "קסילן", "כסילן"]
+    COL_ALIASES = {"כסילן": "קסילן"}  # doc uses כ, results dict uses ק
     CHEM_THRESH = {"MTBE": 0.02, "בנזן": 0.0025, "טולואן": 0.35, "אתיל בנזן": 0.15, "קסילן": 0.5}
 
-    # Find column index mapping by header row (row 0)
+    # Find column indices by exact header match, then fallback to contains
     header = [c.text.strip() for c in tbl.rows[0].cells]
     col_idx = {}
     for ci, h in enumerate(header):
         for param in CHEM_COLS:
-            if param in h:
-                col_idx[param] = ci
+            if h == param:  # exact match first
+                canonical = COL_ALIASES.get(param, param)
+                col_idx[canonical] = ci
     water_col = next((ci for ci, h in enumerate(header) if "עומק" in h and "מים" in h), 3)
 
     date_pat = re.compile(r'^\d{2}\.\d{2}\.\d{2,4}$')
@@ -918,35 +945,47 @@ HEBREW_MONTHS = ["ינואר", "פברואר", "מרץ", "אפריל", "מאי",
 
 def _update_narrative_layout_b(doc: Document, date_str: str, results: dict):
     """
-    Layout B: update the summary date and concentration values in the
-    structured BTEX sentence (afr-style docs where the sentence lists all
-    5 compounds with blank value slots in order: MTBE, Benzene, EthylBenzene,
-    Toluene, Xylene).
+    Layout B: update the date and BTEX concentration values in the
+    narrative sentences.
+    - Date: appears as a separate run after "בתאריך " (run index 1)
+    - BTEX: fixed value-run positions (6,16,26,32,35) hold the previous
+      round's numeric values which need to be overwritten with new ones.
+      Order in text: MTBE, Benzene, Ethylbenzene, Toluene, Xylene.
     """
     ORDERED = ["MTBE", "בנזן", "אתיל בנזן", "טולואן", "קסילן"]
 
     for p in doc.paragraphs:
         runs = p.runs
-        # Update "בתאריך [blank] נערך דיגום" sentences (Layout B: date is
-        # appended to the "בתאריך " run rather than stored in a separate run)
-        if ("נערך דיגום" in p.text or "נערך" in p.text) and "בתאריך" in p.text:
-            for run in runs:
-                if run.text.rstrip().endswith("בתאריך"):
-                    # Replace old date or add new one
-                    run.text = run.text.rstrip() + " " + date_str + " "
-                    run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+        text = p.text
 
-        # Update the structured BTEX concentration sentence
-        if "בדיגום" in p.text and "MTBE" in p.text and "בריכוזים" in p.text:
-            # Find blank/space runs that immediately precede a "מ\"ג" run
-            blank_slots = []
+        # Update "בתאריך [date] נערך" sentences — date is in run immediately
+        # after the "בתאריך" run (run 1 in afr layout)
+        if "נערך" in text and "בתאריך" in text:
             for i, run in enumerate(runs):
-                if run.text.strip() == "" and i + 1 < len(runs):
-                    nxt = runs[i + 1].text
-                    if 'מ"ג' in nxt or 'מ"ג' in nxt or "מ\"ג" in nxt:
-                        blank_slots.append(i)
+                if run.text.rstrip() == "בתאריך" or run.text.rstrip().endswith("בתאריך"):
+                    # The next run holds the old date value
+                    if i + 1 < len(runs):
+                        runs[i + 1].text = date_str + " "
+                        runs[i + 1].font.highlight_color = WD_COLOR_INDEX.YELLOW
+                    else:
+                        run.text = run.text.rstrip() + " " + date_str + " "
+                        run.font.highlight_color = WD_COLOR_INDEX.YELLOW
 
-            for slot_idx, param in zip(blank_slots, ORDERED):
+        # Update the BTEX concentration sentence
+        # The value runs are the numeric/non-Hebrew runs between the fixed
+        # label phrases. Identify them by: they follow a "של " or ", " run
+        # and precede a "מ\"ג" run.
+        if "בדיגום" in text and "MTBE" in text and "בריכוזים" in text:
+            value_run_indices = []
+            for i, run in enumerate(runs):
+                t = run.text.strip()
+                # A numeric value run: contains only digits, dots, "<"
+                if re.match(r'^<?[\d.]+$', t) and i + 1 < len(runs):
+                    nxt = runs[i + 1].text
+                    if 'מ"ג' in nxt or "מ\"ג" in nxt or 'מ' in nxt:
+                        value_run_indices.append(i)
+
+            for slot_idx, param in zip(value_run_indices, ORDERED):
                 val = results.get(param)
                 txt = str(val) if val is not None else "<0.001"
                 runs[slot_idx].text = txt
