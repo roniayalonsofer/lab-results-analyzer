@@ -929,6 +929,14 @@ if page == "soil":
     else:
         st.session_state["pid_map"] = {}
 
+    secondary_lab_file = st.file_uploader(
+        "🧪 קובץ מעבדה משנית / אימות (.xlsx) — אופציונלי",
+        type=["xlsx"],
+        key="secondary_lab_upload",
+        help="תוצאות מעבדת אימות (QC/split samples). ישולבו בדוח עם סימון # ליד הנתונים.",
+    )
+    st.session_state["secondary_lab_file"] = secondary_lab_file
+
     st.markdown('</div>', unsafe_allow_html=True)
 
     if not uploaded_files:
@@ -1278,6 +1286,34 @@ if page == "soil":
         thresh_display = ", ".join(tm.threshold_label(k) for k in selected_thresholds) or "ללא ערכי סף"
         st.caption(f"📌 ערכי סף: **{thresh_display}**")
         try:
+            # ── Parse secondary lab file (any lab, any format) ──────────
+            secondary_records = []
+            _sec_file = st.session_state.get("secondary_lab_file")
+            if _sec_file is not None:
+                try:
+                    _sec_raw  = _sec_file.getvalue()
+                    _sec_name = _sec_file.name
+                    # Auto-detect secondary lab type, then parse with same pipeline
+                    _sec_lab = auto_detect_lab(_sec_name, _sec_raw) or "🔍 זיהוי אוטומטי"
+                    _sec_cat = auto_detect_category(_sec_name, _sec_raw, _sec_lab) or category
+                    try:
+                        _sec_parser = get_parser(_sec_lab, _sec_cat)
+                    except KeyError:
+                        _sec_parser = get_parser(_sec_lab, "soil")
+                    try:
+                        _sec_recs = _sec_parser.parse(io.BytesIO(_sec_raw), pdf_bytes=[])
+                    except TypeError:
+                        _sec_recs = _sec_parser.parse(io.BytesIO(_sec_raw))
+                    for r in _sec_recs:
+                        r["lab"] = "secondary"
+                    secondary_records = _sec_recs
+                    st.caption(
+                        f"🔬 מעבדה משנית ({_sec_lab} / {_sec_cat}): "
+                        f"{len(secondary_records)} רשומות"
+                    )
+                except Exception as _se:
+                    st.warning(f"⚠️ שגיאת קריאת מעבדה משנית: {_se}")
+
             builder = LabReportExcel(
                 records             = records,
                 threshold_manager   = tm,
@@ -1289,6 +1325,7 @@ if page == "soil":
                 combine_tph_voc     = combine_tph_voc,
                 combine_tph_mbtex   = combine_tph_mbtex,
                 pid_map             = pid_map,
+                secondary_records   = secondary_records,
             )
             builder.build()
             excel_buf.seek(0)

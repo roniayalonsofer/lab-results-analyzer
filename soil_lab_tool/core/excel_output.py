@@ -516,8 +516,10 @@ class LabReportExcel:
         combine_tph_voc: bool = False,
         combine_tph_mbtex: bool = False,
         pid_map: dict | None = None,
+        secondary_records: list[dict] | None = None,
     ):
         self.records           = records
+        self.secondary_records = secondary_records or []
         self.tm                = threshold_manager
         self.out_path          = output_path
         self.project           = project_name
@@ -592,15 +594,35 @@ class LabReportExcel:
         # Alchem PDFs), embed it into the sample key as "name depth" so that
         # different depths of the same borehole become distinct columns.
         # _split_sample_depth already handles "name depth" space-separated format.
+        # ── Secondary lab merging ──────────────────────────────────────
+        # Secondary sample IDs get "_SEC" suffix so they appear as distinct samples.
+        sheet_atype = records[0].get("analysis_type") if records else None
+        sec_records = []
+        for r in self.secondary_records:
+            if r.get("analysis_type") == sheet_atype:
+                rc = dict(r)
+                rc["sample_id"] = rc.get("sample_id", "") + "_SEC"
+                rc["lab"] = "secondary"
+                sec_records.append(rc)
+        has_secondary = bool(sec_records)
+        all_records = list(records) + sec_records
+
+        # secondary LOQ map (per compound, first seen)
+        sec_loq_map: dict[str, float | None] = {}
+        for r in sec_records:
+            cmp = r["compound"]
+            if sec_loq_map.get(cmp) is None and r.get("loq") is not None:
+                sec_loq_map[cmp] = r["loq"]
+
         def _sid(r):
             sid = r["sample_id"]
             d   = r.get("depth", "")
             return f"{sid} {d}" if d else sid
 
-        samples   = _ordered_unique(_sid(r) for r in records)
-        if cfg.get("analysis_type") == "SOIL_TPH" or all(r.get("analysis_type") == "SOIL_TPH" for r in records):
+        samples   = _ordered_unique(_sid(r) for r in all_records)
+        if cfg.get("analysis_type") == "SOIL_TPH" or all(r.get("analysis_type") == "SOIL_TPH" for r in all_records):
             samples = sorted(samples, key=_tph_sort_key)
-        compounds = _ordered_unique(r["compound"]  for r in records)
+        compounds = _ordered_unique(r["compound"]  for r in all_records)
 
         # Pivot: compound → sample_id → (value, flag, lod)
         pivot:    dict[str, dict] = {}
@@ -610,14 +632,14 @@ class LabReportExcel:
         unit_map: dict[str, str]  = {}
 
         # Pre-pass: collect first non-None lod/loq per compound from all records
-        for r in records:
+        for r in all_records:
             cmp = r["compound"]
             if lod_map.get(cmp) is None and r.get("lod") is not None:
                 lod_map[cmp] = r["lod"]
-            if loq_map.get(cmp) is None and r.get("loq") is not None:
-                loq_map[cmp] = r["loq"]
+            if loq_map.get(cmp) is None and r.get("loq") is not None and r.get("lab") != "secondary":
+                loq_map[cmp] = r["loq"]  # primary LOQ only
 
-        for r in records:
+        for r in all_records:
             cmp = r["compound"]
             sid = _sid(r)
             if cmp not in pivot:
@@ -761,14 +783,18 @@ class LabReportExcel:
                                  thresh_keys, thresh_vals, header_info, cfg,
                                  sample_meta=sample_meta, unit_map=unit_map,
                                  depth_map=depth_map, pid_map=self.pid_map,
-                                 uncertain_compounds=uncertain_compounds)
+                                 uncertain_compounds=uncertain_compounds,
+                                 has_secondary=has_secondary,
+                                 sec_loq_map=sec_loq_map)
         else:
             self._write_landscape(ws, compounds, samples, pivot, cas_map,
                                   lod_map, loq_map,
                                   thresh_keys, thresh_vals, header_info, cfg,
                                   sample_meta=sample_meta, unit_map=unit_map,
                                   depth_map=depth_map, pid_map=self.pid_map,
-                                  uncertain_compounds=uncertain_compounds)
+                                  uncertain_compounds=uncertain_compounds,
+                                  has_secondary=has_secondary,
+                                  sec_loq_map=sec_loq_map)
         return True
 
     def _write_lowflow_sheet(self, ws, records, cfg):
@@ -933,10 +959,15 @@ class LabReportExcel:
                         lod_map, loq_map,
                         thresh_keys, thresh_vals, hinfo, cfg=None, sample_meta=None,
                         unit_map=None, depth_map=None, pid_map=None,
-                        uncertain_compounds=None):
+                        uncertain_compounds=None,
+                        has_secondary=False, sec_loq_map=None):
         cfg         = cfg or {}
         sample_meta = sample_meta or {}
         uncertain_compounds = uncertain_compounds or {}
+        sec_loq_map = sec_loq_map or {}
+        # Separate primary vs secondary sample IDs
+        pri_samples = [s for s in samples if "_SEC" not in s]
+        sec_samples = [s for s in samples if "_SEC" in s]
         unit            = hinfo["unit"]
         include_lod_loq = cfg.get("include_lod_loq", False)   # gas sheet: full LOD+LOQ mode
         lod_loq_mode    = cfg.get("lod_loq_mode", False)       # soil: "both" or "loq"
@@ -1024,11 +1055,26 @@ class LabReportExcel:
                 bh_override = sample_meta.get(sid, {}).get("borehole")
                 if bh_override:
                     split_p[sid] = (_norm_borehole(bh_override), split_p[sid][1])
-            samples = sorted(samples,
-                             key=lambda sid: (*_borehole_sort_key(split_p[sid][0]),
-                                              float(split_p[sid][1]) if split_p[sid][1] else 0.0))
-            boreholes = [_dup_rich_text(split_p[sid][0]) for sid in samples]
-            depths    = [split_p[sid][1] for sid in samples]
+            # Sort samples: secondary ones interleave after their matching primary
+            def _sec_sort_key(sid):
+                is_sec = sid.endswith("_SEC")
+                base = sid[:-4] if is_sec else sid
+                bh, dep = split_p.get(base, split_p.get(sid, ("", "")))
+                return (*_borehole_sort_key(bh), float(dep) if dep else 0.0, 1 if is_sec else 0)
+            samples = sorted(samples, key=_sec_sort_key)
+
+            # Build display values: secondary samples show borehole + "#" in depth
+            split_sec = {}
+            for sid in samples:
+                if sid.endswith("_SEC"):
+                    base = sid[:-4]
+                    bh, dep = split_p.get(base, _split_sample_depth(base))
+                    split_sec[sid] = (bh, (dep + " #") if dep else "#")
+                else:
+                    split_sec[sid] = split_p.get(sid, _split_sample_depth(sid))
+
+            boreholes = [_dup_rich_text(split_sec[sid][0]) for sid in samples]
+            depths    = [split_sec[sid][1] for sid in samples]
             meta_rows = [("שם קידוח", boreholes)]
             if any(v is not None and str(v).strip() != "" for v in depths):
                 meta_rows.append(("עומק [מ']", depths))
@@ -1322,6 +1368,13 @@ class LabReportExcel:
                         value="* ספי חש מוגדרים לפי תקנות איכות אויר")
             c.font = Font(**FHE, italic=True, color="808080")
             c.fill = WHITE
+            note_row += 1
+        # ── Secondary lab footnote ──────────────────────────────────────
+        if has_secondary:
+            c = ws.cell(row=note_row, column=1,
+                        value="# תוצאות מעבדה משנית")
+            c.font = Font(**FHE, italic=True, color="808080")
+            c.fill = WHITE
         self._auto_width(ws, N_FIXED + len(samples), hdr_row=hdr_row)
 
     # ------------------------------------------------------------------
@@ -1331,15 +1384,26 @@ class LabReportExcel:
                          lod_map, loq_map,
                          thresh_keys, thresh_vals, hinfo, cfg=None, sample_meta=None,
                          unit_map=None, depth_map=None, pid_map=None,
-                         uncertain_compounds=None):
+                         uncertain_compounds=None,
+                         has_secondary=False, sec_loq_map=None):
         cfg      = cfg or {}
         unit_map = unit_map or {}
         uncertain_compounds = uncertain_compounds or {}
+        sec_loq_map = sec_loq_map or {}
+
+        # Separate primary vs secondary samples for display
+        pri_samples = [s for s in samples if not s.endswith("_SEC")]
+        sec_samples = [s for s in samples if s.endswith("_SEC")]
 
         # ── Depth detection & sample sorting ────────────────────────────
-        # Split each sample_id into (borehole, depth_str) for display.
-        # If ANY sample has a depth suffix (e.g. "ב-1 3.0") we add a depth column.
-        split_map = {sid: _split_sample_depth(sid) for sid in samples}
+        split_map = {}
+        for sid in samples:
+            if sid.endswith("_SEC"):
+                base = sid[:-4]
+                bh, dep = _split_sample_depth(base)
+                split_map[sid] = (bh, (dep + " #") if dep else "#")
+            else:
+                split_map[sid] = _split_sample_depth(sid)
         if depth_map:
             split_map = {sid: (split_map[sid][0], depth_map.get(sid, split_map[sid][1]))
                          for sid in samples}
@@ -1355,7 +1419,9 @@ class LabReportExcel:
             # Sort samples: ק first, נ second, others last; within group by number then depth
             def _sort_key(sid):
                 bh, dep = split_map[sid]
-                return (*_borehole_sort_key(bh), float(dep) if dep else 0.0)
+                dep_clean = dep.replace('#', '').strip() if dep else ''
+                is_sec = 1 if sid.endswith("_SEC") else 0
+                return (*_borehole_sort_key(bh), float(dep_clean) if dep_clean else 0.0, is_sec)
             samples = sorted(samples, key=_sort_key)
 
         # Column count: borehole + depth (when present) + PID (from pid_map) + compounds
@@ -1399,7 +1465,7 @@ class LabReportExcel:
         data_row = hdr_base + 3
         if lod_loq_mode:
             unit     = hinfo["unit"]
-            loq_lbl  = f"LOQ [{unit}]"
+            loq_lbl  = f"LOQ ראשית [{unit}]" if has_secondary else f"LOQ [{unit}]"
             lc = ws.cell(row=data_row, column=1, value=loq_lbl)
             lc.font      = _font(loq_lbl, bold=True)
             lc.alignment = WRAP_C
@@ -1415,6 +1481,25 @@ class LabReportExcel:
                 c.alignment = CENTER
                 c.border    = THIN
             data_row += 1
+
+            # ── Secondary LOQ row (when secondary lab is present) ──
+            if has_secondary:
+                sec_loq_lbl = f"LOQ משנית [{unit}]"
+                sc = ws.cell(row=data_row, column=1, value=sec_loq_lbl)
+                sc.font      = _font(sec_loq_lbl, bold=True)
+                sc.alignment = WRAP_C
+                sc.border    = THIN
+                for fc in range(2, cmp_col_start):
+                    ws.cell(row=data_row, column=fc).border = THIN
+                for ci, cmp in enumerate(compounds, cmp_col_start):
+                    sloq_val  = sec_loq_map.get(cmp)
+                    sloq_disp = _round_sf(sloq_val) if isinstance(sloq_val, float) else ""
+                    c = ws.cell(row=data_row, column=ci)
+                    c.value     = sloq_disp
+                    c.font      = _font(sloq_disp)
+                    c.alignment = CENTER
+                    c.border    = THIN
+                data_row += 1
 
         # ── Threshold rows (BEFORE sample data) ─────────────────────────
         UNDEF_FONT  = Font(**FHE, color="000000", italic=False)
