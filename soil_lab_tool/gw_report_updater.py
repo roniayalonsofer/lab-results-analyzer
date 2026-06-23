@@ -80,6 +80,20 @@ def parse_aminolab_pdf(pdf_path: str) -> dict:
     floating_re = re.compile(r'הפצ הבכש')
     sampler_re = re.compile(r'(\S+)\s+(\S+)\s+-באלונימא\s+:י"ע\s+םגדנ$')
 
+    # ── Inline BTEX format (e.g. "- 0.01 mg/L Benzene", "( -) 2 mg/L MTBE") ──
+    # Used in sites where BTEX results appear directly in the field-measurements
+    # table rather than as a separate multi-page VOC scan.
+    INLINE_BTEX = {
+        "Benzene":      "בנזן",
+        "Toluene":      "טולואן",
+        "Ethyl benzene": "אתיל בנזן",
+        "Xylene":       "קסילן",
+        "MTBE":         "MTBE",
+    }
+    inline_btex_re = re.compile(
+        r'^[\s\d()+-]*(<?\d+\.?\d*)\s*mg/L\s+(' + '|'.join(re.escape(k) for k in INLINE_BTEX) + r')\s*$'
+    )
+
     # Lines like: "* Toluene 108-88-3 35 84" / "Xylene's - 40 -" / "Benzene 71 -43 -2 <10 -"
     compound_re = re.compile(
         r'^\*?\s*(?P<name>.+?)\s*\*?\s+(?P<cas>[\d][\d\s\-]*\d|-)\s+'
@@ -187,6 +201,16 @@ def parse_aminolab_pdf(pdf_path: str) -> dict:
                         val = None if raw_result.startswith("<") else float(raw_result)
                         if val is not None:
                             val = val / 1000.0  # ppb -> mg/L
+                        results[heb] = val
+
+                # Inline BTEX format: "- 0.01 mg/L Benzene" / "( -) 2 mg/L MTBE"
+                m = inline_btex_re.match(line)
+                if m:
+                    raw_result = m.group(1)
+                    eng_name = m.group(2)
+                    heb = INLINE_BTEX.get(eng_name)
+                    if heb and heb not in results:  # don't overwrite scan-page values
+                        val = None if raw_result.startswith("<") else float(raw_result)
                         results[heb] = val
 
     if well_id is None:
@@ -716,8 +740,217 @@ def _update_historical_tables(doc: Document, new_date: str,
                 _set_cell(cells[3 + ci], txt, bold=exceeds, color=color, highlight=True)
 
 
+def _detect_layout(doc: Document) -> str:
+    """
+    Detect document layout:
+      'B' = has a full historical-field table (table[2] with 10+ cols, pH/EC headers)
+      'A' = simple layout (table[2] is the chemistry table, no separate field history)
+    """
+    if len(doc.tables) >= 4:
+        t2 = doc.tables[2]
+        if len(t2.columns) >= 9:
+            headers = [c.text.strip() for c in t2.rows[1].cells] if len(t2.rows) > 1 else []
+            if any(h in ("pH", "EC", "pH units") for h in headers):
+                return "B"
+    return "A"
+
+
+def _update_historical_field_table(doc: Document, new_date: str, field: dict, well_id: str):
+    """
+    Layout B: append a new row to the historical field-data table (doc.tables[2]).
+    Columns: well, date, pH, EC, temp, DO, turbidity, redox, water_level, total_depth, samp_depth
+    """
+    tbl = doc.tables[2]
+    COLS = ["pH", "EC", "טמפרטורה", "חמצן מומס", "עכירות", "רדוקס",
+            "עומק פני המים", "עומק כללי של הקידוח", "עומק דגימה מפני המים"]
+
+    # Find last data row (has a date in col 1)
+    date_pat = re.compile(r'^\d{2}\.\d{2}\.\d{2,4}$')
+    last = -1
+    for i, row in enumerate(tbl.rows):
+        if len(row.cells) >= 2 and date_pat.match(row.cells[1].text.strip()):
+            last = i
+    if last < 0:
+        return
+
+    new_row = _insert_row_after(tbl, last, last)
+    cells = new_row.cells
+    # col 0: well name (merged — don't touch)
+    _set_cell(cells[1], new_date, highlight=True)
+    for ci, key in enumerate(COLS, 2):
+        val = field.get(key)
+        if val is None:
+            txt = "-"
+        elif isinstance(val, float) and val == int(val):
+            txt = str(int(val))
+        else:
+            txt = str(val)
+        _set_cell(cells[ci], txt, highlight=True)
+
+
+def _update_chem_table_layout_b(doc: Document, new_date: str, water_level, results: dict):
+    """
+    Layout B: append a new row to the chemistry table (doc.tables[3]).
+    Columns: well, date, analysis, water_level, MTBE, בנזן, טולואן, אתיל בנזן, [כסילן]
+    """
+    tbl = doc.tables[3]
+
+    CHEM_COLS = ["MTBE", "בנזן", "טולואן", "אתיל בנזן", "קסילן"]
+    CHEM_THRESH = {"MTBE": 0.02, "בנזן": 0.0025, "טולואן": 0.35, "אתיל בנזן": 0.15, "קסילן": 0.5}
+
+    # Find column index mapping by header row (row 0)
+    header = [c.text.strip() for c in tbl.rows[0].cells]
+    col_idx = {}
+    for ci, h in enumerate(header):
+        for param in CHEM_COLS:
+            if param in h:
+                col_idx[param] = ci
+    water_col = next((ci for ci, h in enumerate(header) if "עומק" in h and "מים" in h), 3)
+
+    date_pat = re.compile(r'^\d{2}\.\d{2}\.\d{2,4}$')
+    last = -1
+    for i, row in enumerate(tbl.rows):
+        if len(row.cells) >= 2 and date_pat.match(row.cells[1].text.strip()):
+            last = i
+    if last < 0:
+        return
+
+    new_row = _insert_row_after(tbl, last, last)
+    cells = new_row.cells
+
+    # col 0: well name (merged — don't touch)
+    _set_cell(cells[1], new_date, highlight=True)
+    _set_cell(cells[2], "", highlight=False)  # analysis type
+
+    wl_txt = str(water_level) if water_level is not None else "-"
+    _set_cell(cells[water_col], wl_txt, highlight=True)
+
+    for param, ci in col_idx.items():
+        val = results.get(param)
+        thresh = CHEM_THRESH.get(param)
+        if val is None:
+            txt = "<0.001"
+            exceeds = False
+        else:
+            txt = str(val)
+            exceeds = thresh is not None and val > thresh
+        color = RGBColor(0xC0, 0x00, 0x00) if exceeds else None
+        _set_cell(cells[ci], txt, bold=exceeds, color=color, highlight=True)
+
+
+def _update_mk_layout_b(mk_xls_bytes: bytes, new_dt: datetime, results: dict) -> bytes:
+    """
+    Layout B Mann-Kendall: add one row per sheet (MTBE, BENZEN/BENZENE).
+    Sheet format: col B = event#, col C = xl-date-float, col D = concentration.
+    """
+    import tempfile as _tmp
+    import xlrd, xlwt
+    from xlutils.copy import copy as xl_copy
+
+    SHEET_TO_PARAM = {
+        "MTBE": "MTBE", "mtbe": "MTBE",
+        "BENZEN": "בנזן", "benzen": "בנזן", "BENZENE": "בנזן", "benzene": "בנזן",
+        "TOLUENE": "טולואן", "toluene": "טולואן",
+        "XYLENE": "קסילן", "xylene": "קסילן",
+        "ETHYLBENZENE": "אתיל בנזן",
+    }
+
+    with _tmp.NamedTemporaryFile(suffix=".xls", delete=False) as f:
+        f.write(mk_xls_bytes)
+        tmp_in = f.name
+
+    import xlwt, xlrd
+    rb = xlrd.open_workbook(tmp_in, formatting_info=True)
+    wb = xl_copy(rb)
+    date_mode = rb.datemode
+
+    import datetime as _dt
+    xl_date = (_dt.datetime(new_dt.year, new_dt.month, new_dt.day)
+               - _dt.datetime(1899, 12, 30)).days
+
+    date_style = xlwt.XFStyle()
+    date_style.num_format_str = 'M/D/YY'
+    yellow_style = xlwt.XFStyle()
+    yellow_style.pattern = xlwt.Pattern()
+    yellow_style.pattern.pattern = xlwt.Pattern.SOLID_PATTERN
+    yellow_style.pattern.pattern_fore_colour = 13  # yellow
+
+    for si in range(rb.nsheets):
+        rs = rb.sheet_by_index(si)
+        ws = wb.get_sheet(si)
+        sname = rs.name.strip().upper()
+        param_heb = SHEET_TO_PARAM.get(sname) or SHEET_TO_PARAM.get(rs.name.strip())
+        if param_heb is None:
+            continue
+
+        # Find last data row (col B = event#, numeric)
+        last_r = 13
+        for r in range(14, rs.nrows):
+            b = rs.cell(r, 1).value
+            if b and isinstance(b, float):
+                last_r = r
+            elif b == '':
+                break
+
+        new_event = int(rs.cell(last_r, 1).value) + 1
+        val = results.get(param_heb)
+        if val is None:
+            val = 0.001
+
+        nr = last_r + 1
+        ws.write(nr, 1, new_event, yellow_style)
+        ws.write(nr, 2, xl_date, date_style)
+        ws.write(nr, 3, val, yellow_style)
+
+    with _tmp.NamedTemporaryFile(suffix=".xls", delete=False) as f:
+        out_path = f.name
+    wb.save(out_path)
+    data = open(out_path, "rb").read()
+    import os
+    os.unlink(tmp_in)
+    os.unlink(out_path)
+    return data
+
+
 HEBREW_MONTHS = ["ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני",
                   "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר"]
+
+
+def _update_narrative_layout_b(doc: Document, date_str: str, results: dict):
+    """
+    Layout B: update the summary date and concentration values in the
+    structured BTEX sentence (afr-style docs where the sentence lists all
+    5 compounds with blank value slots in order: MTBE, Benzene, EthylBenzene,
+    Toluene, Xylene).
+    """
+    ORDERED = ["MTBE", "בנזן", "אתיל בנזן", "טולואן", "קסילן"]
+
+    for p in doc.paragraphs:
+        runs = p.runs
+        # Update "בתאריך [blank] נערך דיגום" sentences (Layout B: date is
+        # appended to the "בתאריך " run rather than stored in a separate run)
+        if ("נערך דיגום" in p.text or "נערך" in p.text) and "בתאריך" in p.text:
+            for run in runs:
+                if run.text.rstrip().endswith("בתאריך"):
+                    # Replace old date or add new one
+                    run.text = run.text.rstrip() + " " + date_str + " "
+                    run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+
+        # Update the structured BTEX concentration sentence
+        if "בדיגום" in p.text and "MTBE" in p.text and "בריכוזים" in p.text:
+            # Find blank/space runs that immediately precede a "מ\"ג" run
+            blank_slots = []
+            for i, run in enumerate(runs):
+                if run.text.strip() == "" and i + 1 < len(runs):
+                    nxt = runs[i + 1].text
+                    if 'מ"ג' in nxt or 'מ"ג' in nxt or "מ\"ג" in nxt:
+                        blank_slots.append(i)
+
+            for slot_idx, param in zip(blank_slots, ORDERED):
+                val = results.get(param)
+                txt = str(val) if val is not None else "<0.001"
+                runs[slot_idx].text = txt
+                runs[slot_idx].font.highlight_color = WD_COLOR_INDEX.YELLOW
 
 
 def _heb_join_words(items):
@@ -939,6 +1172,7 @@ def run_update_bytes(
 
         # ── Update Word document ──────────────────────────────────
         doc = Document(str(word_path))
+        layout = _detect_layout(doc)
 
         # Detect the well-naming convention actually used in THIS document
         # (different sites use different prefixes, e.g. "מת-1" or "צא - 1"),
@@ -980,7 +1214,22 @@ def run_update_bytes(
             )
 
         _update_field_table(doc, samples, wells_order)
-        _update_historical_tables(doc, new_date, samples, wells_order)
+
+        if layout == "B":
+            # Layout B: historical field table (table 2) + chemistry table (table 3)
+            first_sample = next(iter(samples.values()), {})
+            _update_historical_field_table(doc, new_date, first_sample.get("field", {}),
+                                           wells_order[0] if wells_order else "")
+            _update_chem_table_layout_b(doc, new_date,
+                                        first_sample.get("water_level"),
+                                        first_sample.get("results", {}))
+            # MK update for Layout B uses a different sheet structure
+            if has_mk:
+                out_mk_bytes = _update_mk_layout_b(
+                    mk_xls_bytes, new_dt, first_sample.get("results", {})
+                )
+        else:
+            _update_historical_tables(doc, new_date, samples, wells_order)
 
         # ── Update narrative text (title month/year, date/sampler gaps,
         #    BTEX concentration summary sentence) ────────────────────────
@@ -993,8 +1242,11 @@ def run_update_bytes(
 
         _update_title_month_year(doc, new_dt)
         _update_cover_page_date(doc, new_dt)
-        _update_narrative_placeholders(doc, full_date_str, sampler_name)
-        _update_concentration_summary(doc, combined_results)
+        if layout == "B":
+            _update_narrative_layout_b(doc, full_date_str, combined_results)
+        else:
+            _update_narrative_placeholders(doc, full_date_str, sampler_name)
+            _update_concentration_summary(doc, combined_results)
 
         # Replace chart images (shape 1 = Benzene, shape 2 = MTBE)
         for chart_idx, sh_name in enumerate(["בנזן", "MTBE"]):

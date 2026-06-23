@@ -1436,6 +1436,7 @@ elif page == "groundwater":
     col1, col2 = st.columns(2)
     with col1:
         word_file = st.file_uploader("📄 דוח Word קודם (.docx)", type=["docx"], key="gw_word")
+        st.caption("⚠️ לפני העלאה: פתח את הדוח ב-Word ← Review ← Accept All Changes ← שמור. ללא זאת העדכון עלול להיכשל.")
         if lab_type_code == "bactochem":
             lab_file = st.file_uploader("🧪 תוצאות מעבדה — בקטוכם (.pdf)", type=["pdf"], key="gw_lab")
         else:
