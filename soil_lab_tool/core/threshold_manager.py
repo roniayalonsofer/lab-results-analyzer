@@ -654,6 +654,7 @@ class ThresholdManager:
         "diet", "non diet",
         "source", "soil", "water", "air",
         "total", "metallic", "elemental",
+        "soluble", "salts", "salt",
     })
 
     @staticmethod
@@ -698,6 +699,25 @@ class ThresholdManager:
         if ln == tn:
             return 'exact'
 
+        # Strip element-symbol prefix from lab name: "ag silver" → "silver"
+        # Handles KTE/Alchem style: "Ag - Silver", "Fe - Iron", "Hg - Mercury***"
+        import re as _re
+        def _strip_element_prefix(s: str) -> str:
+            # Remove trailing asterisks/stars
+            s = s.rstrip('* ').strip()
+            # Match "XY name" where XY is 1-2 letters (element symbol)
+            m = _re.match(r'^([a-z]{1,2}) ([a-z].+)$', s)
+            if m:
+                rest = m.group(2).strip()
+                if not _re.match(r'^\d', rest):
+                    return rest
+            return s
+        ln_stripped = _strip_element_prefix(ln)
+        tn_stripped_el = _strip_element_prefix(tn)
+
+        if ln_stripped == tn or ln == tn_stripped_el or ln_stripped == tn_stripped_el:
+            return 'exact'
+
         # Known safe synonyms
         lns = self._SAFE_SYNONYMS.get(ln, ln)
         tns = self._SAFE_SYNONYMS.get(tn, tn)
@@ -731,6 +751,7 @@ class ThresholdManager:
             w for w in tn_words if w.rstrip(':.,') not in self._SAFE_QUALIFIER_WORDS
         ).strip()
         if tn_stripped and (tn_stripped == ln or tn_stripped == lns or
+                            tn_stripped == ln_stripped or
                             set(tn_stripped.split()) == ln_words):
             return 'exact'
 
