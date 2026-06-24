@@ -646,7 +646,20 @@ class LabReportExcel:
                 'mercury': 'mercury',
                 'quicksilver': 'mercury',
             }
-            s = _synonyms.get(s, s)
+            # Remove parentheses content before synonym lookup
+            s_clean = re.sub(r'\([^)]*\)', '', s).strip()
+            s_clean = re.sub(r'\s+', ' ', s_clean)
+            # TPH fraction synonyms: map ALS names to primary lab names
+            _tph_synonyms = {
+                'c10 c28 fraction dro': 'dro',
+                'c10 c28 fraction': 'dro',
+                'c10 c40 fraction tph': 'tph',
+                'c24 c40 fraction oro': 'oro',
+                'c24 c40 fraction': 'oro',
+                'c10 c28 dro': 'dro',
+                'c24 c40 oro': 'oro',
+            }
+            s = _tph_synonyms.get(s_clean, _tph_synonyms.get(s, s))
             return s
 
 
@@ -1705,12 +1718,12 @@ class LabReportExcel:
             row_meta: list[tuple] = []
             col_vals: list = []
 
-            # SPLIT rows: show borehole as "D22 SPLIT", keep same depth
+            # SPLIT rows: borehole=same as primary, depth="3.0 SPLIT" (matching image format)
             if has_secondary and depth_str == "SPLIT":
                 base_sid = sid[:-6] if sid.endswith("_SPLIT") else sid
                 base_bh, base_dep = split_map.get(base_sid, _split_sample_depth(base_sid))
-                bh_cell_val = _dup_rich_text(f"{base_bh} SPLIT")
-                depth_display = base_dep
+                bh_cell_val = _dup_rich_text(base_bh)
+                depth_display = f"{base_dep} SPLIT" if base_dep else "SPLIT"
             else:
                 bh_cell_val = _dup_rich_text(borehole)
                 depth_display = depth_str
