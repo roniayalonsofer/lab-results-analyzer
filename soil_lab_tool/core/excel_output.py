@@ -1191,13 +1191,13 @@ class LabReportExcel:
                 return (*_borehole_sort_key(bh), float(dep) if dep else 0.0, 1 if is_split else 0)
             samples = sorted(samples, key=_sec_sort_key)
 
-            # Build display values: SPLIT samples show same borehole AND same depth as primary
+            # Build display values: SPLIT samples show same borehole, depth="3.0 SPLIT"
             split_sec = {}
             for sid in samples:
                 if sid.endswith("_SPLIT"):
                     base = sid[:-6]
                     bh, dep = split_p.get(base, _split_sample_depth(base))
-                    split_sec[sid] = (bh, dep)   # same depth as primary, not "SPLIT"
+                    split_sec[sid] = (bh, f"{dep} SPLIT" if dep else "SPLIT")
                 else:
                     split_sec[sid] = split_p.get(sid, _split_sample_depth(sid))
 
@@ -1206,33 +1206,6 @@ class LabReportExcel:
             meta_rows = [("שם קידוח", boreholes)]
             if any(v is not None and str(v).strip() != "" for v in depths):
                 meta_rows.append(("עומק [מ']", depths))
-            # When secondary lab present: add a "ראשית / משנית" sub-label row
-            if has_secondary:
-                split_set = {sid for sid in samples if sid.endswith("_SPLIT")}
-                # Map match_key → primary sid, to detect which primaries have a split pair
-                pri_match_keys = {}
-                for sid in samples:
-                    if not sid.endswith("_SPLIT"):
-                        bh, dep = split_p.get(sid, _split_sample_depth(sid))
-                        k = f"{_norm_borehole(bh)}|{dep}"
-                        pri_match_keys[k] = sid
-                # Which primary sids have a corresponding SPLIT?
-                paired_pri_sids = set()
-                for sid in split_set:
-                    base = sid[:-6]
-                    bh, dep = split_p.get(base, _split_sample_depth(base))
-                    k = f"{_norm_borehole(bh)}|{dep}"
-                    if k in pri_match_keys:
-                        paired_pri_sids.add(pri_match_keys[k])
-                lab_labels = []
-                for sid in samples:
-                    if sid.endswith("_SPLIT"):
-                        lab_labels.append("משנית")
-                    elif sid in paired_pri_sids:
-                        lab_labels.append("ראשית")
-                    else:
-                        lab_labels.append("")
-                meta_rows.append(("מעבדה", lab_labels))
             if pid_map:
                 pid_vals_pm = [_pid_lookup_split(pid_map, split_p[sid][0], split_p[sid][1])
                                for sid in samples]
@@ -1359,10 +1332,10 @@ class LabReportExcel:
                 sample_vals.append((display, v, flag, lod))
 
             if include_lod_loq or lod_loq_mode == "both":
-                sec_loq_disp = _round_sf(sec_loq_map.get(cmp)) if has_secondary and sec_loq_map.get(cmp) is not None else ("" if has_secondary else None)
+                sec_loq_disp = _round_sf(sec_loq_map.get(cmp)) if has_secondary and sec_loq_map.get(cmp) is not None else ("-" if has_secondary else None)
                 fixed_vals = [cmp, cas, lod_disp, loq_disp] + ([sec_loq_disp] if has_secondary else [])
             elif lod_loq_mode == "loq":
-                sec_loq_disp = _round_sf(sec_loq_map.get(cmp)) if has_secondary and sec_loq_map.get(cmp) is not None else ("" if has_secondary else None)
+                sec_loq_disp = _round_sf(sec_loq_map.get(cmp)) if has_secondary and sec_loq_map.get(cmp) is not None else ("-" if has_secondary else None)
                 fixed_vals = [cmp, cas, loq_disp] + ([sec_loq_disp] if has_secondary else [])
             else:
                 fixed_vals = [cmp, cas]
@@ -1666,7 +1639,7 @@ class LabReportExcel:
                     ws.cell(row=data_row, column=fc).border = THIN
                 for ci, cmp in enumerate(compounds, cmp_col_start):
                     sloq_val  = sec_loq_map.get(cmp)
-                    sloq_disp = _round_sf(sloq_val) if isinstance(sloq_val, float) else ""
+                    sloq_disp = _round_sf(sloq_val) if isinstance(sloq_val, float) else "-"
                     c = ws.cell(row=data_row, column=ci)
                     c.value     = sloq_disp
                     c.font      = _font(sloq_disp)
