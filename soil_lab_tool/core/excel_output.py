@@ -611,14 +611,44 @@ class LabReportExcel:
             bh, dep = _split_sample_depth(sid)
             return f"{_norm_borehole(bh)}|{dep}"
 
+        # CAS-based compound matching: built lazily when CAS numbers are available
+        _cas_to_norm: dict[str, str] = {}   # cas → first-seen norm_cmp (primary wins)
+
         def _norm_cmp(name: str) -> str:
-            """Canonical compound name for cross-lab matching."""
+            """Canonical compound name for cross-lab matching.
+
+            Handles common cross-lab name differences:
+            - 'Ag - Silver' (KTE/Alchem prefix style) → strip element-symbol prefix
+            - 'Aluminium' vs 'Aluminum' → normalize -ium/-um endings
+            - dot-numbers vs comma-numbers: '1.1-' → '1,1-'
+            """
             s = name.lower().strip()
-            # dot-numbers → comma: '1.1-' → '1,1-'
-            s = re.sub(r'(\d)\.(\d)', r'\1,\2', s)
+            # dot-numbers → comma: '1.1.1-' → '1,1,1-' (use lookaround for all occurrences)
+            s = re.sub(r'(?<=\d)\.(?=\d)', ',', s)
             # collapse spaces/hyphens
             s = re.sub(r'[-–\s]+', ' ', s)
+            # Strip element-symbol prefix: "ag silver" → "silver", "fe iron" → "iron"
+            # Pattern: one or two letters (element symbol) then a space then the rest
+            m = re.match(r'^([a-z]{1,2}) ([a-z].*)$', s)
+            if m:
+                sym, rest = m.group(1), m.group(2)
+                # Only strip if the rest is a known element name (i.e. sym is element-like)
+                # Heuristic: rest is a single English word (no digit prefix)
+                if re.match(r'^[a-z]+', rest) and not re.match(r'^\d', rest):
+                    s = rest
+            # Normalize -ium / -um endings (aluminium vs aluminum, etc.)
+            s = re.sub(r'inium$', 'inum', s)
+            s = re.sub(r'ium$', 'um', s)
+            # chrome → chromium: normalize common synonyms
+            _synonyms = {
+                'chrome': 'chromum',
+                'chromium': 'chromum',
+                'mercury': 'mercury',
+                'quicksilver': 'mercury',
+            }
+            s = _synonyms.get(s, s)
             return s
+
 
         # Build primary pivot
         pri_sids  = _ordered_unique(_sid(r) for r in records)
@@ -650,10 +680,21 @@ class LabReportExcel:
         sec_pivot: dict[str, dict] = {}   # norm_cmp → sid → entry
         sec_cmp_display: dict[str, str] = {}  # norm_cmp → original secondary name
 
+        # CAS → primary ncmp: fallback for name mismatches (e.g. "Mercury" vs "Hg - Mercury***")
+        pri_cas_to_ncmp: dict[str, str] = {}
+        for ncmp, display in pri_cmp_display.items():
+            cas = cas_map.get(display, "")
+            if cas:
+                pri_cas_to_ncmp[str(cas).strip()] = ncmp
+
         for r in sec_records_raw:
             cmp  = r["compound"]
             ncmp = _norm_cmp(cmp)
             sid  = _sid(r)
+            # CAS-based fallback: if norm name doesn't match primary but CAS does, use primary's ncmp
+            sec_cas = str(r.get("cas") or "").strip()
+            if ncmp not in pri_pivot and sec_cas and sec_cas in pri_cas_to_ncmp:
+                ncmp = pri_cas_to_ncmp[sec_cas]
             if ncmp not in sec_pivot:
                 sec_pivot[ncmp]        = {}
                 sec_cmp_display[ncmp]  = cmp
@@ -1049,9 +1090,9 @@ class LabReportExcel:
 
         N_COMPOUND = 2                         # A: compound, B: CAS Number
         if include_lod_loq or lod_loq_mode == "both":
-            N_LOD_LOQ = 2
+            N_LOD_LOQ = 2 + (1 if has_secondary else 0)  # LOD + LOQ ראשית [+ LOQ משנית]
         elif lod_loq_mode == "loq":
-            N_LOD_LOQ = 1
+            N_LOD_LOQ = 1 + (1 if has_secondary else 0)  # LOQ ראשית [+ LOQ משנית]
         else:
             N_LOD_LOQ = 0
         N_THRESH   = len(thresh_keys)
@@ -1182,9 +1223,15 @@ class LabReportExcel:
             # ── Column headers row (after all meta rows) ───────────────
             hdr_row = meta_start + len(meta_rows)
             if lod_loq_mode == "both":
-                lod_loq_hdrs = [f"LOD [{unit}]", f"LOQ [{unit}]"]
+                loq_pri_lbl = f"LOQ ראשית [{unit}]" if has_secondary else f"LOQ [{unit}]"
+                lod_loq_hdrs = [f"LOD [{unit}]", loq_pri_lbl]
+                if has_secondary:
+                    lod_loq_hdrs.append(f"LOQ משנית [{unit}]")
             elif lod_loq_mode == "loq":
-                lod_loq_hdrs = [f"LOQ [{unit}]"]
+                loq_pri_lbl = f"LOQ ראשית [{unit}]" if has_secondary else f"LOQ [{unit}]"
+                lod_loq_hdrs = [loq_pri_lbl]
+                if has_secondary:
+                    lod_loq_hdrs.append(f"LOQ משנית [{unit}]")
             else:
                 lod_loq_hdrs = []
             headers = (["תרכובת", "CAS Number"]
@@ -1272,9 +1319,11 @@ class LabReportExcel:
                 sample_vals.append((display, v, flag, lod))
 
             if include_lod_loq or lod_loq_mode == "both":
-                fixed_vals = [cmp, cas, lod_disp, loq_disp]
+                sec_loq_disp = _round_sf(sec_loq_map.get(cmp)) if has_secondary and sec_loq_map.get(cmp) is not None else ("" if has_secondary else None)
+                fixed_vals = [cmp, cas, lod_disp, loq_disp] + ([sec_loq_disp] if has_secondary else [])
             elif lod_loq_mode == "loq":
-                fixed_vals = [cmp, cas, loq_disp]
+                sec_loq_disp = _round_sf(sec_loq_map.get(cmp)) if has_secondary and sec_loq_map.get(cmp) is not None else ("" if has_secondary else None)
+                fixed_vals = [cmp, cas, loq_disp] + ([sec_loq_disp] if has_secondary else [])
             else:
                 fixed_vals = [cmp, cas]
             row_data = fixed_vals + thresh_row + [sv[0] for sv in sample_vals]
@@ -1410,8 +1459,12 @@ class LabReportExcel:
             # Build row
             if lod_loq_mode == "loq":
                 row_data = ["Total TPH", "DRO+ORO", _round_sf(total_loq)]
+                if has_secondary:
+                    row_data.append("")   # secondary LOQ placeholder for Total TPH
             elif include_lod_loq or lod_loq_mode == "both":
                 row_data = ["Total TPH", "DRO+ORO", "", _round_sf(total_loq)]
+                if has_secondary:
+                    row_data.append("")   # secondary LOQ placeholder
             else:
                 row_data = ["Total TPH", "DRO+ORO"]
 
