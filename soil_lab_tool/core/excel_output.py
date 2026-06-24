@@ -1299,8 +1299,9 @@ class LabReportExcel:
 
             lod_val = lod_map.get(cmp)
             loq_val = loq_map.get(cmp)
-            lod_disp = _round_sf(lod_val) if isinstance(lod_val, float) else (lod_val if lod_val is not None else "")
-            loq_disp = _round_sf(loq_val) if isinstance(loq_val, float) else (loq_val if loq_val is not None else "")
+            _empty = "-" if has_secondary else ""
+            lod_disp = _round_sf(lod_val) if isinstance(lod_val, float) else (lod_val if lod_val is not None else _empty)
+            loq_disp = _round_sf(loq_val) if isinstance(loq_val, float) else (loq_val if loq_val is not None else _empty)
 
             # Threshold values — uncertain ones already set to None in thresh_vals
             thresh_row = [
