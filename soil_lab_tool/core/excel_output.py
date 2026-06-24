@@ -594,59 +594,133 @@ class LabReportExcel:
         # Alchem PDFs), embed it into the sample key as "name depth" so that
         # different depths of the same borehole become distinct columns.
         # _split_sample_depth already handles "name depth" space-separated format.
-        # ── Secondary lab merging ──────────────────────────────────────
-        # Secondary sample IDs get "_SEC" suffix so they appear as distinct samples.
+        # ── Secondary lab merging (two-pivot correlation) ──────────────
+        # Build separate primary and secondary pivots, then correlate samples
+        # by (borehole, depth) to create interleaved SPLIT columns/rows.
         sheet_atype = records[0].get("analysis_type") if records else None
-        sec_records = []
-        for r in self.secondary_records:
-            if r.get("analysis_type") == sheet_atype:
-                rc = dict(r)
-                rc["sample_id"] = rc.get("sample_id", "") + "_SEC"
-                rc["lab"] = "secondary"
-                sec_records.append(rc)
-        has_secondary = bool(sec_records)
-        all_records = list(records) + sec_records
-
-        # secondary LOQ map (per compound, first seen)
-        sec_loq_map: dict[str, float | None] = {}
-        for r in sec_records:
-            cmp = r["compound"]
-            if sec_loq_map.get(cmp) is None and r.get("loq") is not None:
-                sec_loq_map[cmp] = r["loq"]
+        sec_records_raw = [r for r in self.secondary_records
+                           if r.get("analysis_type") == sheet_atype]
+        has_secondary = bool(sec_records_raw)
 
         def _sid(r):
             sid = r["sample_id"]
             d   = r.get("depth", "")
             return f"{sid} {d}" if d else sid
 
-        samples   = _ordered_unique(_sid(r) for r in all_records)
-        if cfg.get("analysis_type") == "SOIL_TPH" or all(r.get("analysis_type") == "SOIL_TPH" for r in all_records):
-            samples = sorted(samples, key=_tph_sort_key)
-        compounds = _ordered_unique(r["compound"]  for r in all_records)
+        def _match_key(sid: str) -> str:
+            bh, dep = _split_sample_depth(sid)
+            return f"{_norm_borehole(bh)}|{dep}"
 
-        # Pivot: compound → sample_id → (value, flag, lod)
-        pivot:    dict[str, dict] = {}
-        cas_map:  dict[str, str]  = {}
-        lod_map:  dict[str, float | None] = {}
-        loq_map:  dict[str, float | None] = {}
-        unit_map: dict[str, str]  = {}
+        def _norm_cmp(name: str) -> str:
+            """Canonical compound name for cross-lab matching."""
+            s = name.lower().strip()
+            # dot-numbers → comma: '1.1-' → '1,1-'
+            s = re.sub(r'(\d)\.(\d)', r'\1,\2', s)
+            # collapse spaces/hyphens
+            s = re.sub(r'[-–\s]+', ' ', s)
+            return s
 
-        # Pre-pass: collect first non-None lod/loq per compound from all records
-        for r in all_records:
-            cmp = r["compound"]
+        # Build primary pivot
+        pri_sids  = _ordered_unique(_sid(r) for r in records)
+        pri_pivot: dict[str, dict] = {}   # norm_cmp → sid → entry
+        pri_cmp_display: dict[str, str] = {}  # norm_cmp → original display name
+        cas_map:   dict[str, str]  = {}   # keyed by display name
+        lod_map:   dict[str, float | None] = {}
+        loq_map:   dict[str, float | None] = {}
+        sec_loq_map: dict[str, float | None] = {}
+        unit_map:  dict[str, str]  = {}
+
+        for r in records:
+            cmp  = r["compound"]
+            ncmp = _norm_cmp(cmp)
+            sid  = _sid(r)
+            if ncmp not in pri_pivot:
+                pri_pivot[ncmp]       = {}
+                pri_cmp_display[ncmp] = cmp
+                cas_map[cmp]          = r.get("cas", "")
+                unit_map[cmp]         = r.get("unit", cfg.get("unit", ""))
+            pri_pivot[ncmp][sid] = (r.get("value"), r.get("flag", ""), r.get("lod"))
             if lod_map.get(cmp) is None and r.get("lod") is not None:
                 lod_map[cmp] = r["lod"]
-            if loq_map.get(cmp) is None and r.get("loq") is not None and r.get("lab") != "secondary":
-                loq_map[cmp] = r["loq"]  # primary LOQ only
+            if loq_map.get(cmp) is None and r.get("loq") is not None:
+                loq_map[cmp] = r["loq"]
 
-        for r in all_records:
-            cmp = r["compound"]
-            sid = _sid(r)
-            if cmp not in pivot:
-                pivot[cmp]    = {}
-                cas_map[cmp]  = r.get("cas", "")
-                unit_map[cmp] = r.get("unit", cfg.get("unit", ""))
-            pivot[cmp][sid] = (r.get("value"), r.get("flag", ""), r.get("lod"))
+        # Build secondary pivot (keyed by normalized compound name)
+        sec_sids   = _ordered_unique(_sid(r) for r in sec_records_raw)
+        sec_pivot: dict[str, dict] = {}   # norm_cmp → sid → entry
+        sec_cmp_display: dict[str, str] = {}  # norm_cmp → original secondary name
+
+        for r in sec_records_raw:
+            cmp  = r["compound"]
+            ncmp = _norm_cmp(cmp)
+            sid  = _sid(r)
+            if ncmp not in sec_pivot:
+                sec_pivot[ncmp]        = {}
+                sec_cmp_display[ncmp]  = cmp
+                # Fill cas/unit from secondary if primary doesn't have it
+                if pri_cmp_display.get(ncmp) is None:
+                    pri_cmp_display[ncmp] = cmp
+                    display_name = cmp
+                    cas_map[display_name]  = r.get("cas", "")
+                    unit_map[display_name] = r.get("unit", cfg.get("unit", ""))
+            sec_pivot[ncmp][sid] = (r.get("value"), r.get("flag", ""), r.get("lod"))
+            if sec_loq_map.get(ncmp) is None and r.get("loq") is not None:
+                sec_loq_map[ncmp] = r["loq"]
+            if lod_map.get(pri_cmp_display.get(ncmp, cmp)) is None and r.get("lod") is not None:
+                lod_map[pri_cmp_display.get(ncmp, cmp)] = r["lod"]
+
+        # Match primary sids to secondary sids by (borehole, depth) key
+        sec_key_to_sid = {}
+        for sid in sec_sids:
+            k = _match_key(sid)
+            if k not in sec_key_to_sid:
+                sec_key_to_sid[k] = sid
+
+        pri_to_sec: dict[str, str] = {}
+        for sid in pri_sids:
+            k = _match_key(sid)
+            if k in sec_key_to_sid:
+                pri_to_sec[sid] = sec_key_to_sid[k]
+
+        SPLIT_SUFFIX = "_SPLIT"
+        matched_sec_sids = set(pri_to_sec.values())
+
+        samples = []
+        for psid in pri_sids:
+            samples.append(psid)
+            if psid in pri_to_sec:
+                samples.append(psid + SPLIT_SUFFIX)
+        for ssid in sec_sids:
+            if ssid not in matched_sec_sids:
+                samples.append(ssid + SPLIT_SUFFIX)
+
+        # Unified compound list (display names, union of both labs)
+        all_ncmps = list(pri_pivot.keys())
+        for ncmp in sec_pivot:
+            if ncmp not in pri_pivot:
+                all_ncmps.append(ncmp)
+        compounds = [pri_cmp_display.get(ncmp, ncmp) for ncmp in all_ncmps]
+        # Keep ncmp → display name mapping for pivot lookup
+        _ncmp_list = all_ncmps
+
+        # Rebuild sec_loq_map keyed by display name
+        sec_loq_map = {pri_cmp_display.get(nc, nc): v for nc, v in sec_loq_map.items()}
+        # Rebuild lod_map and loq_map keyed by display name (already done above for primary)
+
+        _DASH = ("-", "dash", None)
+
+        pivot: dict[str, dict] = {}
+        for ncmp, display in zip(_ncmp_list, compounds):
+            pivot[display] = {}
+            for sid in samples:
+                if sid.endswith(SPLIT_SUFFIX):
+                    base   = sid[:-len(SPLIT_SUFFIX)]
+                    sec_sid = pri_to_sec.get(base) or base
+                    entry   = (sec_pivot.get(ncmp) or {}).get(sec_sid)
+                    pivot[display][sid] = entry if entry is not None else _DASH
+                else:
+                    entry = (pri_pivot.get(ncmp) or {}).get(sid)
+                    pivot[display][sid] = entry if entry is not None else _DASH
 
         # Enrich cas_map: for compounds with no CAS from the parser, try the
         # threshold manager's VSL tables first, then fall back to cas_lookup
@@ -1055,21 +1129,21 @@ class LabReportExcel:
                 bh_override = sample_meta.get(sid, {}).get("borehole")
                 if bh_override:
                     split_p[sid] = (_norm_borehole(bh_override), split_p[sid][1])
-            # Sort samples: secondary ones interleave after their matching primary
+            # Sort samples: SPLIT follows its paired primary
             def _sec_sort_key(sid):
-                is_sec = sid.endswith("_SEC")
-                base = sid[:-4] if is_sec else sid
+                is_split = sid.endswith("_SPLIT")
+                base = sid[:-6] if is_split else sid
                 bh, dep = split_p.get(base, split_p.get(sid, ("", "")))
-                return (*_borehole_sort_key(bh), float(dep) if dep else 0.0, 1 if is_sec else 0)
+                return (*_borehole_sort_key(bh), float(dep) if dep else 0.0, 1 if is_split else 0)
             samples = sorted(samples, key=_sec_sort_key)
 
-            # Build display values: secondary samples show borehole + "#" in depth
+            # Build display values: SPLIT samples show same borehole, depth="SPLIT"
             split_sec = {}
             for sid in samples:
-                if sid.endswith("_SEC"):
-                    base = sid[:-4]
+                if sid.endswith("_SPLIT"):
+                    base = sid[:-6]
                     bh, dep = split_p.get(base, _split_sample_depth(base))
-                    split_sec[sid] = (bh, (dep + " #") if dep else "#")
+                    split_sec[sid] = (bh, "SPLIT")
                 else:
                     split_sec[sid] = split_p.get(sid, _split_sample_depth(sid))
 
@@ -1147,7 +1221,9 @@ class LabReportExcel:
                 # Use borehole name only (split_p[sid][0]) when depth is embedded
                 # in the composite key — depth is already shown in the עומק row.
                 for ci, sid in enumerate(samples, sample_start):
-                    display = split_p[sid][0] if split_p and sid in split_p else sid
+                    display = split_sec[sid][0] if split_sec and sid in split_sec else (
+                        split_p[sid][0] if split_p and sid in split_p else sid
+                    )
                     c = ws.cell(row=hdr_row, column=ci, value=display)
                     c.font      = _font(display, bold=True)
                     c.alignment = CENTER
@@ -1176,9 +1252,13 @@ class LabReportExcel:
             # Sample values — build display strings + keep raw for colouring
             sample_vals: list = []
             for sid in samples:
-                v, flag, lod = pivot.get(cmp, {}).get(sid, (None, "<LOQ", None))
+                entry = pivot.get(cmp, {}).get(sid, (None, "<LOQ", None))
+                v, flag, lod = entry
+                # Dash sentinel: compound not analysed by this lab for this sample
+                if flag == "dash":
+                    sample_vals.append(("-", None, "dash", None))
+                    continue
                 if flag == "<LOQ":
-                    # Store numeric LOQ; "<"0.### format makes Excel display "<0.05".
                     loq_ref = loq_val or v
                     display = _round_sf(loq_ref) if isinstance(loq_ref, float) else None
                 elif flag == "<LOD":
@@ -1225,7 +1305,7 @@ class LabReportExcel:
                     if flag == "<LOQ" and isinstance(val, (int, float)):
                         c.number_format = '"<"0.0##'
                     # If threshold is uncertain, skip exceedance colouring entirely
-                    if cmp not in uncertain_compounds:
+                    if cmp not in uncertain_compounds and flag != "dash":
                         vsl_lim      = self._vsl_limit(t_vals)
                         tier1_ind    = self._tier1_ind_limit(t_vals)
                         tier1_res    = self._tier1_res_limit(t_vals)
@@ -1372,7 +1452,7 @@ class LabReportExcel:
         # ── Secondary lab footnote ──────────────────────────────────────
         if has_secondary:
             c = ws.cell(row=note_row, column=1,
-                        value="# תוצאות מעבדה משנית")
+                        value="SPLIT = תוצאות מעבדה משנית")
             c.font = Font(**FHE, italic=True, color="808080")
             c.fill = WHITE
         self._auto_width(ws, N_FIXED + len(samples), hdr_row=hdr_row)
@@ -1392,16 +1472,16 @@ class LabReportExcel:
         sec_loq_map = sec_loq_map or {}
 
         # Separate primary vs secondary samples for display
-        pri_samples = [s for s in samples if not s.endswith("_SEC")]
-        sec_samples = [s for s in samples if s.endswith("_SEC")]
+        pri_samples  = [s for s in samples if not s.endswith("_SPLIT")]
+        sec_samples  = [s for s in samples if s.endswith("_SPLIT")]
 
         # ── Depth detection & sample sorting ────────────────────────────
         split_map = {}
         for sid in samples:
-            if sid.endswith("_SEC"):
-                base = sid[:-4]
+            if sid.endswith("_SPLIT"):
+                base = sid[:-6]
                 bh, dep = _split_sample_depth(base)
-                split_map[sid] = (bh, (dep + " #") if dep else "#")
+                split_map[sid] = (bh, "SPLIT")
             else:
                 split_map[sid] = _split_sample_depth(sid)
         if depth_map:
@@ -1419,9 +1499,9 @@ class LabReportExcel:
             # Sort samples: ק first, נ second, others last; within group by number then depth
             def _sort_key(sid):
                 bh, dep = split_map[sid]
-                dep_clean = dep.replace('#', '').strip() if dep else ''
-                is_sec = 1 if sid.endswith("_SEC") else 0
-                return (*_borehole_sort_key(bh), float(dep_clean) if dep_clean else 0.0, is_sec)
+                dep_clean = dep.replace('SPLIT', '').strip() if dep else ''
+                is_split = 1 if sid.endswith("_SPLIT") else 0
+                return (*_borehole_sort_key(bh), float(dep_clean) if dep_clean else 0.0, is_split)
             samples = sorted(samples, key=_sort_key)
 
         # Column count: borehole + depth (when present) + PID (from pid_map) + compounds
@@ -1553,10 +1633,12 @@ class LabReportExcel:
                 col_vals = [bh_cell_val] + ([pid_cell] if has_pid else [])
 
             for cmp in compounds:
-                v, flag, lod = pivot.get(cmp, {}).get(sid, (None, "<LOQ", None))
+                entry = pivot.get(cmp, {}).get(sid, (None, "<LOQ", None))
+                v, flag, lod = entry
                 loq_val = loq_map.get(cmp)
-                if flag == "<LOQ":
-                    # Store numeric LOQ; "<"0.### format makes Excel display "<0.05".
+                if flag == "dash":
+                    display = "-"
+                elif flag == "<LOQ":
                     loq_ref = loq_val or v
                     display = _round_sf(loq_ref) if isinstance(loq_ref, float) else None
                 elif flag == "<LOD":
@@ -1592,8 +1674,8 @@ class LabReportExcel:
                     cmp_name               = compounds[comp_idx]
                     num_v, flag_cell, lod_cell = row_meta[comp_idx]
                     t_vals                 = thresh_vals.get(cmp_name, {})
-                    # Skip exceedance colouring for uncertain compounds
-                    if cmp_name in uncertain_compounds:
+                    # Skip exceedance colouring for uncertain compounds or dash cells
+                    if cmp_name in uncertain_compounds or flag_cell == "dash":
                         pass
                     else:
                         vsl_lim   = self._vsl_limit(t_vals)
