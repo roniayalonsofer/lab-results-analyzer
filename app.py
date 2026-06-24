@@ -1645,8 +1645,8 @@ elif page == "guide":
         '<td>חריגה מ-TIER1 מגורים</td></tr>'
         '<tr><td><span style="background:#FFB6C1;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">ורוד</span></td>'
         '<td>חריגה מ-TIER1 תעשייה</td></tr>'
-        '<tr><td><span style="background:#D3D3D3;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">אפור</span></td>'
-        '<td>LOQ גבוה מסף</td></tr>'
+        '<tr><td><strong style="font-size:13px;">מודגש</strong></td>'
+        '<td>ערכים החורגים מערך סף הגילוי מודגשים (LOQ גבוה מסף)</td></tr>'
         '</tbody></table>'
         '</div>'
         '</div>',

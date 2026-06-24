@@ -1378,11 +1378,10 @@ class LabReportExcel:
                             # GREY first: ND is a non-detection regardless of stored value
                             if _nd_at_loq:
                                 if loq_val is not None and loq_val > any_lim:
-                                    c.fill = GRAY
                                     c.font = _font(display, bold=True)
                                     c.number_format = '"<"0.0##'
                                     has_gray = True
-                            # GREY: threshold < LOD/LOQ → uncertain exclusion
+                            # BOLD: threshold < LOD/LOQ → uncertain exclusion
                             elif flag in ("<LOD", "<LOQ", "<"):
                                 lod_num = (
                                     lod     if lod     is not None else
@@ -1391,7 +1390,6 @@ class LabReportExcel:
                                     (num_v  if isinstance(num_v, (int, float)) else None)
                                 )
                                 if lod_num is not None and lod_num > any_lim:
-                                    c.fill = GRAY
                                     c.font = _font(display, bold=True)
                                     has_gray = True
                             # COLOUR: real detection vs threshold
@@ -1771,11 +1769,10 @@ class LabReportExcel:
                             # GREY first: ND is a non-detection regardless of stored value
                             if _nd_at_loq:
                                 if _loq_cmp is not None and _loq_cmp > any_lim:
-                                    c.fill = GRAY
                                     c.font = _font(val, bold=True)
                                     c.number_format = '"<"0.0##'
                                     has_gray = True
-                            # GREY: threshold < LOD/LOQ → uncertain exclusion
+                            # BOLD: threshold < LOD/LOQ → uncertain exclusion
                             elif flag_cell in ("<LOD", "<LOQ", "<"):
                                 lod_num = (
                                     lod_cell              if lod_cell              is not None else
@@ -1784,7 +1781,6 @@ class LabReportExcel:
                                     (num_v if isinstance(num_v, (int, float)) else None)
                                 )
                                 if lod_num is not None and lod_num > any_lim:
-                                    c.fill = GRAY
                                     c.font = _font(val, bold=True)
                                     has_gray = True
                             # COLOUR: real detection vs threshold
@@ -1953,11 +1949,15 @@ class LabReportExcel:
         if has_vsl:
             items.append(("חריגה מערך VSL",          YELLOW))
         if include_gray:
-            items.append(("ערך הסף גדול מסף הגילוי", GRAY))
+            items.append(("ערכים החורגים מערך סף הגילוי מודגשים", None))
         for i, (label, fill) in enumerate(items):
             c = ws.cell(row=start_row + i, column=1, value=label)
-            c.font   = Font(name="David", size=9, bold=True)
-            c.fill   = fill
+            if fill is not None:
+                c.font  = Font(name="David", size=9, bold=True)
+                c.fill  = fill
+            else:
+                # Bold only — no gray fill
+                c.font  = Font(name="David", size=9, bold=True)
             c.border = THIN
             c.alignment = Alignment(horizontal="right", vertical="center")
         return len(items)
