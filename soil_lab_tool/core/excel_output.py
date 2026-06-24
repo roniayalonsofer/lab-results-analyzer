@@ -463,7 +463,7 @@ SHEET_CONFIG: dict[str, dict] = {
     "SOIL_TPH":   {"name": "קרקע TPH",            "unit": "mg/kg", "lod_loq_mode": "loq"},
     "SOIL_TPH_VOC":   {"name": "קרקע TPH+BTEX",      "unit": "mg/kg"},
     "SOIL_TPH_MBTEX": {"name": "קרקע TPH+MBTEX",     "unit": "mg/kg"},
-    "SOIL_METALS":    {"name": "קרקע מתכות",         "unit": "mg/kg DW", "nd_shows_loq": True},
+    "SOIL_METALS":    {"name": "קרקע מתכות",         "unit": "mg/kg DW", "nd_shows_loq": True, "lod_loq_mode": "loq"},
     "SOIL_GRAIN_SIZE":{"name": "גרנולומטריה",        "unit": "%"},
     "SOIL_PFAS":   {"name": "קרקע PFAS",       "unit": "ng/g"},
     "GW_VOC":          {"name": "מי תהום VOC",      "unit": "µg/L", "lod_loq_mode": "loq"},
@@ -1178,13 +1178,13 @@ class LabReportExcel:
                 return (*_borehole_sort_key(bh), float(dep) if dep else 0.0, 1 if is_split else 0)
             samples = sorted(samples, key=_sec_sort_key)
 
-            # Build display values: SPLIT samples show same borehole, depth="SPLIT"
+            # Build display values: SPLIT samples show same borehole AND same depth as primary
             split_sec = {}
             for sid in samples:
                 if sid.endswith("_SPLIT"):
                     base = sid[:-6]
                     bh, dep = split_p.get(base, _split_sample_depth(base))
-                    split_sec[sid] = (bh, "SPLIT")
+                    split_sec[sid] = (bh, dep)   # same depth as primary, not "SPLIT"
                 else:
                     split_sec[sid] = split_p.get(sid, _split_sample_depth(sid))
 
@@ -1193,6 +1193,33 @@ class LabReportExcel:
             meta_rows = [("שם קידוח", boreholes)]
             if any(v is not None and str(v).strip() != "" for v in depths):
                 meta_rows.append(("עומק [מ']", depths))
+            # When secondary lab present: add a "ראשית / משנית" sub-label row
+            if has_secondary:
+                split_set = {sid for sid in samples if sid.endswith("_SPLIT")}
+                # Map match_key → primary sid, to detect which primaries have a split pair
+                pri_match_keys = {}
+                for sid in samples:
+                    if not sid.endswith("_SPLIT"):
+                        bh, dep = split_p.get(sid, _split_sample_depth(sid))
+                        k = f"{_norm_borehole(bh)}|{dep}"
+                        pri_match_keys[k] = sid
+                # Which primary sids have a corresponding SPLIT?
+                paired_pri_sids = set()
+                for sid in split_set:
+                    base = sid[:-6]
+                    bh, dep = split_p.get(base, _split_sample_depth(base))
+                    k = f"{_norm_borehole(bh)}|{dep}"
+                    if k in pri_match_keys:
+                        paired_pri_sids.add(pri_match_keys[k])
+                lab_labels = []
+                for sid in samples:
+                    if sid.endswith("_SPLIT"):
+                        lab_labels.append("משנית")
+                    elif sid in paired_pri_sids:
+                        lab_labels.append("ראשית")
+                    else:
+                        lab_labels.append("")
+                meta_rows.append(("מעבדה", lab_labels))
             if pid_map:
                 pid_vals_pm = [_pid_lookup_split(pid_map, split_p[sid][0], split_p[sid][1])
                                for sid in samples]
@@ -1677,11 +1704,20 @@ class LabReportExcel:
             borehole, depth_str = split_map[sid]
             row_meta: list[tuple] = []
             col_vals: list = []
-            bh_cell_val = _dup_rich_text(borehole)  # rich text if DUP, else plain
+
+            # SPLIT rows: show borehole as "D22 SPLIT", keep same depth
+            if has_secondary and depth_str == "SPLIT":
+                base_sid = sid[:-6] if sid.endswith("_SPLIT") else sid
+                base_bh, base_dep = split_map.get(base_sid, _split_sample_depth(base_sid))
+                bh_cell_val = _dup_rich_text(f"{base_bh} SPLIT")
+                depth_display = base_dep
+            else:
+                bh_cell_val = _dup_rich_text(borehole)
+                depth_display = depth_str
 
             pid_cell = _pid_lookup_split(pid_map, borehole, depth_str) if has_pid else None
             if has_depth:
-                col_vals = [bh_cell_val, depth_str if depth_str else ""] + ([pid_cell] if has_pid else [])
+                col_vals = [bh_cell_val, depth_display if depth_display else ""] + ([pid_cell] if has_pid else [])
             else:
                 col_vals = [bh_cell_val] + ([pid_cell] if has_pid else [])
 
@@ -1689,11 +1725,18 @@ class LabReportExcel:
                 entry = pivot.get(cmp, {}).get(sid, (None, "<LOQ", None))
                 v, flag, lod = entry
                 loq_val = loq_map.get(cmp)
+                is_split_row = sid.endswith("_SPLIT")
                 if flag == "dash":
                     display = "-"
                 elif flag == "<LOQ":
                     loq_ref = loq_val or v
-                    display = _round_sf(loq_ref) if isinstance(loq_ref, float) else None
+                    if is_split_row:
+                        # Use secondary LOQ for display
+                        sec_loq = sec_loq_map.get(cmp) if sec_loq_map else None
+                        ref = sec_loq if sec_loq is not None else loq_ref
+                        display = f"<{_round_sf(ref)}" if isinstance(ref, (int, float)) else f"<{ref}"
+                    else:
+                        display = _round_sf(loq_ref) if isinstance(loq_ref, float) else None
                 elif flag == "<LOD":
                     display = f"<{_fmt_lod(lod)}" if lod is not None else None
                 elif flag == "<":
