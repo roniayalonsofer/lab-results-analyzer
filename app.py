@@ -1395,43 +1395,32 @@ if page == "soil":
             )
 
         # ── Uncertain threshold notice + download link ─────────────────
+        _thresh_path = os.path.join(THRESH_DIR, 'soil_vsl_tier1_v7_2024.xlsx')
+        _vsl_path    = os.path.join(THRESH_DIR, 'soil_vsl_v7_full.xlsx')
         st.info(
             "ℹ️ תרכובות המסומנות בכוכבית ( **\\*** ) בדוח — שמן לא התאים בדיוק לשם בטבלת ערכי הסף. "
             "ערך הסף הוצג כ-**'לא קיים'** עבורן, ובעמודת ההערות מופיע שם התרכובת הדומה שנמצאה בטבלה. "
             "מומלץ לבדוק ידנית אם ערך הסף של התרכובת הדומה רלוונטי."
         )
-        st.markdown("**⬇️ הורדת טבלאות ערכי סף מקוריות:**")
-        _thresh_cols = st.columns(3)
-        _dl_files = [
-            (
-                "ערכי סף קרקע (VSL + TIER1)\nגרסה 7 – דצמבר 2024",
-                os.path.join(THRESH_DIR, "ערכי_סף_מעודכנים_גרסה_7_דצמבר_2024.xlsx"),
-                "ערכי_סף_קרקע_גרסה_7_דצמבר_2024.xlsx",
-                "thresh_dl_soil",
-            ),
-            (
-                "ערכי סף PFAS בקרקע\nגרסה 3 – מרץ 2026",
-                os.path.join(THRESH_DIR, "ערכי_סף_PFAS_גרסה_3.xlsx"),
-                "ערכי_סף_PFAS_גרסה_3.xlsx",
-                "thresh_dl_pfas",
-            ),
-            (
-                "ערכי סף מי תהום",
-                os.path.join(THRESH_DIR, "ערכי_סף_מי_תהום.xlsx"),
-                "ערכי_סף_מי_תהום.xlsx",
-                "thresh_dl_gw",
-            ),
-        ]
-        for col, (label, path, fname_dl, key) in zip(_thresh_cols, _dl_files):
-            if os.path.exists(path):
-                with open(path, 'rb') as _f:
-                    col.download_button(
-                        f"⬇️ {label}",
-                        data=_f.read(),
-                        file_name=fname_dl,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key=key,
-                    )
+        _thresh_cols = st.columns(2)
+        if os.path.exists(_thresh_path):
+            with open(_thresh_path, 'rb') as _f:
+                _thresh_cols[0].download_button(
+                    "⬇️ הורד טבלת ערכי סף (TIER1 + VSL)",
+                    data=_f.read(),
+                    file_name="soil_vsl_tier1_v7_2024.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="thresh_dl_btn",
+                )
+        if os.path.exists(_vsl_path):
+            with open(_vsl_path, 'rb') as _f:
+                _thresh_cols[1].download_button(
+                    "⬇️ הורד טבלת VSL המלאה",
+                    data=_f.read(),
+                    file_name="soil_vsl_v7_full.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="vsl_full_dl_btn",
+                )
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1495,77 +1484,224 @@ elif page == "groundwater":
     st.markdown(
         '<div class="page-wrapper">'
         '<div class="hero" style="padding:1.5rem 2.5rem;">'
-        '<h1 style="font-size:2rem;">💧 עדכון דוח ניטור מי תהום</h1>'
-        '<p>העלה את הקבצים — המערכת תוסיף את הדיגום החדש לדוח ולגרפים אוטומטית</p>'
+        '<h1 style="font-size:2rem;">💧 דוחות ניטור מי תהום</h1>'
+        '<p>עדכון דוח תקופתי או יצירת דוח שנתי מלא</p>'
         '</div>',
         unsafe_allow_html=True,
     )
 
-    gw_lab_type = st.radio(
-        "🧪 מעבדה",
-        ["בקטוכם", "אמינולאב"],
-        horizontal=True,
-        key="gw_lab_type",
-    )
-    lab_type_code = "bactochem" if gw_lab_type == "בקטוכם" else "aminolab"
+    gw_tab1, gw_tab2 = st.tabs(["📄 עדכון דוח תקופתי", "📅 דוח שנתי"])
 
-    col1, col2 = st.columns(2)
-    with col1:
-        word_file = st.file_uploader("📄 דוח Word קודם (.docx)", type=["docx"], key="gw_word")
-        st.caption("⚠️ לפני העלאה: פתח את הדוח ב-Word ← Review ← Accept All Changes ← שמור. ללא זאת העדכון עלול להיכשל.")
-        if lab_type_code == "bactochem":
-            lab_file = st.file_uploader("🧪 תוצאות מעבדה — בקטוכם (.pdf)", type=["pdf"], key="gw_lab")
-        else:
-            lab_files = st.file_uploader(
-                "🧪 תעודות מעבדה — אמינולאב (.pdf, קובץ אחד לכל באר)",
-                type=["pdf"], accept_multiple_files=True, key="gw_lab_multi",
-            )
-    with col2:
-        field_file = st.file_uploader("📋 טופס ממצאי שדה (.pdf, אופציונלי)", type=["pdf"], key="gw_field")
-
-    if lab_type_code == "bactochem":
-        lab_ready = bool(lab_file)
-    else:
-        lab_ready = bool(lab_files)
-
-    if word_file and lab_ready:
-        if st.button("⚡ עדכן דוח", type="primary", use_container_width=True):
-            with st.spinner("מעבד... ⏳"):
-                try:
-                    lab_pdf_bytes = (
-                        lab_file.read() if lab_type_code == "bactochem"
-                        else [f.read() for f in lab_files]
-                    )
-                    out_word, _ = run_update_bytes(
-                        word_file.read(),
-                        lab_pdf_bytes,
-                        None,
-                        field_pdf_bytes=field_file.read() if field_file else None,
-                        lab_type=lab_type_code,
-                    )
-                    st.success("✅ הדוח עודכן בהצלחה!")
-                    st.download_button(
-                        "⬇️ הורד דוח Word מעודכן",
-                        data=out_word,
-                        file_name="דוח_ניטור_מעודכן.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True,
-                    )
-                except Exception as e:
-                    st.error(f"שגיאה בעיבוד: {e}")
-    else:
-        st.markdown(
-            '<div class="card"><div class="card-header">📋 שלבי השימוש</div>'
-            '<div class="steps">'
-            '<div class="step"><div class="step-num">1</div><div class="step-title">דוח Word קודם</div><div class="step-desc">הדוח מהסבב הקודם (.docx)</div></div>'
-            '<div class="step"><div class="step-num">2</div><div class="step-title">תוצאות מעבדה</div><div class="step-desc">PDF של בקטוכם או אמינולאב מהדיגום החדש</div></div>'
-            '<div class="step"><div class="step-num">3</div><div class="step-title">הורד</div><div class="step-desc">דוח Word מעודכן עם כל השינויים מסומנים בצהוב</div></div>'
-            '</div></div>',
-            unsafe_allow_html=True,
+    # ── TAB 1: Periodic update (existing functionality) ──────────────────────
+    with gw_tab1:
+        gw_lab_type = st.radio(
+            "🧪 מעבדה",
+            ["בקטוכם", "אמינולאב"],
+            horizontal=True,
+            key="gw_lab_type",
         )
+        lab_type_code = "bactochem" if gw_lab_type == "בקטוכם" else "aminolab"
+
+        col1, col2 = st.columns(2)
+        with col1:
+            word_file = st.file_uploader("📄 דוח Word קודם (.docx)", type=["docx"], key="gw_word")
+            st.caption("⚠️ לפני העלאה: פתח את הדוח ב-Word ← Review ← Accept All Changes ← שמור. ללא זאת העדכון עלול להיכשל.")
+            if lab_type_code == "bactochem":
+                lab_file = st.file_uploader("🧪 תוצאות מעבדה — בקטוכם (.pdf)", type=["pdf"], key="gw_lab")
+            else:
+                lab_files = st.file_uploader(
+                    "🧪 תעודות מעבדה — אמינולאב (.pdf, קובץ אחד לכל באר)",
+                    type=["pdf"], accept_multiple_files=True, key="gw_lab_multi",
+                )
+        with col2:
+            field_file = st.file_uploader("📋 טופס ממצאי שדה (.pdf, אופציונלי)", type=["pdf"], key="gw_field")
+
+        if lab_type_code == "bactochem":
+            lab_ready = bool(lab_file)
+        else:
+            lab_ready = bool(lab_files)
+
+        if word_file and lab_ready:
+            if st.button("⚡ עדכן דוח", type="primary", use_container_width=True, key="gw_update_btn"):
+                with st.spinner("מעבד... ⏳"):
+                    try:
+                        lab_pdf_bytes = (
+                            lab_file.read() if lab_type_code == "bactochem"
+                            else [f.read() for f in lab_files]
+                        )
+                        out_word, _ = run_update_bytes(
+                            word_file.read(),
+                            lab_pdf_bytes,
+                            None,
+                            field_pdf_bytes=field_file.read() if field_file else None,
+                            lab_type=lab_type_code,
+                        )
+                        st.success("✅ הדוח עודכן בהצלחה!")
+                        st.download_button(
+                            "⬇️ הורד דוח Word מעודכן",
+                            data=out_word,
+                            file_name="דוח_ניטור_מעודכן.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            use_container_width=True,
+                            key="gw_dl_periodic",
+                        )
+                    except Exception as e:
+                        st.error(f"שגיאה בעיבוד: {e}")
+        else:
+            st.markdown(
+                '<div class="card"><div class="card-header">📋 שלבי השימוש</div>'
+                '<div class="steps">'
+                '<div class="step"><div class="step-num">1</div><div class="step-title">דוח Word קודם</div><div class="step-desc">הדוח מהסבב הקודם (.docx)</div></div>'
+                '<div class="step"><div class="step-num">2</div><div class="step-title">תוצאות מעבדה</div><div class="step-desc">PDF של בקטוכם או אמינולאב מהדיגום החדש</div></div>'
+                '<div class="step"><div class="step-num">3</div><div class="step-title">הורד</div><div class="step-desc">דוח Word מעודכן עם כל השינויים מסומנים בצהוב</div></div>'
+                '</div></div>',
+                unsafe_allow_html=True,
+            )
+
+    # ── TAB 2: Annual report ─────────────────────────────────────────────────
+    with gw_tab2:
+        st.markdown("### 📅 יצירת דוח שנתי")
+        st.info(
+            "המערכת תייצר דוח שנתי על בסיס הדוח התקופתי האחרון + תוצאות המעבדה של כל "
+            "הדיגומים שבוצעו השנה. הדוח יכלול טבלאות מצטברות מעודכנות וסיכום אוטומטי."
+        )
+
+        ann_col1, ann_col2 = st.columns(2)
+        with ann_col1:
+            ann_year = st.text_input(
+                "📅 שנה", value="2025", key="ann_year",
+                help="שנת הדוח השנתי",
+            )
+            ann_author = st.text_input(
+                "✍️ מחבר הדוח", key="ann_author",
+                help="שם מחבר הדוח",
+            )
+            ann_approver = st.text_input(
+                "✅ מאשר הדוח", key="ann_approver",
+                help="שם מאשר הדוח",
+            )
+            ann_cutoff = st.text_input(
+                "📆 תאריך הדוח השנתי הקודם (dd.mm.yy)",
+                key="ann_cutoff",
+                value="15.12.24",
+                help="תאריך הדיגום האחרון שנכלל בדוח השנתי הקודם. דיגומים מאוחרים יותר ייכללו בדוח החדש.",
+            )
+
+        with ann_col2:
+            ann_word = st.file_uploader(
+                "📄 דוח תקופתי אחרון (.docx)",
+                type=["docx"],
+                key="ann_word",
+                help="הדוח התקופתי האחרון שיצא (למשל אוגוסט 2025). מכיל את ההיסטוריה המצטברת.",
+            )
+            ann_lab_files = st.file_uploader(
+                "🧪 תעודות מעבדה של השנה (.pdf/.xlsx)",
+                type=["pdf", "xlsx"],
+                accept_multiple_files=True,
+                key="ann_lab_files",
+                help="כל תעודות המעבדה של הדיגומים שבוצעו השנה ולא כלולים בדוח התקופתי שהועלה. תומך בבקטוכם ואמינולאב.",
+            )
+
+        # Show detected labs for uploaded files
+        if ann_lab_files:
+            try:
+                import sys, os
+                sys.path.insert(0, "/home/claude/check5/soil_lab_tool") if os.path.exists("/home/claude/check5/soil_lab_tool") else None
+                from parsers import auto_detect_lab, auto_detect_category
+                det_info = []
+                for f in ann_lab_files:
+                    raw = f.getvalue()
+                    lab = auto_detect_lab(f.name, raw) or "?"
+                    det_info.append(f"**{f.name}**: {lab}")
+                    f.seek(0)
+                st.caption("זוהו: " + " | ".join(det_info))
+            except Exception:
+                pass
+
+        ready = bool(ann_word and ann_year)
+
+        if ready:
+            if st.button("⚡ צור דוח שנתי", type="primary", use_container_width=True, key="ann_gen_btn"):
+                with st.spinner("מייצר דוח שנתי... ⏳"):
+                    try:
+                        import sys, os
+                        _gw_path = os.path.join(os.path.dirname(__file__), "soil_lab_tool")
+                        if _gw_path not in sys.path:
+                            sys.path.insert(0, _gw_path)
+
+                        from core.annual_gw_report import (
+                            parse_word_report, parse_lab_reports,
+                            merge_events, generate_annual_report,
+                        )
+
+                        # 1. Parse periodic report
+                        word_bytes = ann_word.read()
+                        gw_data    = parse_word_report(word_bytes, ann_word.name)
+
+                        # 2. Parse lab files
+                        lab_files_data = []
+                        for f in (ann_lab_files or []):
+                            lab_files_data.append((f.name, f.read()))
+
+                        if lab_files_data:
+                            new_events = parse_lab_reports(lab_files_data)
+                            gw_data    = merge_events(gw_data, new_events)
+
+                        # 3. Generate annual report
+                        out_bytes = generate_annual_report(
+                            data          = gw_data,
+                            year          = ann_year,
+                            author        = ann_author or gw_data.author,
+                            approver      = ann_approver or gw_data.approver,
+                            cutoff_date   = ann_cutoff,
+                            template_bytes= word_bytes,
+                        )
+
+                        n_events = len(gw_data.events)
+                        n_bh     = len(gw_data.boreholes)
+                        st.success(
+                            f"✅ דוח שנתי {ann_year} נוצר בהצלחה! "
+                            f"({n_bh} קידוחים, {n_events} אירועי דיגום)"
+                        )
+                        st.download_button(
+                            f"⬇️ הורד דוח שנתי {ann_year}",
+                            data=out_bytes,
+                            file_name=f"דוח_ניטור_שנתי_{ann_year}.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            use_container_width=True,
+                            key="ann_dl_btn",
+                        )
+
+                    except Exception as _e:
+                        import traceback
+                        st.error(f"שגיאה ביצירת הדוח: {_e}")
+                        with st.expander("פרטי שגיאה"):
+                            st.code(traceback.format_exc())
+        else:
+            st.markdown(
+                '<div class="card"><div class="card-header">📋 שלבי השימוש</div>'
+                '<div class="steps">'
+                '<div class="step"><div class="step-num">1</div>'
+                '<div class="step-title">דוח תקופתי אחרון</div>'
+                '<div class="step-desc">הדוח התקופתי האחרון שיצא (למשל אוגוסט 2025) — '
+                'מכיל את כל ההיסטוריה המצטברת</div></div>'
+                '<div class="step"><div class="step-num">2</div>'
+                '<div class="step-title">תעודות מעבדה של השנה</div>'
+                '<div class="step-desc">תעודות של כל הדיגומים שבוצעו מאז הדוח השנתי הקודם '
+                '(בקטוכם / אמינולאב / סונול)</div></div>'
+                '<div class="step"><div class="step-num">3</div>'
+                '<div class="step-title">פרטי הדוח</div>'
+                '<div class="step-desc">שנה, מחבר, מאשר, תאריך הדוח הקודם</div></div>'
+                '<div class="step"><div class="step-num">4</div>'
+                '<div class="step-title">הורד</div>'
+                '<div class="step-desc">דוח Word שנתי עם טבלאות מצטברות ותוצאות מעודכנות</div></div>'
+                '</div></div>',
+                unsafe_allow_html=True,
+            )
 
     st.markdown('</div>', unsafe_allow_html=True)
     st.markdown(_FOOTER, unsafe_allow_html=True)
+
 
 
 # ══════════════════════════════════════════════════════════════════
