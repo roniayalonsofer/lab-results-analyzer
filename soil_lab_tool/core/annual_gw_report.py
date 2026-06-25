@@ -528,41 +528,209 @@ def merge_events(base: GWReportData, new_events: list[SamplingEvent]) -> GWRepor
 # ── Word report generator ─────────────────────────────────────────────────────
 
 def generate_annual_report(
-    data:          GWReportData,
+    data:          "GWReportData",
     year:          str,
     author:        str       = "",
     approver:      str       = "",
-    cutoff_date:   str       = "",   # last date of previous annual report
+    cutoff_date:   str       = "",
     template_bytes: bytes | None = None,
 ) -> bytes:
     """
-    Generate annual Word report from GWReportData.
+    Generate annual Word report by XML manipulation of the template.
+    - Simple text replacement for metadata
+    - Duplicate last row per borehole + highlight yellow for new sampling date
+    - Update summary dates
     Returns .docx bytes.
     """
+    if template_bytes is None:
+        raise ValueError("template_bytes is required for annual report generation")
+
+    import tempfile, shutil, subprocess, copy
+    from lxml import etree
+
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    def w(tag): return f"{{{W}}}{tag}"
+    def find_text(el):
+        return "".join(t.text or "" for t in el.iter(w("t")))
+
+    def highlight_row_yellow(row):
+        for rPr in row.iter(w("rPr")):
+            for h in rPr.findall(w("highlight")):
+                rPr.remove(h)
+            h = etree.SubElement(rPr, w("highlight"))
+            h.set(w("val"), "yellow")
+
+    def set_cell_text(cell, val):
+        for t in cell.iter(w("t")):
+            if t.text is not None:
+                t.text = str(val) if val else "-"
+                return
+        # If no run, create one
+        para = cell.find(f".//{w('p')}")
+        if para is not None:
+            run = etree.SubElement(para, w("r"))
+            t = etree.SubElement(run, w("t"))
+            t.text = str(val) if val else "-"
+
+    # Unpack template to temp dir
+    tmpdir = tempfile.mkdtemp()
     try:
-        import docx as _docx
-        from docx.shared import Pt, Cm, RGBColor
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
-        from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
-        from docx.oxml.ns import qn
-        from docx.oxml import OxmlElement
-    except ImportError:
-        import subprocess, sys
-        subprocess.check_call([sys.executable, "-m", "pip", "install",
-                               "python-docx", "--break-system-packages", "-q"])
-        import docx as _docx
-        from docx.shared import Pt, Cm, RGBColor
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        import zipfile, os
+        with zipfile.ZipFile(io.BytesIO(template_bytes)) as zf:
+            zf.extractall(tmpdir)
 
-    if template_bytes:
-        doc = _docx.Document(io.BytesIO(template_bytes))
-        _update_template(doc, data, year, author, approver, cutoff_date)
-    else:
-        doc = _build_from_scratch(data, year, author, approver, cutoff_date)
+        doc_xml_path = os.path.join(tmpdir, "word", "document.xml")
+        with open(doc_xml_path, encoding="utf-8") as f:
+            xml = f.read()
 
-    buf = io.BytesIO()
-    doc.save(buf)
-    return buf.getvalue()
+        # Build lookup of new data: borehole → SamplingEvent
+        new_data = {}
+        for ev in data.events:
+            d = ev.date_obj()
+            if d and cutoff_date:
+                cutoff = data._parse_date(cutoff_date)
+                if cutoff and d <= cutoff:
+                    continue
+            if ev.borehole not in new_data or (
+                ev.date_obj() and (new_data[ev.borehole].date_obj() or datetime.min) < ev.date_obj()
+            ):
+                new_data[ev.borehole] = ev
+
+        # Find the latest existing date in the document (to know what to duplicate)
+        all_dates_in_doc = sorted(set(re.findall(r"\d{2}\.\d{2}\.\d{2}", xml)))
+        prev_date = all_dates_in_doc[-1] if all_dates_in_doc else ""
+        # Get new date from new events
+        new_dates = sorted(set(ev.date for ev in new_data.values() if ev.date_obj()),
+                          key=lambda d: data._parse_date(d) or datetime.min)
+        new_date = new_dates[-1] if new_dates else ""
+
+        # ── Text replacements ──────────────────────────────────────────────────
+        replacements = []
+        # Report type: תקופתי → שנתי (bare <w:t> content)
+        replacements.append((">ניטור מי תהום תקופתי<", ">ניטור מי תהום שנתי<"))
+        replacements.append(("ניטור מי תהום תקופתי", "ניטור מי תהום שנתי"))
+        # Month: replace month name in <w:t> tag with דצמבר
+        for month_he in ["ינואר","פברואר","מרץ","אפריל","מאי","יוני",
+                         "יולי","אוגוסט","ספטמבר","אוקטובר","נובמבר"]:
+            replacements.append((f">{month_he}</w:t>", ">דצמבר</w:t>"))
+        # Header title with month
+        for month_he in ["ינואר","פברואר","מרץ","אפריל","מאי","יוני",
+                         "יולי","אוגוסט","ספטמבר","אוקטובר","נובמבר"]:
+            replacements.append((
+                f"ניטור מי תהום {month_he} {year}",
+                f"ניטור מי תהום שנתי {year}"
+            ))
+        replacements.append((
+            f"ניטור מי תהום {year}",
+            f"ניטור מי תהום שנתי {year}"
+        ))
+        # Submission date — update to end of year
+        replacements.append(("19/05/2026", f"31/12/{year}"))
+        replacements.append(("30/01/2025", f"31/12/{year}"))
+        # Body sampling date text
+        if prev_date:
+            prev_date_full = prev_date.replace(".", ".")
+            replacements.append((
+                f"בתאריך {prev_date_full[:2]}.{prev_date_full[3:5]}.20{prev_date_full[6:]} נערך דיגום תקופתי",
+                f"בשנת {year} בוצעו דיגומי ניטור תקופתיים. הדיגום האחרון"
+            ))
+        # Author / approver
+        _author   = author or data.author or ""
+        _approver = approver or data.approver or ""
+
+        for old, new_txt in replacements:
+            if old in xml:
+                xml = xml.replace(old, new_txt)
+
+        # Author name replacement
+        if _author and data.author:
+            xml = xml.replace(data.author, _author)
+        if _approver and data.approver:
+            xml = xml.replace(data.approver, _approver)
+
+        # ── XML tree manipulation: add new date rows ───────────────────────────
+        tree = etree.fromstring(xml.encode("utf-8"))
+
+        for tbl in tree.findall(".//" + w("tbl")):
+            rows = tbl.findall(w("tr"))
+            if len(rows) < 3:
+                continue
+            hdr = find_text(tbl)
+            is_lab   = any(k in hdr for k in ["בנזן", "MTBE"])
+            is_field = any(k in hdr for k in ["עכירות", "רדוקס"]) and "בנזן" not in hdr
+            if not (is_lab or is_field):
+                continue
+
+            ttype = "lab" if is_lab else "field"
+            bh_last = {}
+            cur_bh  = None
+            for i, row in enumerate(rows):
+                cells = row.findall(w("tc"))
+                if cells:
+                    fc = find_text(cells[0]).strip().replace("\u200f", "")
+                    bh_m = re.match(r"(מת-?\d+)", fc)
+                    if bh_m:
+                        raw = bh_m.group(1)
+                        cur_bh = raw if "-" in raw else f"מת-{raw[2:]}"
+                if cur_bh and prev_date and prev_date in find_text(row):
+                    bh_last[cur_bh] = (row, i)
+
+            inserted = 0
+            for bh in sorted(bh_last):
+                ev = new_data.get(bh)
+                if not ev or not new_date:
+                    continue
+                last_row, _ = bh_last[bh]
+                new_row = copy.deepcopy(last_row)
+                # Update date cell
+                for t in new_row.iter(w("t")):
+                    if t.text and prev_date in t.text:
+                        t.text = t.text.replace(prev_date, new_date)
+                # Update value cells
+                cells = new_row.findall(w("tc"))
+                if ttype == "lab":
+                    val_cols = {2: ev.water_level, 3: ev.benzene, 4: ev.toluene,
+                                5: ev.ethylbenzene, 6: ev.xylene, 7: ev.mtbe}
+                else:
+                    val_cols = {2: ev.ph, 3: ev.ec, 4: ev.temp, 5: ev.do,
+                                6: ev.turbidity, 7: ev.redox, 8: ev.water_level,
+                                9: ev.total_depth}
+                for ci, val in val_cols.items():
+                    if ci < len(cells) and val and val not in ("-", None):
+                        set_cell_text(cells[ci], val)
+                    elif ci < len(cells):
+                        set_cell_text(cells[ci], "-")
+                # Highlight yellow
+                highlight_row_yellow(new_row)
+                # Insert
+                parent = last_row.getparent()
+                idx    = list(parent).index(last_row)
+                parent.insert(idx + 1 + inserted, new_row)
+                inserted += 1
+
+        # Write back
+        result_xml = etree.tostring(
+            tree, xml_declaration=True, encoding="UTF-8", standalone=True
+        ).decode("utf-8")
+        with open(doc_xml_path, "w", encoding="utf-8") as f:
+            f.write(result_xml)
+
+        # Repack
+        out_buf = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(template_bytes)) as orig_zf:
+            with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as out_zf:
+                for item in orig_zf.infolist():
+                    member_path = os.path.join(tmpdir, item.filename.replace("/", os.sep))
+                    if os.path.exists(member_path) and not os.path.isdir(member_path):
+                        with open(member_path, "rb") as mf:
+                            out_zf.writestr(item, mf.read())
+                    else:
+                        out_zf.writestr(item, orig_zf.read(item.filename))
+        return out_buf.getvalue()
+
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
 
 
 def _update_template(doc, data, year, author, approver, cutoff_date):
@@ -578,7 +746,7 @@ def _update_template(doc, data, year, author, approver, cutoff_date):
                 re.search(r'20\d\d', para.text).group() if re.search(r'20\d\d', para.text) else "", year))
         if re.search(r'20\d\d', para.text) and len(para.text) < 20:
             _replace_para_text(para, year)
-        if "אוגוסט\|ינואר\|פברואר\|מרץ\|אפריל\|מאי\|יוני\|יולי\|ספטמבר\|אוקטובר\|נובמבר\|דצמבר" and \
+        if re.search(r"ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר", para.text or "") and \
            re.search(r'ינואר|פברואר|מרץ|אפריל|מאי|יוני|יולי|אוגוסט|ספטמבר|אוקטובר|נובמבר|דצמבר', para.text) \
            and len(para.text) < 30:
             _replace_para_text(para, f"דצמבר {year}")
