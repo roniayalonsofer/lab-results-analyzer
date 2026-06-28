@@ -1,4 +1,4 @@
-# app.py  --  Streamlit UI for the Lab Results Analyzer
+# app.py  --  Streamlit UI for the Lab Results Analyzer  [reload: 20260628-174012]
 # Run: py -3 -m streamlit run app.py
 import sys, os, io, re, collections, socket
 from datetime import date
