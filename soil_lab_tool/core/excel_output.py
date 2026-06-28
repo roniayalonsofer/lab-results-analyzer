@@ -196,10 +196,8 @@ def _norm_borehole(s: str) -> str:
 
 def _pid_key(borehole: str) -> str:
     """Normalize borehole name for pid_map lookup.
-    Strips 'קרקע ' prefix (Bactochem PDF includes it in sample_id),
-    maps Latin K/k prefix to Hebrew ק (K-2 → ק2), then removes dashes/spaces."""
+    Strips קרקע prefix (Bactochem), maps Latin K/k to ק, removes dashes/spaces."""
     name = borehole.strip()
-    # Strip "קרקע " prefix that Bactochem embeds in sample_id (e.g. "קרקע ונ 20" → "ונ 20")
     if name.startswith('קרקע '):
         name = name[len('קרקע '):].strip()
     name = re.sub(r'^[Kk]-?', 'ק', name)
@@ -614,11 +612,9 @@ class LabReportExcel:
 
         def _match_key(sid: str) -> str:
             s = sid.strip()
-            # Strip "קרקע " prefix that Bactochem embeds in sample_id
             if s.startswith("קרקע "):
                 s = s[len("קרקע "):].strip()
             bh, dep = _split_sample_depth(s)
-            # Normalize borehole: remove dashes/spaces so "ונ-20" == "ונ 20"
             bh_norm = re.sub(r"[-\s]", "", _norm_borehole(bh))
             return f"{bh_norm}|{dep}"
 

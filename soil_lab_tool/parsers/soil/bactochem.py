@@ -95,10 +95,9 @@ _SUMMARY_RE = re.compile(
 
 # BTEX / VOC bare-ND line — no CAS prefix, format: "{loq} {unit} [X≤{thresh}] NOT DETECTED {compound}"
 # e.g. "0.02 mg/kg X≤ 0.28 NOT DETECTED Benzene"
-# e.g. "0.02 mg/kg NOT DETECTED MTBE"
 _BTEX_ND_RE = re.compile(
     r"^\s*(?P<loq>[\d.]+)\s+(?P<unit>mg/(?:kg|L))"
-    r"(?:\s+X[≤≥<>]\s*[\d.]+)?"          # optional threshold
+    r"(?:\s+X[≤≥<>]\s*[\d.]+)?"
     r"\s+NOT\s+DETECTED\s+(?P<compound>.+)$",
     re.IGNORECASE,
 )
@@ -354,15 +353,12 @@ def _extract_lines(file_obj: io.BytesIO, pdfplumber) -> list[str]:
     stripped = [s for line in raw if (s := line.strip())]
 
     # Some PDFs split "NOT DETECTED" across two lines:
-    # e.g. line N:   "0.02 mg/kg X≤ 0.28 NOT Benzene"
-    #      line N+1: "DETECTED"
-    # The word order is RTL-visual: result token "NOT" appears before compound name,
-    # then "DETECTED" lands on the next line. We need to insert "DETECTED" right after
-    # "NOT" in the previous line.
+    # line N:   "0.02 mg/kg X≤ 0.28 NOT Benzene"
+    # line N+1: "DETECTED"
+    # Insert DETECTED right after NOT in the previous line.
     joined: list[str] = []
     for line in stripped:
         if line.strip().upper() == "DETECTED" and joined:
-            # Insert DETECTED right after the last occurrence of "NOT" in previous line
             prev = joined[-1]
             idx = prev.upper().rfind(" NOT ")
             if idx != -1:

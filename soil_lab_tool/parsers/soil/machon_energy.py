@@ -141,8 +141,6 @@ class MachonEnergyParser(BaseParser):
                                 if _p and _p[-1] in _hebrew:
                                     _p = _p[-1] + _p[:-1]
                                 _fixed.append(_p)
-                            # _fixed is e.g. ['ונ', '9.0 -20']
-                            # Parse last part as "depth -bh_number" → build "ונ-20 9.0"
                             import re as _re
                             if len(_fixed) >= 2:
                                 _last = _fixed[-1].strip()
