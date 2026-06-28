@@ -196,8 +196,13 @@ def _norm_borehole(s: str) -> str:
 
 def _pid_key(borehole: str) -> str:
     """Normalize borehole name for pid_map lookup.
-    Maps Latin K/k prefix to Hebrew ק (K-2 → ק2), then removes dashes/spaces."""
-    name = re.sub(r'^[Kk]-?', 'ק', borehole.strip())
+    Strips 'קרקע ' prefix (Bactochem PDF includes it in sample_id),
+    maps Latin K/k prefix to Hebrew ק (K-2 → ק2), then removes dashes/spaces."""
+    name = borehole.strip()
+    # Strip "קרקע " prefix that Bactochem embeds in sample_id (e.g. "קרקע ונ 20" → "ונ 20")
+    if name.startswith('קרקע '):
+        name = name[len('קרקע '):].strip()
+    name = re.sub(r'^[Kk]-?', 'ק', name)
     return re.sub(r'[-\s]', '', name).strip()
 
 
