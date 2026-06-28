@@ -613,8 +613,14 @@ class LabReportExcel:
             return f"{sid} {d}" if d else sid
 
         def _match_key(sid: str) -> str:
-            bh, dep = _split_sample_depth(sid)
-            return f"{_norm_borehole(bh)}|{dep}"
+            s = sid.strip()
+            # Strip "קרקע " prefix that Bactochem embeds in sample_id
+            if s.startswith("קרקע "):
+                s = s[len("קרקע "):].strip()
+            bh, dep = _split_sample_depth(s)
+            # Normalize borehole: remove dashes/spaces so "ונ-20" == "ונ 20"
+            bh_norm = re.sub(r"[-\s]", "", _norm_borehole(bh))
+            return f"{bh_norm}|{dep}"
 
         # CAS-based compound matching: built lazily when CAS numbers are available
         _cas_to_norm: dict[str, str] = {}   # cas → first-seen norm_cmp (primary wins)

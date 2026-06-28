@@ -141,7 +141,21 @@ class MachonEnergyParser(BaseParser):
                                 if _p and _p[-1] in _hebrew:
                                     _p = _p[-1] + _p[:-1]
                                 _fixed.append(_p)
-                            row_sample_id = " - ".join(_fixed)
+                            # _fixed is e.g. ['ונ', '9.0 -20']
+                            # Parse last part as "depth -bh_number" → build "ונ-20 9.0"
+                            import re as _re
+                            if len(_fixed) >= 2:
+                                _last = _fixed[-1].strip()
+                                _bh_prefix = _fixed[0].strip()
+                                _m = _re.match(r'^(\d+\.?\d*)\s*-?\s*(\d+)$', _last)
+                                if _m:
+                                    _depth = _m.group(1)
+                                    _bh_num = _m.group(2)
+                                    row_sample_id = f"{_bh_prefix}-{_bh_num} {_depth}"
+                                else:
+                                    row_sample_id = " - ".join(_fixed)
+                            else:
+                                row_sample_id = " - ".join(_fixed)
                             if fn_base:
                                 row_sample_id = f"{row_sample_id} — {fn_base}"
                             for compound, col_idx in (("TPH", 3), ("DRO", 2), ("ORO", 1)):
