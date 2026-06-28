@@ -93,6 +93,16 @@ _SUMMARY_RE = re.compile(
     re.IGNORECASE,
 )
 
+# BTEX / VOC bare-ND line — no CAS prefix, format: "{loq} {unit} [X≤{thresh}] NOT DETECTED {compound}"
+# e.g. "0.02 mg/kg X≤ 0.28 NOT DETECTED Benzene"
+# e.g. "0.02 mg/kg NOT DETECTED MTBE"
+_BTEX_ND_RE = re.compile(
+    r"^\s*(?P<loq>[\d.]+)\s+(?P<unit>mg/(?:kg|L))"
+    r"(?:\s+X[≤≥<>]\s*[\d.]+)?"          # optional threshold
+    r"\s+NOT\s+DETECTED\s+(?P<compound>.+)$",
+    re.IGNORECASE,
+)
+
 # MTBE bare line — no CAS prefix, format: "{loq} {unit} {result} MTBE"
 # e.g. "0.025 mg/kg 1.470 MTBE"
 _MTBE_RE = re.compile(
@@ -341,7 +351,27 @@ def _extract_lines(file_obj: io.BytesIO, pdfplumber) -> list[str]:
     # "substance" appears on its own line after "mg/kg dry" lines due to PDF
     # word-wrap; skipping it is safe because the unit regex matches "mg/kg dry"
     # without the trailing word, and we normalize below.
-    return [s for line in raw if (s := line.strip())]
+    stripped = [s for line in raw if (s := line.strip())]
+
+    # Some PDFs split "NOT DETECTED" across two lines:
+    # e.g. line N:   "0.02 mg/kg X≤ 0.28 NOT Benzene"
+    #      line N+1: "DETECTED"
+    # The word order is RTL-visual: result token "NOT" appears before compound name,
+    # then "DETECTED" lands on the next line. We need to insert "DETECTED" right after
+    # "NOT" in the previous line.
+    joined: list[str] = []
+    for line in stripped:
+        if line.strip().upper() == "DETECTED" and joined:
+            # Insert DETECTED right after the last occurrence of "NOT" in previous line
+            prev = joined[-1]
+            idx = prev.upper().rfind(" NOT ")
+            if idx != -1:
+                joined[-1] = prev[:idx] + " NOT DETECTED" + prev[idx + 4:]
+            else:
+                joined[-1] = prev + " DETECTED"
+        else:
+            joined.append(line)
+    return joined
 
 
 def _parse_lines(lines: list[str]) -> list[dict]:
@@ -444,6 +474,26 @@ def _parse_lines(lines: list[str]) -> list[dict]:
                             "analysis_type": "SOIL_VOC",
                         })
                     continue
+
+            # ── BTEX/VOC bare NOT DETECTED line (no CAS prefix) ────────
+            # e.g. "0.02 mg/kg X≤ 0.28 NOT DETECTED Benzene"
+            m_btex_nd = _BTEX_ND_RE.match(line)
+            if m_btex_nd:
+                compound = m_btex_nd.group("compound").strip()
+                loq_v    = float(m_btex_nd.group("loq"))
+                unit     = m_btex_nd.group("unit").strip()
+                records.append({
+                    "sample_id":     sample_name,
+                    "compound":      compound,
+                    "cas":           "",
+                    "value":         loq_v,
+                    "flag":          "ND",
+                    "unit":          unit,
+                    "lod":           None,
+                    "loq":           loq_v,
+                    "analysis_type": "SOIL_VOC",
+                })
+                continue
 
             # ── Summary line (unit-first RTL layout, no CAS number) ────
             # e.g. "mg/kg 1086.840 Total BTEX"
