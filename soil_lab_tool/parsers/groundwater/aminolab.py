@@ -325,12 +325,12 @@ def _extract_sample_id(page) -> str:
     raw_lines = [l.strip() for l in text.splitlines() if l.strip()]
     lines     = [_fix_rtl(l) for l in raw_lines]
 
-    # h-N borehole format: e.g. "תאור הדוגמה: קרקע (5m (h-3"
-    for raw in raw_lines[:20]:
-        if "תאור הדוגמה" in raw or "תאור הדגימה" in raw:
-            m = re.search(r"h-\d+", raw, re.I)
+    # Aminolab soil format: "תאור הדוגמה: קרקע (5m (h-3"
+    for line in lines[:20]:
+        if re.search(r"תאור\s+הדוגמה|תאור\s+הדגימה", line, re.I):
+            m = re.search(r"\b(h[-_]?\d+)\b", line, re.I)
             if m:
-                return m.group(0)
+                return m.group(1).lower()
 
     for line in lines[:20]:
         if re.search(r"מספר\s+(דגימה|בור|תעודה|דגם|פיזומטר)|sample\s*(id|no|number)",
