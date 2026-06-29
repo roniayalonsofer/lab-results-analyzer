@@ -721,7 +721,95 @@ class AminolabGroundwaterParser(BaseParser):
         self._vp    = LabValueParser(default_nd_factor=1.0)
         self._debug = debug if debug is not None else bool(os.environ.get("AMINOLAB_DEBUG"))
 
+    def _parse_xlsx(self, file_obj: io.BytesIO) -> list[dict]:
+        """Parse Aminolab soil xlsx files.
+
+        Layout: header row contains "הבדיקה" (col 0), "יחידות מידה" (col 1),
+        then one column per sample with a header like "קרקע h-1 (4m)\\n14/12/2025".
+        Data rows: compound name (col 0), units (col 1), values (col 2+).
+        """
+        try:
+            import openpyxl
+        except ImportError as exc:
+            raise ImportError("openpyxl is required: pip install openpyxl") from exc
+
+        wb = openpyxl.load_workbook(file_obj, data_only=True)
+        records: list[dict] = []
+
+        for ws in wb.worksheets:
+            rows = list(ws.iter_rows(values_only=True))
+
+            # Find header row: contains "הבדיקה" or "יחידות מידה"
+            header_row_idx = None
+            for i, row in enumerate(rows):
+                if any(isinstance(c, str) and
+                       ("הבדיקה" in c or "יחידות מידה" in c)
+                       for c in (row or [])):
+                    header_row_idx = i
+                    break
+            if header_row_idx is None:
+                continue
+
+            header = rows[header_row_idx]
+
+            # Col 0 = compound name, col 1 = units, col 2+ = sample columns.
+            # Extract sample_id from header cells like "קרקע h-1 (4m)\n14/12/2025".
+            sample_cols: dict[int, str] = {}
+            for col_idx, cell in enumerate(header):
+                if col_idx < 2 or not isinstance(cell, str):
+                    continue
+                bh    = re.search(r"\b(h[-_]?\d+)\b", cell, re.I)
+                depth = re.search(r"\b(\d+(?:\.\d+)?)\s*m\b", cell, re.I)
+                if bh:
+                    sid = bh.group(1).lower()
+                    if depth:
+                        sid = f"{sid} {depth.group(1)}m"
+                    sample_cols[col_idx] = sid
+
+            if not sample_cols:
+                continue
+
+            if self._debug:
+                print(f"[AMINOLAB DEBUG] xlsx sheet={ws.title!r} "
+                      f"header_row={header_row_idx} "
+                      f"sample_cols={sample_cols}")
+
+            for row in rows[header_row_idx + 1:]:
+                if not row:
+                    continue
+                raw_name  = row[0] if len(row) > 0 else None
+                raw_units = row[1] if len(row) > 1 else None
+                if not raw_name or not isinstance(raw_name, str) or not raw_name.strip():
+                    continue
+
+                compound_name = _fix_rtl(raw_name.strip())
+                units_str     = str(raw_units).strip() if raw_units is not None else ""
+
+                for col_idx, sample_id in sample_cols.items():
+                    if col_idx >= len(row):
+                        continue
+                    cell_val = row[col_idx]
+                    val_str  = str(cell_val).strip() if cell_val is not None else ""
+                    rec = _make_record(
+                        compound_name, units_str, val_str, "", sample_id, self._vp)
+                    if rec:
+                        records.append(rec)
+
+        if self._debug:
+            print(f"\n[AMINOLAB DEBUG] xlsx total: {len(records)} records")
+            for r in records:
+                print(f"  {r['compound']:30s}  {r['value']}  {r['flag']}  "
+                      f"{r['unit']}  {r['analysis_type']}")
+
+        return records
+
     def parse(self, file_obj: io.BytesIO) -> list[dict]:
+        # xlsx: ZIP magic bytes PK\x03\x04
+        magic = file_obj.read(4)
+        file_obj.seek(0)
+        if magic == b'\x50\x4B\x03\x04':
+            return self._parse_xlsx(file_obj)
+
         try:
             import pdfplumber
         except ImportError as exc:
