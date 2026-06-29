@@ -428,6 +428,8 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
                 return "מכון האנרגיה"
             if _is_machon_haneft_excel(file_bytes):
                 return "מכון הנפט"
+            if _is_aminolab_xlsx(file_bytes):
+                return "aminolab"
             if _is_kte_soil_gas_excel(xl.sheet_names):
                 return "kte"
             if _is_xrf_excel(file_bytes):
