@@ -581,6 +581,9 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None, lab: st
         if _is_alchem_soil_gas_numeric(sheet_names, file_bytes):
             return "soil_gas"
 
+        if _is_aminolab_xlsx(file_bytes):
+            return "soil"
+
         if _is_alchem_excel(sheet_names):
             return "soil"
 
