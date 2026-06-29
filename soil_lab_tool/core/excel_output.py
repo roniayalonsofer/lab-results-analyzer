@@ -861,6 +861,12 @@ class LabReportExcel:
                 r.get("analysis_type") == "SOIL_TPH" for r in records
             ):
                 return True
+            # For sheets where ND is shown as LOQ (e.g. VOC/BTEX), ND is a valid result
+            if cfg.get("nd_shows_loq"):
+                return any(
+                    pivot.get(cmp, {}).get(sid) is not None
+                    for cmp in compounds
+                )
             return any(
                 pivot.get(cmp, {}).get(sid, (None, "ND", None))[1] != "ND"
                 for cmp in compounds
