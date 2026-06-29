@@ -174,6 +174,30 @@ def _is_aminolab_pdf(file_bytes: bytes) -> bool:
     return False
 
 
+def _is_aminolab_xlsx(file_bytes: bytes) -> bool:
+    """Return True if the xlsx content identifies this as an Aminolab report.
+
+    Scans the first 15 rows of every worksheet for "אמינולאב", "aminolab",
+    or "מס אמינולאב" (case-insensitive).
+    """
+    try:
+        import io as _io, openpyxl as _ox
+        wb = _ox.load_workbook(_io.BytesIO(file_bytes), read_only=True, data_only=True)
+        for ws in wb.worksheets:
+            for row in ws.iter_rows(max_row=15, values_only=True):
+                for cell in row:
+                    if not isinstance(cell, str):
+                        continue
+                    cl = cell.lower()
+                    if "אמינולאב" in cl or "aminolab" in cl or "מס אמינולאב" in cl:
+                        wb.close()
+                        return True
+        wb.close()
+    except Exception:
+        pass
+    return False
+
+
 def _is_alchem_multi_section_pdf(file_bytes: bytes) -> bool:
     """Return True if the PDF contains all three Alchem multi-section markers:
     EPA 6010 (metals), EPA 8015 (TPH), and EPA 8260 (VOC)."""
