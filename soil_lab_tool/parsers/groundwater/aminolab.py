@@ -712,10 +712,10 @@ def _parse_field_params_words(page, sample_id: str, vp: LabValueParser,
 # ── Parser class ──────────────────────────────────────────────────────────────
 
 class AminolabGroundwaterParser(BaseParser):
-    """Aminolab groundwater PDF parser — matches KTE/Bactochem record format."""
+    """Aminolab groundwater/soil parser — PDF and xlsx paths."""
 
     LAB_NAME       = "Aminolab"
-    ANALYSIS_TYPES = ["GW_VOC", "GW_FIELD_PARAMS"]
+    ANALYSIS_TYPES = ["GW_VOC", "GW_FIELD_PARAMS", "SOIL_NUTRIENTS", "SOIL_MICROBIOLOGY"]
 
     def __init__(self, debug: bool | None = None):
         self._vp    = LabValueParser(default_nd_factor=1.0)
