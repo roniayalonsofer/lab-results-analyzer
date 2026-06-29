@@ -782,7 +782,7 @@ class AminolabGroundwaterParser(BaseParser):
                 if not raw_name or not isinstance(raw_name, str) or not raw_name.strip():
                     continue
 
-                compound_name = _fix_rtl(raw_name.strip())
+                compound_name = raw_name.strip()   # xlsx is logical Unicode order — no RTL reversal needed
                 units_str     = str(raw_units).strip() if raw_units is not None else ""
 
                 for col_idx, sample_id in sample_cols.items():
