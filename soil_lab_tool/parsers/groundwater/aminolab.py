@@ -330,7 +330,12 @@ def _extract_sample_id(page) -> str:
         if re.search(r"תאור\s+הדוגמה|תאור\s+הדגימה", line, re.I):
             m = re.search(r"\b(h[-_]?\d+)\b", line, re.I)
             if m:
-                return m.group(1).lower()
+                bh = m
+                depth = re.search(r"\b(\d+(?:\.\d+)?)\s*m\b", line, re.I)
+                name = bh.group(1).lower()
+                if depth:
+                    name = f"{name} {depth.group(1)}m"
+                return name
 
     for line in lines[:20]:
         if re.search(r"מספר\s+(דגימה|בור|תעודה|דגם|פיזומטר)|sample\s*(id|no|number)",
