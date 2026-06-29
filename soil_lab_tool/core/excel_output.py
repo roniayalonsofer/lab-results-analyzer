@@ -999,6 +999,7 @@ class LabReportExcel:
             c.border    = THIN
 
         # Data rows
+        loq_map: dict[str, float | None] = {}
         row_num = hdr_row + 1
         for param in params:
             row_data = [param, unit_map.get(param, "")]
