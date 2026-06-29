@@ -102,6 +102,21 @@ _COMPOUND_MAP: dict[str, tuple[str, str, str]] = {
     "קוטר קידוח":                              ("", "GW_FIELD_PARAMS", "קוטר קידוח"),
     "נפח שאיבה בפועל":                         ("", "GW_FIELD_PARAMS", "נפח שאיבה בפועל"),
     "עומק המים מפני הדיגום בקידוח":            ("", "GW_FIELD_PARAMS", "עומק המים מפני הדיגום בקידוח"),
+    # Soil nutrients — SOIL_NUTRIENTS
+    "חנקן קלדל":              ("",            "SOIL_NUTRIENTS", "Kjeldahl Nitrogen"),
+    "חנקן ניטראט":            ("14797-55-8",  "SOIL_NUTRIENTS", "Nitrate-Nitrogen"),
+    "חנקן ניטריט":            ("14797-65-0",  "SOIL_NUTRIENTS", "Nitrite-Nitrogen"),
+    "פוספאט":                 ("14265-44-2",  "SOIL_NUTRIENTS", "Phosphate"),
+    "חומר אורגני":            ("",            "SOIL_NUTRIENTS", "Organic Matter"),
+    "חנקן כללי - חישובי":     ("",            "SOIL_NUTRIENTS", "Total Nitrogen (calc.)"),
+    "חנקן כללי":              ("",            "SOIL_NUTRIENTS", "Total Nitrogen"),
+    "toc":                    ("",            "SOIL_NUTRIENTS", "TOC"),
+    "זרחן":                   ("7723-14-0",   "SOIL_NUTRIENTS", "Total Phosphorus"),
+    # Microbiology — SOIL_MICROBIOLOGY
+    "ספירה כללית":            ("",            "SOIL_MICROBIOLOGY", "Total Count"),
+    "קוליפורם":               ("",            "SOIL_MICROBIOLOGY", "Coliform"),
+    "e. coli":                ("",            "SOIL_MICROBIOLOGY", "E. coli"),
+    "e.coli":                 ("",            "SOIL_MICROBIOLOGY", "E. coli"),
 }
 
 _HEBREW_RE = re.compile(r"[א-ת]")
