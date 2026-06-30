@@ -300,6 +300,23 @@ def _is_bactochem_csv(file_bytes: bytes) -> bool:
     return False
 
 
+def _is_bactochem_xlsx(file_bytes: bytes) -> bool:
+    """Return True if an .xlsx looks like a Bactochem raw tabular export
+    (headers: מספר תעודה | מספר דוגמה | אנליזה | תיאור אנליזה | רכיב | תוצאה | יחידות מידה)."""
+    try:
+        import io as _io
+        import pandas as _pd
+        xl = _pd.ExcelFile(_io.BytesIO(file_bytes))
+        for sheet in xl.sheet_names[:2]:
+            df = xl.parse(sheet, header=None, nrows=3, dtype=str)
+            flat = " ".join(str(v) for v in df.values.flatten() if v and str(v) != "nan")
+            if "מספר תעודה" in flat and "מספר דוגמה" in flat and "רכיב" in flat:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _is_xrf_tabular(file_bytes: bytes, is_csv: bool = False) -> bool:
     """Return True if the file looks like a wide-format XRF metals table."""
     try:
@@ -443,6 +460,8 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
                 return "מכון הנפט"
             if _is_aminolab_xlsx(file_bytes):
                 return "aminolab"
+            if _is_bactochem_xlsx(file_bytes):
+                return "בקטוכם"
             if _is_kte_soil_gas_excel(xl.sheet_names):
                 return "kte"
             if _is_xrf_excel(file_bytes):
@@ -596,6 +615,9 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None, lab: st
 
         if _is_aminolab_xlsx(file_bytes):
             return "soil"
+
+        if _is_bactochem_xlsx(file_bytes):
+            return "groundwater"
 
         if _is_alchem_excel(sheet_names):
             return "soil"

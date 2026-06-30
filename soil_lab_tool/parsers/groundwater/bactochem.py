@@ -436,8 +436,16 @@ class BactochemGroundwaterParser(BaseParser):
     COL_COMPOUND = "רכיב"
     COL_RESULT   = "תוצאה"
     COL_LOCATION = "תיאור דוגמה"
+    COL_SAMPLE_NO = "מספר דוגמה"   # raw export fallback when COL_LOCATION is absent
     COL_DATE     = "תאריך דיגום"
     COL_UNIT     = "יחידות"   # units column (may be absent in some file versions)
+
+    # Standard Bactochem BTEX/MTBE LOQ (mg/L) — consistent across reports;
+    # used as a fallback when the raw tabular export has no LOQ column.
+    _DEFAULT_BTEX_LOQ = {
+        "Benzene": 0.001, "Toluene": 0.001, "Ethyl Benzene": 0.001,
+        "Xylene": 0.001, "MTBE": 0.001,
+    }
 
     def __init__(self, debug: bool | None = None):
         self._vp    = LabValueParser()
@@ -495,6 +503,11 @@ class BactochemGroundwaterParser(BaseParser):
             compound  = str(row.get(self.COL_COMPOUND, "")).strip()
             raw_val   = str(row.get(self.COL_RESULT,   "")).strip()
             loc       = str(row.get(self.COL_LOCATION, "")).strip()
+            if not loc or loc.lower() == "nan":
+                # Raw tabular export has no location column — fall back to
+                # the lab sample number (will be remapped to a borehole name
+                # downstream if a matching PDF/description is available).
+                loc = str(row.get(self.COL_SAMPLE_NO, "")).strip()
             date_val  = str(row.get(self.COL_DATE,     "")).strip()
             file_unit = str(row.get(self.COL_UNIT,     "")).strip()
 
@@ -539,9 +552,20 @@ class BactochemGroundwaterParser(BaseParser):
 
             sample_id = (loc if loc and loc.lower() not in ("nan", "")
                          else "Sample")
-            date_str = self._short_date(date_val)
-            if date_str:
-                sample_id = f"{sample_id} ({date_str})"
+            # Clean up verbose description text into a plain borehole name,
+            # e.g. 'דיגום מי תהום-דלק פרבר- פפ 3' → 'פפ-3'
+            # (no date suffix — keeps sample_id consistent with the PDF path
+            # so SPLIT/cross-lab matching by borehole name works correctly)
+            bh_m = re.search(r'([א-ת]{1,4})\s+(\d+)\s*$', sample_id)
+            if bh_m:
+                sample_id = f"{bh_m.group(1)}-{bh_m.group(2)}"
+
+            # Default LOQ: the raw tabular export has no LOQ column.
+            # Use the known-standard Bactochem BTEX/MTBE LOQ (0.001 mg/L)
+            # so cross-lab LOQ comparison still works.
+            loq = self._DEFAULT_BTEX_LOQ.get(compound) if atype == "GW_VOC" else None
+            if flag == "ND" and loq is not None:
+                value = loq
 
             records.append({
                 "lab":           self.LAB_NAME,
@@ -552,7 +576,7 @@ class BactochemGroundwaterParser(BaseParser):
                 "flag":          flag,
                 "unit":          norm_unit,
                 "lod":           None,
-                "loq":           None,
+                "loq":           loq,
                 "analysis_type": atype,
             })
 
