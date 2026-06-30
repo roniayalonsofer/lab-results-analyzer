@@ -599,7 +599,9 @@ class LabReportExcel:
             if atype == "LOWFLOW":
                 self._write_lowflow_sheet(sheet, recs, cfg)
             elif atype == "GW_FIELD_PARAMS":
-                self._write_field_params_sheet(sheet, recs, cfg)
+                sec_fp = [r for r in self.secondary_records
+                          if r.get("analysis_type") == "GW_FIELD_PARAMS"]
+                self._write_field_params_sheet(sheet, recs, cfg, secondary_records=sec_fp)
             else:
                 if not self._write_data_sheet(sheet, recs, cfg, thresh_keys):
                     wb.remove(sheet)
@@ -1055,24 +1057,49 @@ class LabReportExcel:
 
         self._auto_width(ws, total_cols, hdr_row=4)
 
-    def _write_field_params_sheet(self, ws, records, cfg):
+    def _write_field_params_sheet(self, ws, records, cfg, secondary_records=None):
         """פרמטרי שדה — field parameters (pH, EC, redox, etc.) per sampling location.
 
-        Pivoted table:  פרמטר | יחידות | <sample 1> | <sample 2> | ...
-        One row per parameter, one column per distinct sample_id — so multiple
-        boreholes/sampling events are all shown (not just the first).
+        Pivoted table:  פרמטר | יחידות | <sample 1> | <sample 1 SPLIT> | <sample 2> | ...
+        One row per parameter, one column per distinct sample_id (plus a SPLIT
+        column when the secondary lab reports field params for the same
+        borehole). A sampling-date row is shown above the parameter rows
+        when dates are available.
         """
-        # Collect distinct sample_ids in first-seen order
+        secondary_records = secondary_records or []
+
+        # Collect distinct primary sample_ids in first-seen order
         sample_ids: list[str] = []
         seen_sids: set[str] = set()
+        sample_dates: dict[str, str] = {}
         for r in records:
             sid = r.get("sample_id", "") or ""
             if sid and sid not in seen_sids:
                 seen_sids.add(sid)
                 sample_ids.append(sid)
+            if sid and not sample_dates.get(sid):
+                d = r.get("sampling_date") or r.get("date") or ""
+                if d:
+                    sample_dates[sid] = str(d)
 
-        # Single-sample case: keep the original simple 3-column layout
-        if len(sample_ids) <= 1:
+        # Build secondary lookup keyed by normalized borehole name
+        sec_by_borehole: dict[str, list[dict]] = defaultdict(list)
+        sec_dates: dict[str, str] = {}
+        for r in secondary_records:
+            sid = r.get("sample_id", "") or ""
+            if not sid:
+                continue
+            key = _norm_borehole(sid)
+            sec_by_borehole[key].append(r)
+            if not sec_dates.get(key):
+                d = r.get("sampling_date") or r.get("date") or ""
+                if d:
+                    sec_dates[key] = str(d)
+
+        has_secondary = bool(secondary_records)
+
+        # Single-sample, no-secondary case: keep the original simple 3-column layout
+        if len(sample_ids) <= 1 and not has_secondary:
             total_cols = 3
             header_written = self._write_header_row(ws, 1, total_cols)
             hdr_row = 2 if header_written else 1
@@ -1111,46 +1138,158 @@ class LabReportExcel:
             ws.row_dimensions[hdr_row].height = 22
             return
 
-        # ── Multi-sample case: pivot — one column per sample_id ──────────────
-        total_cols = 2 + len(sample_ids)
+        # ── Multi-sample (and/or dual-lab) case: pivot with optional SPLIT cols ──
+        # col_map: sample_id → (primary_col, split_col_or_None)
+        col_map: dict[str, tuple[int, int | None]] = {}
+        col_labels: list[tuple[int, str]] = []   # (col_index, header_label) for header row
+        cur_col = 3
+        for sid in sample_ids:
+            key = _norm_borehole(sid)
+            if key in sec_by_borehole:
+                col_map[sid] = (cur_col, cur_col + 1)
+                col_labels.append((cur_col, sid))
+                col_labels.append((cur_col + 1, "SPLIT"))
+                cur_col += 2
+            else:
+                col_map[sid] = (cur_col, None)
+                col_labels.append((cur_col, sid))
+                cur_col += 1
+
+        # Secondary-only boreholes (no matching primary sample) get their own column
+        sec_only_cols: dict[str, int] = {}
+        primary_keys = {_norm_borehole(s) for s in sample_ids}
+        for key in sec_by_borehole:
+            if key not in primary_keys:
+                sec_only_cols[key] = cur_col
+                col_labels.append((cur_col, f"{key} SPLIT"))
+                cur_col += 1
+
+        total_cols = cur_col - 1
         header_written = self._write_header_row(ws, 1, total_cols)
         hdr_row = 2 if header_written else 1
 
-        headers = ["פרמטר", "יחידות"] + sample_ids
-        for ci, h in enumerate(headers, 1):
-            c = ws.cell(row=hdr_row, column=ci, value=h)
+        # Header row: פרמטר | יחידות | <sample columns / SPLIT>
+        c = ws.cell(row=hdr_row, column=1, value="פרמטר")
+        c.font = Font(**FHE, bold=True); c.alignment = WRAP_C; c.border = THIN
+        c = ws.cell(row=hdr_row, column=2, value="יחידות")
+        c.font = Font(**FHE, bold=True); c.alignment = WRAP_C; c.border = THIN
+        for ci, label in col_labels:
+            c = ws.cell(row=hdr_row, column=ci, value=label)
             c.font      = Font(**FHE, bold=True)
             c.alignment = WRAP_C
             c.border    = THIN
 
-        # Build param → unit, param → {sample_id: value} in first-seen order
+        date_row_written = any(sample_dates.values()) or any(sec_dates.values())
+        if date_row_written:
+            date_row = hdr_row + 1
+            c = ws.cell(row=date_row, column=1, value="תאריך דיגום")
+            c.font = Font(**FHE, italic=True); c.alignment = WRAP_C; c.border = THIN
+            for sid in sample_ids:
+                pcol, scol = col_map[sid]
+                c = ws.cell(row=date_row, column=pcol, value=sample_dates.get(sid, ""))
+                c.font = Font(**FHE, italic=True); c.alignment = CENTER; c.border = THIN
+                if scol is not None:
+                    key = _norm_borehole(sid)
+                    c = ws.cell(row=date_row, column=scol, value=sec_dates.get(key, ""))
+                    c.font = Font(**FHE, italic=True); c.alignment = CENTER; c.border = THIN
+            for key, ci in sec_only_cols.items():
+                c = ws.cell(row=date_row, column=ci, value=sec_dates.get(key, ""))
+                c.font = Font(**FHE, italic=True); c.alignment = CENTER; c.border = THIN
+            data_start_row = date_row + 1
+        else:
+            data_start_row = hdr_row + 1
+
+        # Build param → unit, param → {col_index: value}
         param_order: list[str] = []
         param_unit: dict[str, str] = {}
-        param_vals: dict[str, dict[str, object]] = {}
+        param_vals: dict[str, dict[int, object]] = {}
+
+        # Field-parameter name synonyms: map lab-specific names to a canonical
+        # Hebrew label so Bactochem and ALS rows for the same physical
+        # parameter merge into one row instead of duplicating.
+        _FP_CANON: dict[str, str] = {
+            # pH
+            "pH (after stabilization)":            "pH",
+            "pH Value":                             "pH",
+            "הגבה pH":                               "pH",
+            # Electrical conductivity
+            "Elctr.conductivity (after stabilization)": "מוליכות חשמלית",
+            "Electrical Conductivity @ 25°C":           "מוליכות חשמלית",
+            "מוליכות":                                   "מוליכות חשמלית",
+            # Redox
+            "Redox (after stabilization)":          "רדוקס",
+            "Redox Potential":                       "רדוקס",
+            "רדוקס":                                  "רדוקס",
+            # Dissolved oxygen
+            "Dissolved O2 (after stabilization)":   "חמצן מומס",
+            "Dissolved Oxygen":                      "חמצן מומס",
+            "חמצן מומס DO":                           "חמצן מומס",
+            # Temperature
+            "Temp (after stabilization)":           "טמפרטורה",
+            "טמפרטורה":                                "טמפרטורה",
+            # Turbidity
+            "Turbidity (after stabilization)":      "עכירות",
+            "עכירות":                                  "עכירות",
+            # Sampling depth / water level
+            "Sampling depth":                        "עומק דיגום",
+            "עומק דיגום LOWFLOW":                      "עומק דיגום",
+            "Depth of upper level":                  "מפלס עליון",
+            "מפלס עליון":                              "מפלס עליון",
+            "Total depth of drilling":               "עומק כללי קידוח",
+            "עומק כללי קידוח":                          "עומק כללי קידוח",
+        }
+
+        def _canon_param(name: str) -> str:
+            return _FP_CANON.get(name.strip(), name.strip())
+
+        def _add_param_value(param: str, unit: str, ci: int, v):
+            param = _canon_param(param)
+            if param not in param_vals:
+                param_vals[param] = {}
+                param_order.append(param)
+                param_unit[param] = unit
+            display = "-" if v is None else (round(v, 3) if isinstance(v, float) else v)
+            param_vals[param].setdefault(ci, display)
+
         for r in records:
             param = (r.get("compound") or "").strip()
             if not param:
                 continue
             sid = r.get("sample_id", "") or ""
-            if param not in param_vals:
-                param_vals[param] = {}
-                param_order.append(param)
-                param_unit[param] = r.get("unit", "")
-            v = r.get("value")
-            display = "" if v is None else (round(v, 3) if isinstance(v, float) else v)
-            # First value wins per (param, sample_id) — avoids overwrite by duplicate rows
-            param_vals[param].setdefault(sid, display)
+            pcol, _ = col_map.get(sid, (None, None))
+            if pcol is not None:
+                _add_param_value(param, r.get("unit", ""), pcol, r.get("value"))
 
-        row_num = hdr_row + 1
+        for sid in sample_ids:
+            pcol, scol = col_map[sid]
+            if scol is None:
+                continue
+            key = _norm_borehole(sid)
+            for r in sec_by_borehole.get(key, []):
+                param = (r.get("compound") or "").strip()
+                if not param:
+                    continue
+                _add_param_value(param, r.get("unit", ""), scol, r.get("value"))
+
+        for key, ci in sec_only_cols.items():
+            for r in sec_by_borehole.get(key, []):
+                param = (r.get("compound") or "").strip()
+                if not param:
+                    continue
+                _add_param_value(param, r.get("unit", ""), ci, r.get("value"))
+
+        row_num = data_start_row
         for param in param_order:
-            row_vals = [param, param_unit.get(param, "")]
-            for sid in sample_ids:
-                row_vals.append(param_vals[param].get(sid, "-"))
-            for ci, val in enumerate(row_vals, 1):
+            c = ws.cell(row=row_num, column=1, value=param)
+            c.font = _font(param); c.border = THIN; c.alignment = WRAP_L
+            c = ws.cell(row=row_num, column=2, value=param_unit.get(param, ""))
+            c.font = _font(param_unit.get(param, "")); c.border = THIN; c.alignment = CENTER
+            for ci in range(3, total_cols + 1):
+                val = param_vals[param].get(ci, "-")
                 c = ws.cell(row=row_num, column=ci, value=val)
                 c.font      = _font(val)
                 c.border    = THIN
-                c.alignment = WRAP_L if ci == 1 else CENTER
+                c.alignment = CENTER
             row_num += 1
 
         note = ws.cell(row=row_num + 1, column=1,
