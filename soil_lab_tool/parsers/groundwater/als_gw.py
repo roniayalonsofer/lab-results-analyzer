@@ -150,9 +150,13 @@ class ALSGroundwaterParser(BaseParser):
             if line.startswith("Sub-Matrix:") and "Client sample ID" in line:
                 # Extract sample IDs after "Client sample ID"
                 after = line.split("Client sample ID", 1)[1].strip()
-                sample_ids = [s for s in after.split() if s and s != "----"]
-                # Sample IDs may include things like "PP-1" or "PP-1" + "(EB)" split by space
-                sample_ids = self._merge_eb_tokens(sample_ids)
+                raw_tokens = after.split()
+                # Merge "(EB)" style suffix tokens into the preceding sample ID
+                # BEFORE filtering "----", so column count stays correct.
+                merged_tokens = self._merge_eb_tokens(raw_tokens)
+                # Keep "----" as an explicit placeholder so n_samples matches
+                # the actual number of result columns in the data rows.
+                sample_ids = merged_tokens
 
                 sampling_dates: list[str] = []
                 hdr_idx = None
@@ -168,7 +172,7 @@ class ALSGroundwaterParser(BaseParser):
                         break
                     j += 1
 
-                if hdr_idx is None or not sample_ids:
+                if hdr_idx is None or not any(s != "----" for s in sample_ids):
                     i += 1
                     continue
 
@@ -199,7 +203,7 @@ class ALSGroundwaterParser(BaseParser):
                     atype = "GW_FIELD_PARAMS" if compound.upper() in _FIELD_PARAM_NAMES else "GW_VOC"
 
                     for si, sid in enumerate(sample_ids):
-                        if si >= len(results):
+                        if si >= len(results) or sid == "----":
                             continue
                         raw_val = results[si]
                         val, flag = _parse_value(raw_val, lor_val)
