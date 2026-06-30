@@ -189,9 +189,36 @@ _WELL_LETTER_ORDER: dict[str, int] = {'ק': 0, 'נ': 1}
 
 def _norm_borehole(s: str) -> str:
     """ק12 → ק-12, נ1 → נ-1 (add '-' after single Hebrew letter prefix).
-    Also strips trailing dashes that appear in some lab report formats (e.g. 'קק-3-')."""
+    Also strips trailing dashes that appear in some lab report formats (e.g. 'קק-3-').
+    Cross-lab transliteration: Hebrew borehole prefixes ↔ Latin equivalents
+    (e.g. 'פפ-1' [Bactochem] ↔ 'PP-1' [ALS])."""
     normalized = _WELL_NORM_RE.sub(r'\1-\2', s.strip())
-    return normalized.rstrip('-').strip()
+    normalized = normalized.rstrip('-').strip()
+    return _translit_borehole_prefix(normalized)
+
+
+# Hebrew ↔ Latin borehole-prefix equivalence map for cross-lab matching.
+_BOREHOLE_PREFIX_EQUIV: dict[str, str] = {
+    "פפ": "PP", "PP": "PP",
+    "מת": "MT", "MT": "MT", "MW": "MT",
+    "ק": "K",   "K": "K",
+    "נ": "N",   "N": "N",
+    "ד": "D",   "D": "D",
+    "בה": "BH", "BH": "BH",
+}
+
+
+def _translit_borehole_prefix(s: str) -> str:
+    """Replace a known Hebrew/Latin borehole prefix with its canonical form,
+    so 'פפ-1' and 'PP-1' normalize to the same key."""
+    m = re.match(r'^([A-Za-z\u05d0-\u05ea]{1,3})-(.+)$', s)
+    if not m:
+        return s
+    prefix, rest = m.group(1), m.group(2)
+    canon = _BOREHOLE_PREFIX_EQUIV.get(prefix.upper(), _BOREHOLE_PREFIX_EQUIV.get(prefix))
+    if canon:
+        return f"{canon}-{rest}"
+    return s
 
 
 def _pid_key(borehole: str) -> str:

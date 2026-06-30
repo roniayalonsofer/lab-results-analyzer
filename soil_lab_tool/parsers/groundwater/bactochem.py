@@ -62,6 +62,52 @@ _BTEX_NAME_RE = re.compile(
 # Logical: "מספר הדוגמה: 1984651"  →  visual: "1984651 :המגודה רפסמ …"
 _BC_SAMPLE_HDR_RE = re.compile(r"(\d{5,})\s+:המגודה רפסמ")
 
+
+def _bc_build_sample_borehole_map(full_text: str) -> dict[str, str]:
+    """
+    Build {sample_number: borehole_name} from Bactochem PDF full text.
+
+    pdfplumber renders Hebrew RTL text reversed and often merges the
+    'מספר הדוגמה' (sample number) and 'תיאור הדוגמה' (description) onto a
+    single line, e.g.:
+      '1984686 :המגודה רפסמ 3 פפ -רברפ קלד-םוהת ימ םוגיד :המגודה רואית'
+    which reversed reads: 'תיאור הדוגמה: דיגום מי תהום-דלק פרבר- פפ 3 מספר הדוגמה: 1984686'
+    i.e. borehole prefix + index appear right before 'מספר הדוגמה' reversed ('המגודה רפסמ').
+    """
+    mapping: dict[str, str] = {}
+    lines = full_text.split("\n")
+
+    # Combined reversed-line pattern: <sample_num> :המגודה רפסמ <index> <prefix> -...
+    combined_re = re.compile(r'(\d+)\s+:המגודה רפסמ\s+(\d+)\s+([א-ת]{1,4})\s')
+
+    # Logical (non-reversed) pattern fallback:
+    # 'תיאור הדוגמה:3  פפ-...' ... 'מספר הדוגמה: 1984686'
+    logical_desc_re = re.compile(r'תיאור הדוגמה\s*:?\s*(\d+)\s+([א-ת]{1,4})-')
+    logical_num_re  = re.compile(r'מספר הדוגמה\s*[:\s]+(\d+)')
+
+    for line in lines:
+        s = line.strip()
+        if not s:
+            continue
+        m = combined_re.search(s)
+        if m:
+            sample_num, idx, prefix = m.groups()
+            mapping[sample_num] = f"{prefix}-{idx}"
+
+    if not mapping:
+        for i, line in enumerate(lines):
+            s = line.strip()
+            dm = logical_desc_re.search(s)
+            if dm:
+                idx, prefix = dm.groups()
+                bh = f"{prefix}-{idx}"
+                for j in range(i, min(i + 4, len(lines))):
+                    nm = logical_num_re.search(lines[j])
+                    if nm:
+                        mapping[nm.group(1).strip()] = bh
+                        break
+    return mapping
+
 # Full CAS-line pattern (mg/L and ng/L) — matches lines like:
 #   CAS #: 71-43-2  0.001  mg/L  Not Detected  Benzene
 #   CAS #: 1634-04-4  0.001  mg/L  3.200  MTBE
@@ -633,6 +679,17 @@ class BactochemGroundwaterParser(BaseParser):
             for atype, cnt in Counter(r["analysis_type"] for r in records).most_common():
                 print(f"[BC DEBUG]   {atype}: {cnt}")
 
+        # ── Remap sample_id (lab sample number) → borehole name when possible ──
+        bh_map = _bc_build_sample_borehole_map(full_text)
+        if bh_map:
+            for r in records:
+                sid = str(r.get("sample_id", ""))
+                # sample_id may carry a "(date)" suffix from field-param rows
+                base_sid = sid.split(" (")[0].strip()
+                if base_sid in bh_map:
+                    suffix = sid[len(base_sid):]
+                    r["sample_id"] = bh_map[base_sid] + suffix
+
         return records
 
     def _extract_btex(self, page, sample_id: str) -> list[dict]:
@@ -658,6 +715,7 @@ class BactochemGroundwaterParser(BaseParser):
 
             cas        = m.group("cas").strip()
             result_raw = m.group("result").strip()
+            loq_raw    = m.group("loq") or ""
             name_tail  = (m.group("compound") or "").strip()
 
             compound = _CAS_TO_NAME.get(cas)
@@ -669,7 +727,14 @@ class BactochemGroundwaterParser(BaseParser):
                     print(f"  [BTEX] unrecognised CAS {cas!r}: {line!r}")
                 continue
 
+            try:
+                loq: float | None = float(loq_raw) if loq_raw else None
+            except ValueError:
+                loq = None
+
             value, flag = self._vp.parse(result_raw)
+            if flag == "ND" and loq is not None:
+                value = loq
 
             if self._debug:
                 print(f"  [BTEX] sample={current_sample!r}  compound={compound!r}  "
@@ -684,7 +749,7 @@ class BactochemGroundwaterParser(BaseParser):
                 "flag":          flag,
                 "unit":          "mg/L",
                 "lod":           None,
-                "loq":           None,
+                "loq":           loq,
                 "analysis_type": "GW_VOC",
             })
 

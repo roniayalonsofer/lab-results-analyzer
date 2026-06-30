@@ -930,12 +930,30 @@ if page == "soil":
         st.session_state["pid_map"] = {}
 
     secondary_lab_file = st.file_uploader(
-        "🧪 קובץ מעבדה משנית / אימות (.xlsx) — אופציונלי",
-        type=["xlsx"],
+        "🧪 קובץ מעבדה משנית / אימות (.xlsx, .xls, .pdf) — אופציונלי",
+        type=["xlsx", "xls", "pdf"],
         key="secondary_lab_upload",
-        help="תוצאות מעבדת אימות (QC/split samples). ישולבו בדוח עם סימון # ליד הנתונים.",
+        help="תוצאות מעבדת אימות (QC/split samples). ישולבו בדוח עם סימון SPLIT ליד הנתונים.",
     )
     st.session_state["secondary_lab_file"] = secondary_lab_file
+
+    if secondary_lab_file is not None:
+        try:
+            _sec_peek = secondary_lab_file.getvalue()
+            _sec_det_lab = auto_detect_lab(secondary_lab_file.name, _sec_peek) or "?"
+            _sec_det_cat = auto_detect_category(secondary_lab_file.name, _sec_peek, _sec_det_lab)
+            _sec_cat_clean = (_sec_det_cat or "").split(" ", 1)[-1] if _sec_det_cat and " " in _sec_det_cat else (_sec_det_cat or "")
+            st.markdown(f"""
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;
+                    padding:0.9rem 1rem;margin-top:0.5rem;text-align:center;">
+          <div style="font-size:0.65rem;color:#94a3b8;font-weight:700;letter-spacing:0.8px;
+                      text-transform:uppercase;margin-bottom:4px;">מעבדה משנית</div>
+          <div style="font-size:1.2rem;font-weight:800;color:#1e3a4f;">{_sec_det_lab}</div>
+          <div style="font-size:0.7rem;color:#64748b;margin-top:4px;">{_sec_cat_clean}</div>
+        </div>
+            """, unsafe_allow_html=True)
+        except Exception:
+            pass
 
     st.markdown('</div>', unsafe_allow_html=True)
 

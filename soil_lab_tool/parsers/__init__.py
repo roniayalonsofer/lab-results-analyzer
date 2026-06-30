@@ -22,6 +22,7 @@ from parsers.soil.xrf           import XRFSoilParser
 from parsers.groundwater.kte        import KTEGroundwaterParser
 from parsers.groundwater.bactochem  import BactochemGroundwaterParser
 from parsers.groundwater.aminolab   import AminolabGroundwaterParser
+from parsers.groundwater.als_gw     import ALSGroundwaterParser
 from parsers.pfas.kte               import KTEPFASParser
 from parsers.pfas.rj_lee            import RJLeePFASParser
 
@@ -50,7 +51,7 @@ _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
     ("bactochem",     "soil"):        BactochemSoilParser,
     ("als",           "soil"):        ALSSoilParser,
     ("als",           "soil_pdf"):   ALSSoilPDFParser,
-    ("als",           "groundwater"): ALSSoilParser,
+    ("als",           "groundwater"): ALSGroundwaterParser,
     ("als",           "grain_size"):  ALSGrainSizeParser,
     ("aminolab",      "groundwater"): AminolabGroundwaterParser,
     ("aminolab",      "soil"):        AminolabGroundwaterParser,
@@ -245,7 +246,7 @@ def _is_alchem_tph_pdf(file_bytes: bytes) -> bool:
 
 
 def _xlsx_sheet_names(file_bytes: bytes) -> list[str]:
-    """Return sheet names from Excel bytes. Tries pandas first, zipfile XML fallback."""
+    """Return sheet names from Excel bytes. Tries pandas first, zipfile XML fallback, then SpreadsheetML XML."""
     import io as _io
     try:
         import pandas as _pd
@@ -258,6 +259,18 @@ def _xlsx_sheet_names(file_bytes: bytes) -> list[str]:
             if "xl/workbook.xml" in zf.namelist():
                 wb = zf.read("xl/workbook.xml").decode("utf-8", errors="ignore")
                 return _re.findall(r'<sheet\b[^>]*\bname="([^"]*)"', wb)
+    except Exception:
+        pass
+    # SpreadsheetML XML (.xls saved as Excel 2003 XML, e.g. ALS exports)
+    try:
+        _head = file_bytes[:512].lstrip()
+        if _head.startswith(b"<?xml") and b"urn:schemas-microsoft-com:office:spreadsheet" in file_bytes[:4096]:
+            import xml.etree.ElementTree as _et
+            root = _et.fromstring(file_bytes)
+            ns_uri = root.tag[1:root.tag.index("}")] if root.tag.startswith("{") else \
+                     "urn:schemas-microsoft-com:office:spreadsheet"
+            ns = {"ss": ns_uri}
+            return [ws.get(f"{{{ns_uri}}}Name", "") for ws in root.findall(".//ss:Worksheet", ns)]
     except Exception:
         pass
     return []
