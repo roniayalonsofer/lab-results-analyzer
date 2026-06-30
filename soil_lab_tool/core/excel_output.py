@@ -1056,62 +1056,111 @@ class LabReportExcel:
         self._auto_width(ws, total_cols, hdr_row=4)
 
     def _write_field_params_sheet(self, ws, records, cfg):
-        """פרמטרי שדה — Aminolab field parameters.
+        """פרמטרי שדה — field parameters (pH, EC, redox, etc.) per sampling location.
 
-        Simple 3-column table:  פרמטר | יחידות | תוצאה
-        No threshold comparison; one row per parameter; no sample pivoting
-        (Aminolab reports are single-sample, so value goes straight into תוצאה).
-        Parameters are shown in PDF extraction order (first occurrence wins).
+        Pivoted table:  פרמטר | יחידות | <sample 1> | <sample 2> | ...
+        One row per parameter, one column per distinct sample_id — so multiple
+        boreholes/sampling events are all shown (not just the first).
         """
-        total_cols = 3
+        # Collect distinct sample_ids in first-seen order
+        sample_ids: list[str] = []
+        seen_sids: set[str] = set()
+        for r in records:
+            sid = r.get("sample_id", "") or ""
+            if sid and sid not in seen_sids:
+                seen_sids.add(sid)
+                sample_ids.append(sid)
 
-        # Row 1: merged project/date/client header (skipped when project+client both empty)
+        # Single-sample case: keep the original simple 3-column layout
+        if len(sample_ids) <= 1:
+            total_cols = 3
+            header_written = self._write_header_row(ws, 1, total_cols)
+            hdr_row = 2 if header_written else 1
+            for ci, h in enumerate(["פרמטר", "יחידות", "תוצאה"], 1):
+                c = ws.cell(row=hdr_row, column=ci, value=h)
+                c.font      = Font(**FHE, bold=True)
+                c.alignment = WRAP_C
+                c.border    = THIN
+
+            seen: set[str] = set()
+            row_num = hdr_row + 1
+            for r in records:
+                param = r.get("compound", "").strip()
+                if not param or param in seen:
+                    continue
+                seen.add(param)
+                unit = r.get("unit", "")
+                v    = r.get("value")
+                display = "" if v is None else (round(v, 3) if isinstance(v, float) else v)
+                row_vals = [param, unit, display]
+                for ci, val in enumerate(row_vals, 1):
+                    c = ws.cell(row=row_num, column=ci, value=val)
+                    c.font      = _font(val)
+                    c.border    = THIN
+                    c.alignment = WRAP_L if ci == 1 else CENTER
+                row_num += 1
+
+            note = ws.cell(row=row_num + 1, column=1,
+                           value="* ממצאי שדה בלבד, ללא השוואה לערכי סף")
+            note.font = Font(**FHE, italic=True, color="808080")
+            ws.column_dimensions["A"].width = 42
+            ws.column_dimensions["B"].width = 12
+            ws.column_dimensions["C"].width = 12
+            if header_written:
+                ws.row_dimensions[1].height = 20
+            ws.row_dimensions[hdr_row].height = 22
+            return
+
+        # ── Multi-sample case: pivot — one column per sample_id ──────────────
+        total_cols = 2 + len(sample_ids)
         header_written = self._write_header_row(ws, 1, total_cols)
         hdr_row = 2 if header_written else 1
-        for ci, h in enumerate(["פרמטר", "יחידות", "תוצאה"], 1):
+
+        headers = ["פרמטר", "יחידות"] + sample_ids
+        for ci, h in enumerate(headers, 1):
             c = ws.cell(row=hdr_row, column=ci, value=h)
             c.font      = Font(**FHE, bold=True)
             c.alignment = WRAP_C
             c.border    = THIN
 
-        # Data rows — deduplicate by compound name, preserve PDF order
-        seen: set[str] = set()
-        row_num = hdr_row + 1
+        # Build param → unit, param → {sample_id: value} in first-seen order
+        param_order: list[str] = []
+        param_unit: dict[str, str] = {}
+        param_vals: dict[str, dict[str, object]] = {}
         for r in records:
-            param = r.get("compound", "").strip()
-            if not param or param in seen:
+            param = (r.get("compound") or "").strip()
+            if not param:
                 continue
-            seen.add(param)
+            sid = r.get("sample_id", "") or ""
+            if param not in param_vals:
+                param_vals[param] = {}
+                param_order.append(param)
+                param_unit[param] = r.get("unit", "")
+            v = r.get("value")
+            display = "" if v is None else (round(v, 3) if isinstance(v, float) else v)
+            # First value wins per (param, sample_id) — avoids overwrite by duplicate rows
+            param_vals[param].setdefault(sid, display)
 
-            unit  = r.get("unit", "")
-            v     = r.get("value")
-            flag  = r.get("flag", "")
-
-            if v is None:
-                display = ""
-            elif isinstance(v, float):
-                display = round(v, 3)
-            else:
-                display = v
-
-            row_vals = [param, unit, display]
+        row_num = hdr_row + 1
+        for param in param_order:
+            row_vals = [param, param_unit.get(param, "")]
+            for sid in sample_ids:
+                row_vals.append(param_vals[param].get(sid, "-"))
             for ci, val in enumerate(row_vals, 1):
                 c = ws.cell(row=row_num, column=ci, value=val)
                 c.font      = _font(val)
                 c.border    = THIN
-                # Parameter column: right-aligned (RTL); value/unit: centered
                 c.alignment = WRAP_L if ci == 1 else CENTER
             row_num += 1
 
-        # Note
         note = ws.cell(row=row_num + 1, column=1,
                        value="* ממצאי שדה בלבד, ללא השוואה לערכי סף")
         note.font = Font(**FHE, italic=True, color="808080")
 
-        # Column widths
-        ws.column_dimensions["A"].width = 42
+        ws.column_dimensions["A"].width = 38
         ws.column_dimensions["B"].width = 12
-        ws.column_dimensions["C"].width = 12
+        for ci in range(3, total_cols + 1):
+            ws.column_dimensions[get_column_letter(ci)].width = 14
         if header_written:
             ws.row_dimensions[1].height = 20
         ws.row_dimensions[hdr_row].height = 22

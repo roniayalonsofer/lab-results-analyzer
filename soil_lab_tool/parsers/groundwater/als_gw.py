@@ -17,6 +17,7 @@ Format: SpreadsheetML (.xls/.xlsx exported as Excel 2003 XML), sheet "Client WAT
 
 from __future__ import annotations
 
+import io
 import re
 import xml.etree.ElementTree as _ET
 
@@ -117,10 +118,184 @@ class ALSGroundwaterParser(BaseParser):
     LAB_NAME = "ALS"
     ANALYSIS_TYPES = ["GW_VOC", "GW_FIELD_PARAMS"]
 
+    def _parse_pdf(self, data: bytes) -> list[dict]:
+        """
+        Parse ALS Czech Republic 'CERTIFICATE OF ANALYSIS' PDF (groundwater).
+
+        Layout (per Sub-Matrix block, may span multiple pages):
+          'Sub-Matrix: WATER Client sample ID <id1> <id2> <id3> ...'
+          'Laboratory sample ID <lab_id1> <lab_id2> ...'
+          'Client sampling date / time <date1> <date2> ...'
+          'Parameter Method LOR Unit Result Result Result'
+          <category line, e.g. 'BTEX', 'Physical Parameters'>
+          '<Compound> <Method> <LOR> <Unit> <result1> <result2> <result3>'
+          ...
+        Multiple Sub-Matrix blocks may appear (one per group of ~3 samples);
+        blank/'----' sample columns are skipped.
+        """
+        import pdfplumber
+
+        full_text = ""
+        with pdfplumber.open(io.BytesIO(data)) as pdf:
+            for page in pdf.pages:
+                full_text += (page.extract_text() or "") + "\n"
+
+        lines = full_text.split("\n")
+        records: list[dict] = []
+
+        i = 0
+        n = len(lines)
+        while i < n:
+            line = lines[i].strip()
+            if line.startswith("Sub-Matrix:") and "Client sample ID" in line:
+                # Extract sample IDs after "Client sample ID"
+                after = line.split("Client sample ID", 1)[1].strip()
+                sample_ids = [s for s in after.split() if s and s != "----"]
+                # Sample IDs may include things like "PP-1" or "PP-1" + "(EB)" split by space
+                sample_ids = self._merge_eb_tokens(sample_ids)
+
+                sampling_dates: list[str] = []
+                hdr_idx = None
+                j = i + 1
+                while j < min(i + 6, n):
+                    jl = lines[j].strip()
+                    if jl.startswith("Client sampling date"):
+                        after_d = jl.split("/ time", 1)[-1].strip() if "/ time" in jl else \
+                                  jl.split("date", 1)[-1].strip()
+                        sampling_dates = self._extract_dates(after_d)
+                    if jl.startswith("Parameter") and "Method" in jl and "LOR" in jl:
+                        hdr_idx = j
+                        break
+                    j += 1
+
+                if hdr_idx is None or not sample_ids:
+                    i += 1
+                    continue
+
+                n_samples = len(sample_ids)
+                current_category = ""
+                k = hdr_idx + 1
+                while k < n:
+                    kl = lines[k].strip()
+                    if not kl:
+                        k += 1
+                        continue
+                    if kl.startswith("Sub-Matrix:") or kl.startswith("Issue Date") or \
+                       kl.startswith("When sampling date") or kl.startswith("Key:") or \
+                       kl.startswith("Brief Method") or kl.startswith("The end of"):
+                        break
+
+                    parsed = self._parse_pdf_data_line(kl, n_samples)
+                    if parsed is None:
+                        # Might be a bare category header (e.g. "BTEX", "Physical Parameters")
+                        if not re.search(r'\d', kl) and len(kl) < 60 and "----" not in kl:
+                            current_category = kl
+                        k += 1
+                        continue
+
+                    compound, method, lor_val, unit_val, results = parsed
+                    cmp_lower = compound.lower().strip()
+                    cas = _GW_CAS_MAP.get(cmp_lower, "")
+                    atype = "GW_FIELD_PARAMS" if compound.upper() in _FIELD_PARAM_NAMES else "GW_VOC"
+
+                    for si, sid in enumerate(sample_ids):
+                        if si >= len(results):
+                            continue
+                        raw_val = results[si]
+                        val, flag = _parse_value(raw_val, lor_val)
+
+                        conv_val, conv_loq, out_unit = val, lor_val, unit_val
+                        if "µg/l" in unit_val.lower() or "ug/l" in unit_val.lower():
+                            if val is not None:
+                                conv_val = round(val / 1000.0, 6)
+                            if lor_val is not None:
+                                conv_loq = round(lor_val / 1000.0, 6)
+                            out_unit = "mg/L"
+
+                        records.append({
+                            "compound":      compound,
+                            "cas":           cas,
+                            "value":         conv_val,
+                            "flag":          flag or "",
+                            "unit":          out_unit,
+                            "sample_id":     sid,
+                            "lod":           None,
+                            "loq":           conv_loq,
+                            "analysis_type": atype,
+                            "sampling_date": sampling_dates[si] if si < len(sampling_dates) else "",
+                            "category":      current_category,
+                        })
+                    k += 1
+                i = k
+                continue
+            i += 1
+
+        return records
+
+    @staticmethod
+    def _merge_eb_tokens(tokens: list[str]) -> list[str]:
+        """Merge '(EB)' style suffix tokens into the preceding sample ID."""
+        out: list[str] = []
+        for t in tokens:
+            if t.startswith("(") and out:
+                out[-1] = f"{out[-1]} {t}"
+            else:
+                out.append(t)
+        return out
+
+    @staticmethod
+    def _extract_dates(text: str) -> list[str]:
+        """Extract DD-Mon-YYYY dates from a text fragment, normalized to dd.mm.yy."""
+        import datetime as _dt
+        found = re.findall(r'\d{1,2}-[A-Za-z]{3}-\d{4}', text)
+        out = []
+        for f in found:
+            try:
+                d = _dt.datetime.strptime(f, "%d-%b-%Y")
+                out.append(d.strftime("%d.%m.%y"))
+            except ValueError:
+                out.append(f)
+        return out
+
+    @staticmethod
+    def _parse_pdf_data_line(line: str, n_samples: int):
+        """
+        Parse a single PDF data row:
+          '<Compound text> <Method> <LOR> <Unit> <result1> <result2> ... <resultN>'
+        Returns (compound, method, lor_value, unit, [results]) or None if not a data row.
+        """
+        # Results are the last n_samples whitespace-separated tokens that look like
+        # numbers, '<N', or '----'
+        tokens = line.split()
+        if len(tokens) < 4 + n_samples:
+            return None
+        result_tokens = tokens[-n_samples:]
+        if not all(re.match(r'^(<?\d|----|\*)', t) for t in result_tokens):
+            return None
+
+        remaining = tokens[:-n_samples]
+        if len(remaining) < 3:
+            return None
+        unit_val = remaining[-1]
+        lor_raw  = remaining[-2].lstrip("<")
+        method   = remaining[-3]
+        compound = " ".join(remaining[:-3]).strip()
+        if not compound:
+            return None
+        try:
+            lor_val = float(lor_raw)
+        except ValueError:
+            lor_val = None
+        return compound, method, lor_val, unit_val, result_tokens
+
     def parse(self, file_obj) -> list[dict]:
         data = file_obj.read() if hasattr(file_obj, "read") else file_obj
         if isinstance(data, str):
             data = data.encode("utf-8")
+
+        # PDF Certificate of Analysis — route to dedicated PDF extractor
+        if data[:4] == b"%PDF":
+            return self._parse_pdf(data)
 
         sheets = _parse_spreadsheetml(data)
         sheet_name = next(
