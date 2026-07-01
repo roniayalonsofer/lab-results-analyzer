@@ -1431,7 +1431,8 @@ class LabReportExcel:
                 is_split = sid.endswith("_SPLIT")
                 base = sid[:-6] if is_split else sid
                 bh, dep = split_p.get(base, split_p.get(sid, ("", "")))
-                return (*_borehole_sort_key(bh), float(dep) if dep else 0.0, 1 if is_split else 0)
+                dep_clean = dep.replace('SPLIT', '').replace('DUP', '').strip() if dep else ''
+                return (*_borehole_sort_key(bh), float(dep_clean) if dep_clean else 0.0, 1 if is_split else 0)
             samples = sorted(samples, key=_sec_sort_key)
 
             # Build display values: SPLIT samples show same borehole, depth="3.0 SPLIT"
@@ -1807,7 +1808,7 @@ class LabReportExcel:
             # Sort samples: ק first, נ second, others last; within group by number then depth
             def _sort_key(sid):
                 bh, dep = split_map[sid]
-                dep_clean = dep.replace('SPLIT', '').strip() if dep else ''
+                dep_clean = dep.replace('SPLIT', '').replace('DUP', '').strip() if dep else ''
                 is_split = 1 if sid.endswith("_SPLIT") else 0
                 return (*_borehole_sort_key(bh), float(dep_clean) if dep_clean else 0.0, is_split)
             samples = sorted(samples, key=_sort_key)
