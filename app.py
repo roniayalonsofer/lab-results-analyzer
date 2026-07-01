@@ -1208,29 +1208,42 @@ if page == "soil":
         any_shown = True
         st.markdown("##### 💨 גז קרקע VOC")
         gas_indoor_type = st.radio(
-            "סוג ערך סף — אוויר פנים מבני:",
+            "סוג ערך סף:",
             options=[
-                "גז קרקע — הגנה על אוויר פנים מבני",
-                "אוויר תוך מבני (Ambient Air)",
+                "Soil Vapor — הגנה על אוויר פנים/חוץ מבני",
+                "Ambient Air — אוויר תוך מבני",
             ],
             index=0,
             key="gas_indoor_type",
             horizontal=True,
         )
+        _use_ambient = gas_indoor_type == "Ambient Air — אוויר תוך מבני"
         sg_col_r, sg_col_i = st.columns(2)
-        with sg_col_r:
-            st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 מגורים</div>', unsafe_allow_html=True)
-            sg_res_in  = st.checkbox("Indoor — פנים",  value=True,  key="sg_res_in")
-            sg_res_out = st.checkbox("Outdoor — חוץ",  value=False, key="sg_res_out")
-        with sg_col_i:
-            st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 תעשייה</div>', unsafe_allow_html=True)
-            sg_ind_in  = st.checkbox("Indoor — פנים",  value=False, key="sg_ind_in")
-            sg_ind_out = st.checkbox("Outdoor — חוץ",  value=False, key="sg_ind_out")
-        _use_ambient = gas_indoor_type == "אוויר תוך מבני (Ambient Air)"
-        if sg_res_in:  selected_thresholds.append("GAS_AMBIENT_RES" if _use_ambient else "GAS_INDOOR_RES")
-        if sg_res_out: selected_thresholds.append("GAS_OUTDOOR_RES")
-        if sg_ind_in:  selected_thresholds.append("GAS_AMBIENT_IND" if _use_ambient else "GAS_INDOOR_IND")
-        if sg_ind_out: selected_thresholds.append("GAS_OUTDOOR_IND")
+        if _use_ambient:
+            # Ambient Air: the threshold sheet has a single column per Res/Ind
+            # (no indoor/outdoor split) — showing Indoor/Outdoor checkboxes
+            # here would be misleading, and Soil Vapor must not apply at all.
+            with sg_col_r:
+                st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 מגורים</div>', unsafe_allow_html=True)
+                sg_res_ambient = st.checkbox("Ambient Air", value=True, key="sg_res_ambient")
+            with sg_col_i:
+                st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 תעשייה</div>', unsafe_allow_html=True)
+                sg_ind_ambient = st.checkbox("Ambient Air", value=False, key="sg_ind_ambient")
+            if sg_res_ambient: selected_thresholds.append("GAS_AMBIENT_RES")
+            if sg_ind_ambient: selected_thresholds.append("GAS_AMBIENT_IND")
+        else:
+            with sg_col_r:
+                st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 מגורים</div>', unsafe_allow_html=True)
+                sg_res_in  = st.checkbox("Indoor — פנים",  value=True,  key="sg_res_in")
+                sg_res_out = st.checkbox("Outdoor — חוץ",  value=False, key="sg_res_out")
+            with sg_col_i:
+                st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 תעשייה</div>', unsafe_allow_html=True)
+                sg_ind_in  = st.checkbox("Indoor — פנים",  value=False, key="sg_ind_in")
+                sg_ind_out = st.checkbox("Outdoor — חוץ",  value=False, key="sg_ind_out")
+            if sg_res_in:  selected_thresholds.append("GAS_INDOOR_RES")
+            if sg_res_out: selected_thresholds.append("GAS_OUTDOOR_RES")
+            if sg_ind_in:  selected_thresholds.append("GAS_INDOOR_IND")
+            if sg_ind_out: selected_thresholds.append("GAS_OUTDOOR_IND")
 
     if has_gw:
         any_shown = True
