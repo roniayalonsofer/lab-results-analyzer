@@ -86,22 +86,25 @@ def _is_alchem_soil_gas_numeric(sheet_names: list[str], file_bytes: bytes) -> bo
     Fallback: when row 1 is empty (layout shifted), look for 'Analysis Time:'
     in rows 2+ alongside LOD headers anywhere in the sheet.
     """
-    numeric_sheets = [s for s in sheet_names if _ALCHEM_SG_NUMERIC_RE.match(s)]
-    if not numeric_sheets:
+    candidate_sheets = [s for s in sheet_names if _ALCHEM_SG_NUMERIC_RE.match(s)]
+    candidate_sheets += [s for s in sheet_names if _ALCHEM_SHEET_RE.match(s)]
+    if not candidate_sheets:
         return False
     try:
         import io as _io
         import pandas as _pd
         xl = _pd.ExcelFile(_io.BytesIO(file_bytes))
-        df = xl.parse(numeric_sheets[0], header=None, dtype=str, nrows=8).fillna("")
+        df = xl.parse(candidate_sheets[0], header=None, dtype=str, nrows=8).fillna("")
         if len(df) < 4:
             return False
 
         # Primary: scan rows 2–6 for the characteristic header row.
-        # Accepts both "Compound Name" and bare "Name" as compound column.
+        # Accepts "Compound Name", bare "Name", or "Analyte" as compound column.
         for ri in range(2, min(7, len(df))):
             row = [str(v).strip() for v in df.iloc[ri]]
-            has_compound = any(v == "Name" or "Compound Name" in v for v in row)
+            has_compound = any(
+                v == "Name" or v == "Analyte" or "Compound Name" in v for v in row
+            )
             has_cas      = any(v.upper() == "CAS" for v in row)
             has_lod      = any("LOD" in v and "ug/m" in v for v in row)
             if has_compound and has_cas and has_lod:

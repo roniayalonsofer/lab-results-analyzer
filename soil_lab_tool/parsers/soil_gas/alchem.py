@@ -112,10 +112,10 @@ class AlchemSoilGasParser(BaseParser):
                 raw_val   = str(values[col_idx]).strip() if col_idx < len(values) else ""
                 sample_id = get_sample_id(col_idx, i)
 
-                # N.D. → below LOQ
+                # N.D. → confirmed not detected, no fabricated number
                 if raw_val.upper() in ("N.D.", "ND", "N/D", "NOT DETECTED", ""):
-                    value = loq
-                    flag  = "<LOQ"
+                    value = None
+                    flag  = "ND"
                 # <DL / <MDL / <LOD → explicit < prefix → display as <number
                 elif raw_val.upper() in ("<DL", "<MDL", "<LOD", "<MRL", "<MDL"):
                     value = lod

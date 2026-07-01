@@ -149,9 +149,13 @@ class AlchemSoilParser(BaseParser):
 
         # Fallback: if no "final conc" found, use columns after col 4
         if not conc_cols:
-            fixed_cols = max(
-                c for c in [col_compound, col_cas, col_lod, col_loq] if c is not None
-            ) + 1
+            _known_cols = [c for c in [col_compound, col_cas, col_lod, col_loq] if c is not None]
+            if not _known_cols:
+                raise ValueError(
+                    f"❌ לא נמצאו עמודות Compound/CAS ב-VOC sheet "
+                    f"(row {header_row}). כותרות: {headers}"
+                )
+            fixed_cols = max(_known_cols) + 1
             conc_cols = list(range(fixed_cols, len(headers)))
 
         if col_compound is None or col_cas is None:
@@ -446,7 +450,7 @@ class AlchemSoilParser(BaseParser):
     def _find_header_row(self, df: pd.DataFrame) -> int:
         for i, row in df.iterrows():
             row_str = " ".join(str(v).lower() for v in row.values)
-            if "compound" in row_str and "cas" in row_str:
+            if "cas" in row_str and ("compound" in row_str or "analyte" in row_str):
                 return i
         return 1  # fallback
 
