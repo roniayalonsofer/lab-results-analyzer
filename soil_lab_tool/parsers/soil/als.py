@@ -501,6 +501,25 @@ class ALSSoilParser(BaseParser):
                         "depth_to":      meta.get("depth_to"),
                     })
 
+        # A (sample, analysis_type) group that is 100% "ND" with not a single
+        # real detection/quantitation anywhere is the signature of a sample
+        # that was never actually submitted for that analysis category at
+        # all (common for split/QA samples tested only for a subset of
+        # methods, e.g. metals-only or VOC-only) — ALS always writes an
+        # explicit "<X" notation for every compound it actually measured, so
+        # a category with zero such notations was not measured. Re-flag
+        # those as "dash" (not analysed) rather than a misleading "N.D."
+        # implying the lab tested and confirmed nothing was present.
+        from collections import defaultdict as _dd2
+        _by_group: dict[tuple, list] = _dd2(list)
+        for r in records:
+            _by_group[(r["sample_id"], r["analysis_type"])].append(r)
+        for (_sid, _atype), _rs in _by_group.items():
+            if len(_rs) >= 5 and all(r["flag"] == "ND" for r in _rs):
+                for r in _rs:
+                    r["flag"] = "dash"
+                    r["value"] = None
+
         return records
 
     def _analysis_type(self, compound: str, cas: str = "", method: str = "") -> str:

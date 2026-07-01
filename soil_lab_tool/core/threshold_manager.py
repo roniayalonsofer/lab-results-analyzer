@@ -812,6 +812,17 @@ class ThresholdManager:
         - 'uncertain' : CAS or name matched but compound identity may differ.
         - 'none'      : no threshold found.
         """
+        # TPH fractions (DRO/ORO/combined Total TPH) use synthetic CAS
+        # identifiers we assign ourselves ('C10-C40' for the calculated
+        # Total TPH sum) rather than a real lab-reported compound name, so a
+        # generic name-similarity check against the threshold table's own
+        # (verbose) row name would incorrectly flag them as ambiguous. These
+        # are always an exact, deliberate match.
+        if cas is not None and str(cas).strip().upper() in _TPH_STANDARDS:
+            val = self.get_threshold(cas, threshold_key)
+            if val is not None:
+                return (val, 'exact')
+
         # Build name→cas reverse map from the loaded dataframes (cached)
         if not hasattr(self, '_cas_to_thresh_name'):
             self._cas_to_thresh_name: dict[str, str] = {}
