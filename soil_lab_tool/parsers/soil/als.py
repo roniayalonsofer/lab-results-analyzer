@@ -214,7 +214,17 @@ def _parse_als_sheet(xl: pd.ExcelFile, sheet_name: str) -> tuple[list[str], dict
 def _parse_value(raw_val: str, loq: float | None) -> tuple[float | None, str | None]:
     """Parse a raw cell string into (value, flag)."""
     v = raw_val.strip()
-    if not v or v.lower() == "nan" or v == "----":
+    if v == "----":
+        # ALS convention: a compound is often reported via two parallel
+        # method rows with different LOR tiers (e.g. S-VOCGMS05 vs
+        # S-VOCGMS06), or a sample simply wasn't submitted for this
+        # analysis type at all. Either way, "----" means "not analysed
+        # here" — NOT a confirmed non-detection (real non-detections are
+        # written as "<0.0050" etc). Emitting no record lets the other
+        # method's real result (or the sample's genuine absence from this
+        # analysis) stand without a fabricated "N.D.".
+        return None, "SKIP"
+    if not v or v.lower() == "nan":
         return None, "ND"
     if v.upper() in ("ND", "N.D.", "N/D", "<LOR", "< LOR", "NOT DETECTED"):
         return loq, "<LOQ"
@@ -420,6 +430,42 @@ class ALSSoilParser(BaseParser):
                 sample_cols = {ci: sid for ci, sid in sample_cols.items()
                                if "blank" not in sid.lower()}
 
+            # ALS sometimes reports the same compound via two parallel rows
+            # with different LOQ tiers (e.g. S-VOCGMS05 vs S-VOCGMS06). Per
+            # sample, only ONE of the two rows carries a real result — the
+            # other is blank because that method wasn't used for that
+            # sample, NOT because the compound was confirmed absent. Without
+            # this merge, the blank row would fabricate a spurious "N.D."
+            # result alongside the sibling row's real (possibly detected)
+            # value. Group rows by compound name and, for samples where a
+            # sibling row already has a non-blank value, drop the blank cell
+            # from this row so no record gets emitted for it here.
+            from collections import defaultdict as _defaultdict
+            _by_compound: dict[str, list] = _defaultdict(list)
+            for _row in data_rows:
+                _by_compound[_row[0].strip().lower()].append(_row)
+            merged_data_rows = []
+            for _key, _rows in _by_compound.items():
+                if len(_rows) == 1:
+                    merged_data_rows.append(_rows[0])
+                    continue
+                _all_cols = set()
+                for _, _, _, _sv in _rows:
+                    _all_cols.update(_sv.keys())
+                _has_value = {
+                    ci: any(str(_sv.get(ci, "")).strip().lower() not in ("", "nan")
+                            for _, _, _, _sv in _rows)
+                    for ci in _all_cols
+                }
+                for _cmp, _unit, _loq, _sv in _rows:
+                    _cleaned = {}
+                    for ci, _raw in _sv.items():
+                        if str(_raw).strip().lower() in ("", "nan") and _has_value.get(ci):
+                            continue  # sibling row has the real result for this sample
+                        _cleaned[ci] = _raw
+                    merged_data_rows.append((_cmp, _unit, _loq, _cleaned))
+            data_rows = merged_data_rows
+
             for compound, unit, loq, sample_vals in data_rows:
                 if "WATER" in sheet and compound.strip().lower() in self._SKIP_WATER_COMPOUNDS:
                     continue
@@ -435,6 +481,8 @@ class ALSSoilParser(BaseParser):
                     if ci not in sample_cols:
                         continue
                     value, flag = _parse_value(raw_val, loq)
+                    if flag == "SKIP":
+                        continue
                     if value is None and flag is None:
                         flag = "ND"
                     meta = sample_meta.get(ci, {})

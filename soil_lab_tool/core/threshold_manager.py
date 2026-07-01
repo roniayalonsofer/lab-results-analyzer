@@ -126,6 +126,8 @@ _TPH_STANDARDS: dict[str, float] = {
     "DRO":     350.0,
     "ORO":     350.0,
     "DRO-ORO": 350.0,
+    "C10-C40": 350.0,
+    "TPH":     350.0,
 }
 
 # Israeli drinking water standards for metals (mg/L).
@@ -450,12 +452,12 @@ class ThresholdManager:
         if threshold_key == "VSL_SOIL" and cas.upper() in _TPH_STANDARDS:
             return _TPH_STANDARDS[cas.upper()]
 
-        if cas.upper() in ("DRO", "ORO", "DRO-ORO") and threshold_key in (
+        if cas.upper() in ("DRO", "ORO", "DRO-ORO", "C10-C40", "TPH") and threshold_key in (
             "TIER1_IND_SOIL_VH", "TIER1_IND_SOIL_HM_0_6",
             "TIER1_IND_SOIL_HM_6", "TIER1_IND_SOIL_LOW",
         ):
             return 1280.0
-        if cas.upper() in ("DRO", "ORO", "DRO-ORO") and threshold_key in (
+        if cas.upper() in ("DRO", "ORO", "DRO-ORO", "C10-C40", "TPH") and threshold_key in (
             "TIER1_RES_SOIL_VH", "TIER1_RES_SOIL_HM_0_6",
             "TIER1_RES_SOIL_HM_6", "TIER1_RES_SOIL_LOW",
         ):
@@ -687,6 +689,25 @@ class ThresholdManager:
         s = s.rstrip(".,; ")
         return s
 
+    # Bare periodic-table symbol → full English element name (lowercase).
+    # Lab reports for metals sometimes give just the symbol ("Fe") as the
+    # compound name instead of the descriptive "Fe - Iron" form; without this
+    # map, name_match_confidence has no way to recognize "fe" and "iron" as
+    # the same compound, so it downgrades an otherwise-exact CAS match to
+    # 'uncertain' — which excel_output.py then treats as "no threshold".
+    _METAL_SYMBOL_NAME: dict[str, str] = {
+        "ag": "silver", "al": "aluminum", "as": "arsenic", "au": "gold",
+        "b": "boron", "ba": "barium", "be": "beryllium", "bi": "bismuth",
+        "ca": "calcium", "cd": "cadmium", "co": "cobalt", "cr": "chromium",
+        "cu": "copper", "fe": "iron", "hg": "mercury", "k": "potassium",
+        "li": "lithium", "mg": "magnesium", "mn": "manganese",
+        "mo": "molybdenum", "na": "sodium", "ni": "nickel",
+        "p": "phosphorus", "pb": "lead", "sb": "antimony", "se": "selenium",
+        "si": "silicon", "sn": "tin", "sr": "strontium", "te": "tellurium",
+        "ti": "titanium", "tl": "thallium", "v": "vanadium", "zn": "zinc",
+        "zr": "zirconium", "s": "sulfur",
+    }
+
     def name_match_confidence(self, lab_name: str, thresh_name: str) -> str:
         """
         Compare a lab compound name with a threshold-table name.
@@ -697,6 +718,12 @@ class ThresholdManager:
         tn = self._norm_name(thresh_name)
 
         if ln == tn:
+            return 'exact'
+
+        # Bare element symbol ↔ full element name (e.g. "fe" ↔ "iron")
+        ln_sym = self._METAL_SYMBOL_NAME.get(ln)
+        tn_sym = self._METAL_SYMBOL_NAME.get(tn)
+        if (ln_sym and ln_sym == tn) or (tn_sym and tn_sym == ln):
             return 'exact'
 
         # Strip element-symbol prefix from lab name: "ag silver" → "silver"
@@ -716,6 +743,11 @@ class ThresholdManager:
         tn_stripped_el = _strip_element_prefix(tn)
 
         if ln_stripped == tn or ln == tn_stripped_el or ln_stripped == tn_stripped_el:
+            return 'exact'
+
+        # Element symbol ↔ full name, also checked against the stripped forms
+        # (handles cases where one side is "ag silver" and the other is "ag")
+        if (ln_sym and ln_sym == tn_stripped_el) or (tn_sym and tn_sym == ln_stripped):
             return 'exact'
 
         # Known safe synonyms
@@ -752,6 +784,7 @@ class ThresholdManager:
         ).strip()
         if tn_stripped and (tn_stripped == ln or tn_stripped == lns or
                             tn_stripped == ln_stripped or
+                            (ln_sym and tn_stripped == ln_sym) or
                             set(tn_stripped.split()) == ln_words):
             return 'exact'
 
