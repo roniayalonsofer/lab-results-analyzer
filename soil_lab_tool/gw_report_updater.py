@@ -391,6 +391,11 @@ def parse_bactochem_pdf(pdf_path: str) -> dict:
                 sample["total_depth"] = v
                 sample["field"]["עומק כללי של הקידוח"] = v
 
+            # Pumping depth: "M 12.87 הביאש קמוע"
+            m = re.search(r'M\s+([\d.]+)\s+הביאש קמוע', line)
+            if m:
+                sample["field"]["עומק שאיבה"] = float(m.group(1))
+
         samples[well_id] = sample
 
     return {"sampling_date": global_date, "samples": samples}
@@ -669,22 +674,139 @@ def _last_row_for_well(table, well_id: str) -> int:
     return last_for_well if last_for_well >= 0 else last_any
 
 
+_FIELD_PARAM_HINTS = {
+    "pH", "EC", "טמפרטורה", "חמצן מומס", "עכירות", "רדוקס",
+    "מוליכות חשמלית", "עומק פני המים", "עומק דיגום", "מפלס עליון",
+    "עומק שאיבה", "עומק כללי של הקידוח", "עומק כללי קידוח",
+    "תאריך", "תאריך דיגום", "עומק דגימה מפני המים",
+}
+
+
+def _find_field_table(doc: Document) -> int:
+    """
+    Locate the field-findings table by content signature (how many of its
+    row-0-cell labels match known field-parameter names), rather than
+    assuming it's always doc.tables[1]. Some documents have extra tables
+    (signature blocks, timestamp tables) before it, which shifts its real
+    index.
+    """
+    best_ti, best_score = None, 0
+    for ti, tbl in enumerate(doc.tables):
+        score = 0
+        for row in tbl.rows:
+            if not row.cells:
+                continue
+            label = row.cells[0].text.strip().rstrip("*")
+            if label in _FIELD_PARAM_HINTS:
+                score += 1
+        if score > best_score:
+            best_score, best_ti = score, ti
+    return best_ti if best_score >= 3 else 1  # fallback to legacy default
+
+
+_FIELD_ROW_ALIASES = {
+    "תאריך דיגום": "__date__",
+    "תאריך": "__date__",
+    "עומק דיגום": "עומק פני המים",
+    "מפלס עליון": "עומק פני המים",
+    "עומק פני המים": "עומק פני המים",
+    "חמצן מומס": "חמצן מומס",
+    "מוליכות חשמלית": "EC",
+    "EC": "EC",
+    "pH": "pH",
+    "רדוקס": "רדוקס",
+    "עומק שאיבה": "עומק שאיבה",
+    "טמפרטורה": "טמפרטורה",
+    "עומק כללי קידוח": "עומק כללי של הקידוח",
+    "עומק כללי של הקידוח": "עומק כללי של הקידוח",
+    "עומק דגימה מפני המים": "עומק דגימה מפני המים",
+    "עכירות": "עכירות",
+}
+
+
+def _fmt_field_val(val) -> str:
+    if isinstance(val, float) and val == int(val):
+        return str(int(val))
+    return str(val)
+
+
+def _update_field_table_dual_column(tbl, field_data: dict, wells: list):
+    """
+    Some sites' field-findings table shows each well across TWO adjacent
+    columns — the two most recent sampling dates side by side (older on
+    the left, newer on the right) — instead of one current-value column
+    per well. To add a new reading: shift the newer column's values into
+    the older column's slot (dropping the oldest reading), then write the
+    new reading into the (now-vacated) newer column.
+    """
+    header_cells = tbl.rows[0].cells
+    well_cols: dict = {}
+    for ci, c in enumerate(header_cells):
+        text = c.text.strip()
+        if text in wells:
+            well_cols.setdefault(text, []).append(ci)
+
+    for well, cols in well_cols.items():
+        if len(cols) < 2:
+            continue
+        old_col, new_col = sorted(cols)[-2:]
+        sample = field_data.get(well, {})
+        well_field = sample.get("field", {})
+        sample_date = sample.get("date")
+
+        for ri, row in enumerate(tbl.rows):
+            if ri == 0:
+                continue
+            cells = row.cells
+            if new_col >= len(cells) or old_col >= len(cells):
+                continue
+            label = cells[0].text.strip().rstrip("*")
+            key = _FIELD_ROW_ALIASES.get(label)
+
+            # Shift the previously-newest reading into the older slot
+            shifted_text = cells[new_col].text.strip()
+            _set_cell(cells[old_col], shifted_text)
+
+            if key == "__date__":
+                if sample_date:
+                    _set_cell(cells[new_col], sample_date, highlight=True)
+                continue
+            if key is None:
+                _set_cell(cells[new_col], "-", highlight=True)
+                continue  # unrecognized/unparsed row — no source data available
+            val = well_field.get(key)
+            _set_cell(cells[new_col], _fmt_field_val(val) if val is not None else "-",
+                      highlight=True)
+
+
 def _update_field_table(doc: Document, field_data: dict, wells: list):
     """
-    Update the field-findings table (doc.tables[1]).
+    Update the field-findings table.
 
-    Two layouts are supported:
+    Layouts supported:
       - Single well: each data row is [param name, unit, value] — the value
         is always the LAST cell, no column matching needed.
-      - Multiple wells: row 0 holds well names as column headers, used to
-        find which column belongs to which well.
+      - Multiple wells, one column each: row 0 holds well names as column
+        headers, used to find which column belongs to which well.
+      - Multiple wells, two columns each (rolling last-2-dates view): see
+        _update_field_table_dual_column.
     """
-    tbl = doc.tables[1]
+    ti = _find_field_table(doc)
+    tbl = doc.tables[ti]
     FIELD_ROWS = {
         "pH": 1, "EC": 2, "טמפרטורה": 3, "חמצן מומס": 4,
         "עכירות": 5, "רדוקס": 6, "עומק פני המים": 7,
         "עומק כללי של הקידוח": 8, "עומק דגימה מפני המים": 9,
     }
+
+    header_texts = [c.text.strip() for c in tbl.rows[0].cells] if tbl.rows else []
+    well_counts: dict = {}
+    for h in header_texts:
+        if h in wells:
+            well_counts[h] = well_counts.get(h, 0) + 1
+    if any(cnt >= 2 for cnt in well_counts.values()):
+        _update_field_table_dual_column(tbl, field_data, wells)
+        return
 
     if len(wells) == 1:
         well = wells[0]
@@ -727,7 +849,7 @@ def _update_field_table(doc: Document, field_data: dict, wells: list):
                       "עומק כללי של הקידוח": 8, "עומק דגימה מפני המים": 9}.get(field)
             if ri is None or ri >= len(tbl.rows):
                 continue
-            txt = str(int(val)) if isinstance(val, float) and val == int(val) else str(val)
+            txt = _fmt_field_val(val)
             row_cells = tbl.rows[ri].cells
             _set_cell(row_cells[-1], txt, highlight=True)
         return
@@ -745,7 +867,7 @@ def _update_field_table(doc: Document, field_data: dict, wells: list):
         for well, ci in well_col.items():
             val = field_data.get(well, {}).get("field", {}).get(field)
             if val is not None:
-                txt = str(int(val)) if isinstance(val, float) and val == int(val) else str(val)
+                txt = _fmt_field_val(val)
                 _set_cell(row.cells[ci], txt, highlight=True)
 
 
@@ -1263,20 +1385,41 @@ def run_update_bytes(
         # Detect the well-naming convention actually used in THIS document
         # (different sites use different prefixes, e.g. "מת-1" or "צא - 1"),
         # then remap the parsed sample keys (always "מת-N") onto it by well number.
-        doc_wells = set()
+        #
+        # Some documents have MULTIPLE tables that both mention the same well
+        # number under different name spellings — e.g. a one-off "before/after
+        # injection" snapshot table using Latin "PP-1", alongside the routine
+        # long-running chronological table using Hebrew "פפ-1". Picking between
+        # them via an unordered set (as before) depends on Python's hash-seed
+        # ordering and could non-deterministically point updates at the wrong
+        # (snapshot) table. Instead, score each name variant by how many
+        # chronological date-rows exist in the table(s) it appears in, and
+        # prefer the variant from the table with the deepest history — that's
+        # unambiguously the routine table meant to receive new readings.
+        _date_pat = re.compile(r'^\d{2}\.\d{2}\.\d{2}$')
+        well_depth = {}
         for tbl in doc.tables:
+            date_rows = sum(
+                1 for row in tbl.rows
+                if len(row.cells) >= 2 and _date_pat.match(row.cells[1].text.strip())
+            )
             for row in tbl.rows:
                 if not row.cells:
                     continue
                 w = row.cells[0].text.strip()
                 if w and re.search(r'\d', w) and len(w) < 20:
-                    doc_wells.add(w)
+                    if date_rows > well_depth.get(w, -1):
+                        well_depth[w] = date_rows
 
         num_to_doc_well = {}
-        for w in doc_wells:
+        num_to_depth = {}
+        for w, depth in well_depth.items():
             m = re.search(r'(\d+)\s*$', w)
             if m:
-                num_to_doc_well.setdefault(m.group(1), w)
+                num = m.group(1)
+                if num not in num_to_doc_well or depth > num_to_depth[num]:
+                    num_to_doc_well[num] = w
+                    num_to_depth[num] = depth
 
         remapped_samples = {}
         unmatched = []
