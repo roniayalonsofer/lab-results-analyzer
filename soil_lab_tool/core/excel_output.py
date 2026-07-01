@@ -173,7 +173,7 @@ def _fmt_lod(lod: float) -> str:
     return f"{round(lod, 3):.3f}".rstrip("0").rstrip(".")
 
 
-_DEPTH_PAREN_RE   = re.compile(r'^(.*?)\s*\((\d+\.?\d*)\)\s*$')
+_DEPTH_PAREN_RE   = re.compile(r'^(.*?)\s*\((\d+\.?\d*)\)\s*(-?\s*DUP)?\s*$', re.IGNORECASE)
 # Shimshon-2 "קק-{depth_float}-{borehole_int}[ DUP]" — depth first, borehole last
 _DEPTH_FLOAT_BH_RE = re.compile(r'^(.*?)-(\d+\.\d+)-(\d+)(\s+DUP)?\s*$', re.IGNORECASE)
 _DEPTH_DOT_RE     = re.compile(r'^(.*?)-(\d+\.\d+)(-DUP)?\s*$', re.IGNORECASE)
@@ -386,23 +386,35 @@ def _split_sample_depth(sid: str) -> tuple[str, str]:
     """
     Split sample ID into (borehole_name, depth_str). Handles formats:
       'ק16 (3.0)'        → ('ק-16', '3.0')
-      'ק17  DUP(1.2)'    → ('ק-17 DUP', '1.2')
+      'ק17  DUP(1.2)'    → ('ק-17', '1.2 DUP')
       'ק-16-1.2'         → ('ק-16', '1.2')
-      'ק-16-1.2-DUP'     → ('ק-16 DUP', '1.2')
+      'ק-16-1.2-DUP'     → ('ק-16', '1.2 DUP')
       'ק-16 - 1-2'       → ('ק-16', '1.2')
-      'ק-16 - 1-2-DUP'   → ('ק-16 DUP', '1.2')
+      'ק-16 - 1-2-DUP'   → ('ק-16', '1.2 DUP')
       'ב-1 3.0'          → ('ב-1', '3.0')
       'קק-1 - 1.5'       → ('קק-1', '1.5')   ← shimshon-1
       'קק-1.5-10'        → ('קק-10', '1.5')  ← shimshon-2
       'קק-10.0-16'       → ('קק-16', '10.0') ← shimshon-2
-      'קק-3.0-14 DUP'    → ('קק-14 DUP', '3.0') ← shimshon-2 DUP
-    Borehole name is always normalized (ק12 → ק-12).
+      'קק-3.0-14 DUP'    → ('קק-14', '3.0 DUP') ← shimshon-2 DUP
+    Borehole name is always normalized (ק12 → ק-12). DUP is always attached
+    to the depth (matching how SPLIT is shown), never to the borehole name.
     """
+    name, depth = _split_sample_depth_raw(sid)
+    m = re.match(r'^(.*?)\s+DUP\s*$', name, re.IGNORECASE)
+    if m:
+        stripped = m.group(1).strip()
+        name = stripped if stripped else name
+        depth = f"{depth} DUP".strip() if depth else "DUP"
+    return name, depth
+
+
+def _split_sample_depth_raw(sid: str) -> tuple[str, str]:
     s = sid.strip()
     # "name (depth)" or "name DUP(depth)"
     m = _DEPTH_PAREN_RE.match(s)
     if m:
-        return _norm_borehole(m.group(1).strip()), m.group(2)
+        depth = m.group(2) + (" DUP" if m.group(3) else "")
+        return _norm_borehole(m.group(1).strip()), depth
 
     # Shimshon-2: "prefix-depth_float-borehole_int[ DUP]"
     # e.g. "קק-1.5-10" → borehole="קק-10", depth="1.5"

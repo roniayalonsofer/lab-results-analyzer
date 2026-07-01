@@ -187,11 +187,11 @@ class AlchemSoilParser(BaseParser):
 
                 # Map detection flags
                 if raw_val.upper() in ("N.D.", "ND", "N/D", "NOT DETECTED", ""):
-                    value = loq
-                    flag  = "<LOQ"
+                    value = None
+                    flag  = "ND"
                 elif raw_val.lower() in ("<mdl", "<dl"):
-                    value = loq
-                    flag  = "<LOQ"
+                    value = lod
+                    flag  = "<LOD"
                 elif raw_val.lower() in ("<mrl", "<loq", "<rl"):
                     value = loq
                     flag  = "<LOQ"
@@ -369,9 +369,9 @@ class AlchemSoilParser(BaseParser):
                 sample_id = sample_ids[i] if i < len(sample_ids) else f"Sample-{i+1}"
 
                 if raw_val.upper() in ("N.D.", "ND", "N/D", "NOT DETECTED", ""):
-                    value, flag = loq, "<LOQ"
+                    value, flag = None, "ND"
                 elif raw_val.lower() in ("<mdl", "<dl"):
-                    value, flag = loq, "<LOQ"
+                    value, flag = lod, "<LOD"
                 elif raw_val.lower() in ("<mrl", "<loq", "<rl"):
                     value, flag = loq, "<LOQ"
                 else:
