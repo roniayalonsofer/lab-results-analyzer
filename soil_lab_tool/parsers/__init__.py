@@ -63,8 +63,9 @@ _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
 }
 
 
-# Sheet names Alchem uses: "<job_number>-VOC", "<job_number>-SVOC", etc.
-_ALCHEM_SHEET_RE = _re.compile(r'^\d+-(?:VOC|SVOC|TPH|ICP|PH|METALS)$', _re.IGNORECASE)
+# Sheet names Alchem uses: "<job_number>-VOC", "<job_number>-SVOC", etc.,
+# or bare category names with no job-number prefix ("TPH", "VOC", "ICP").
+_ALCHEM_SHEET_RE = _re.compile(r'^(?:\d+-)?(?:VOC|SVOC|TPH|ICP|PH|METALS)$', _re.IGNORECASE)
 
 # Alchem soil-gas variant: sheets are bare job-number integers ("40344", "38276")
 _ALCHEM_SG_NUMERIC_RE = _re.compile(r'^\d+$')

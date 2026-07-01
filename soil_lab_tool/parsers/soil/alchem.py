@@ -137,7 +137,7 @@ class AlchemSoilParser(BaseParser):
         # Parse column headers
         headers = [str(v).strip() for v in raw.iloc[header_row].values]
 
-        col_compound = self._find_col_idx(headers, ["compound name", "compound", "analyte"])
+        col_compound = self._find_col_idx(headers, ["compound name", "compound", "analyte", "name"])
         col_cas      = self._find_col_idx(headers, ["cas number", "cas no", "cas"])
         col_lod      = self._find_col_idx(headers, ["lod", "mdl", "method detection"])
         col_loq      = self._find_col_idx(headers, ["loq", "mrl", "method reporting"])
@@ -225,10 +225,21 @@ class AlchemSoilParser(BaseParser):
 
         # Locate header row ("Sample Name" in col 0)
         header_row = 0
+        data_start = None
         for i, row in raw.iterrows():
-            if "sample name" in str(row.iloc[0]).lower():
+            cell0 = str(row.iloc[0]).strip().lower()
+            if "sample name" in cell0:
                 header_row = i
+                data_start = i + 1
                 break
+            if cell0 == "name":
+                # Two-row header: analyte names (DRO/ORO/Total TPH) are in
+                # the row ABOVE this generic 'Name/Final Conc...' sub-header.
+                header_row = max(i - 1, 0)
+                data_start = i + 1
+                break
+        if data_start is None:
+            data_start = header_row + 1
 
         headers = [str(v).strip() for v in raw.iloc[header_row].values]
 
@@ -262,7 +273,7 @@ class AlchemSoilParser(BaseParser):
                 loq_per_col[ci] = _TPH_LOQ_DEFAULTS.get(param.upper())
 
         records = []
-        for i in range(header_row + 1, len(raw)):
+        for i in range(data_start, len(raw)):
             row = raw.iloc[i]
             sample_id = str(row.iloc[0]).strip()
             if not sample_id or sample_id.lower() in ("nan", ""):
