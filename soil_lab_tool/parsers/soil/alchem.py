@@ -277,9 +277,27 @@ class AlchemSoilParser(BaseParser):
                 loq_per_col[ci] = _TPH_LOQ_DEFAULTS.get(param.upper())
 
         records = []
+        _tph_trailing_int_digit = re.compile(r'^(.*\S)\s+(\d+)\s+(\d)$')
+        _tph_trailing_2digit    = re.compile(r'^(.*\S)\s+([0-3])(\d)$')
+
+        def _fix_tph_sample_name(raw: str) -> str:
+            """Reconstruct a lost decimal point in the TPH sheet's Sample
+            Name column. Al-Chem's TPH export sometimes drops the '.' in the
+            depth, producing 'k31 05' (meant '0.5') or 'k49 2 5' (meant
+            '2.5') instead of the normal 'K-31(0.5)' format used by the
+            VOC/ICP sheets for the same samples."""
+            s = raw.strip()
+            m = _tph_trailing_int_digit.match(s)
+            if m:
+                return f"{m.group(1)}-{m.group(2)}.{m.group(3)}"
+            m = _tph_trailing_2digit.match(s)
+            if m:
+                return f"{m.group(1)}-{m.group(2)}.{m.group(3)}"
+            return s
+
         for i in range(data_start, len(raw)):
             row = raw.iloc[i]
-            sample_id = str(row.iloc[0]).strip()
+            sample_id = _fix_tph_sample_name(str(row.iloc[0]).strip())
             if not sample_id or sample_id.lower() in ("nan", ""):
                 continue
 
