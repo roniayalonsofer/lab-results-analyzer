@@ -734,40 +734,58 @@ class AlchemMultiSectionParser(BaseParser):
     def _parse_multi_section_pdf(self, file_obj: io.BytesIO) -> list[dict]:
         import pdfplumber
         records: list[dict] = []
+        current_section: str | None = None  # persists across continuation pages
         with pdfplumber.open(file_obj) as pdf:
             for page in pdf.pages:
                 text = page.extract_text() or ""
                 text_lo = text.lower()
                 tables = page.extract_tables() or []
 
+                # A fresh EPA-method marker only appears on the FIRST page of
+                # each multi-page table block — continuation pages (e.g. the
+                # rest of a 20-compound VOC list) carry no marker at all, so
+                # without remembering the last section type those pages'
+                # tables would be silently skipped entirely.
                 if re.search(r'epa\s*6010', text_lo):
-                    sid = self._extract_sample_id(text)
-                    for tbl in tables:
-                        if not tbl or len(tbl) < 2:
-                            continue
-                        hl = [str(c or "").lower() for c in tbl[0]]
-                        if any("conc" in x for x in hl):
-                            records.extend(self._parse_metals_table(tbl, sid))
-
+                    current_section = "metals"
                 elif re.search(r'epa\s*8015|based\s+on\s+epa', text_lo):
+                    current_section = "tph"
+                elif re.search(r'epa\s*8260', text_lo):
+                    current_section = "voc"
+
+                if current_section == "metals":
                     for tbl in tables:
                         if not tbl or len(tbl) < 2:
                             continue
-                        hl = [str(c or "").lower() for c in tbl[0]]
+                        records.extend(self._parse_metals_table(tbl))
+                elif current_section == "tph":
+                    for tbl in tables:
+                        if not tbl or len(tbl) < 2:
+                            continue
+                        hl = [self._clean_cell(c).lower() for c in tbl[0]]
                         if any("dro" in x for x in hl):
                             records.extend(self._parse_tph_table(tbl))
-
-                elif re.search(r'epa\s*8260', text_lo):
+                elif current_section == "voc":
                     for tbl in tables:
                         if not tbl or len(tbl) < 2:
                             continue
-                        hl = [str(c or "").lower() for c in tbl[0]]
-                        if any("cas" in x for x in hl):
-                            records.extend(self._parse_voc_table(tbl))
+                        records.extend(self._parse_voc_table(tbl))
 
         return records
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _clean_cell(val) -> str:
+        """Cell text as extracted by pdfplumber can contain embedded
+        newlines when a long sample name wraps to two lines in the PDF
+        layout (e.g. 'K-\\n14(0.5)' instead of 'K-14(0.5)'). A wrap always
+        lands right after a hyphen, so remove that newline first (else it
+        collapses to a stray space, 'K- 14', instead of 'K-14') before
+        collapsing any remaining whitespace."""
+        s = str(val or "")
+        s = re.sub(r'-\s*\n\s*', '-', s)
+        return re.sub(r'\s+', ' ', s).strip()
+
     @staticmethod
     def _extract_sample_id(text: str) -> str:
         m = re.search(
@@ -778,82 +796,114 @@ class AlchemMultiSectionParser(BaseParser):
 
     @staticmethod
     def _parse_sample_name(raw: str) -> tuple[str, str]:
-        """'KC-1 (0.5)' → ('KC-1', '0.5')"""
-        m = re.match(r'^(.+?)\s*\(\s*([\d.]+)\s*\)\s*$', raw.strip())
+        """'KC-1 (0.5)' → ('KC-1', '0.5'); 'KC-1 (0.5) DUP' → ('KC-1', '0.5 DUP')"""
+        raw = re.sub(r'\s+', ' ', raw or "").strip()
+        m = re.match(r'^(.+?)\s*\(\s*([\d.]+)\s*\)\s*(-?\s*DUP)?\s*$', raw, re.IGNORECASE)
         if m:
-            return m.group(1).strip(), m.group(2)
+            depth = m.group(2) + (" DUP" if m.group(3) else "")
+            return m.group(1).strip(), depth
         return raw.strip(), ""
 
     # ------------------------------------------------------------------
-    def _parse_metals_table(self, table: list, sample_id: str) -> list[dict]:
-        """EPA 6010D: Name | Final Conc. [mg/kg] | LOD [mg/kg] | LOQ. [mg/kg]"""
-        h  = [str(c or "").strip() for c in table[0]]
-        hl = [x.lower() for x in h]
-        col_conc = next(
-            (i for i, x in enumerate(hl)
-             if "final conc" in x or ("conc" in x and "lod" not in x and "loq" not in x)),
-            1,
-        )
+    def _parse_metals_table(self, table: list) -> list[dict]:
+        """EPA 6010D multi-sample table:
+           row0: 'Sample Name:' | sample1 | sample2 | ... | (blank) | (blank)
+           row1: 'Name'         | 'Final Conc...' x N     | 'LOD...' | 'LOQ...'
+           row2+: element name  | value x N                | lod      | loq
+        Each table holds several samples as separate COLUMNS, not one
+        sample per table — the header (and sample-name) row must be located
+        by content, not assumed to be row 0.
+        """
+        clean = [[self._clean_cell(c) for c in row] for row in table]
+
+        header_row_idx = None
+        for ri in range(min(3, len(clean))):
+            if any("final conc" in c.lower() for c in clean[ri]):
+                header_row_idx = ri
+                break
+        if header_row_idx is None:
+            return []
+
+        name_row = clean[0]
+        hdr_row  = clean[header_row_idx]
+        hl = [c.lower() for c in hdr_row]
+
         col_lod = next((i for i, x in enumerate(hl) if x.startswith("lod")), None)
         col_loq = next((i for i, x in enumerate(hl) if x.startswith("loq")), None)
 
-        borehole, depth = self._parse_sample_name(sample_id)
-        sid = borehole or sample_id
+        name_cells = [(i, v) for i, v in enumerate(name_row) if v.strip() and any(ch.isdigit() for ch in v)]
+        conc_cols_idx = [i for i, x in enumerate(hl) if "final conc" in x]
+        sample_cols: list[tuple[int, str, str]] = []
+        for pos, ci in enumerate(conc_cols_idx):
+            sid_raw = name_cells[pos][1] if pos < len(name_cells) else ""
+            borehole, depth = self._parse_sample_name(sid_raw)
+            sid = borehole or sid_raw or f"Sample-{ci}"
+            sample_cols.append((ci, sid, depth))
+        if not sample_cols:
+            return []
 
         records: list[dict] = []
-        for row in table[1:]:
+        n_samples = len(sample_cols)
+        for row in clean[header_row_idx + 1:]:
             if not row or not row[0]:
                 continue
-            name = str(row[0] or "").strip()
+            name = row[0].strip()
             if not name or name.lower() in ("name", "compound name", "nan", ""):
                 continue
 
             symbol = name.split(" - ")[0].strip() if " - " in name else name.split()[0]
             cas = _METAL_SYMBOL_CAS.get(symbol, "")
 
-            lod_v = self._sf(str(row[col_lod] or "") if col_lod is not None and col_lod < len(row) else "")
-            loq_v = self._sf(str(row[col_loq] or "") if col_loq is not None and col_loq < len(row) else "")
-            raw_v = str(row[col_conc] or "").strip() if col_conc < len(row) else ""
+            # Non-empty cells after the compound name, in left-to-right
+            # order: first n_samples are the sample values, then LOD, LOQ.
+            values = [v.strip() for v in row[1:] if v and v.strip() and v.strip().lower() != "nan"]
+            sample_vals = values[:n_samples]
+            lod_v = self._sf(values[n_samples])     if len(values) > n_samples     else None
+            loq_v = self._sf(values[n_samples + 1]) if len(values) > n_samples + 1 else None
 
-            if not raw_v or raw_v.lower() in ("nan", ""):
-                continue
-
-            rv = raw_v.upper()
-            fallback = loq_v or lod_v or 0.01
-            if rv in ("N.D.", "ND", "N.D", "N/D"):
-                value, flag = lod_v, "ND"
-            elif rv in ("<LOQ", "<MDL", "<MRL", "<DL"):
-                value, flag = loq_v or fallback, "<LOQ"
-            elif raw_v.startswith("<"):
-                try:
-                    value, flag = float(raw_v[1:].replace(",", "")), "<LOQ"
-                except (ValueError, TypeError):
-                    value, flag = fallback, "<LOQ"
-            else:
-                try:
-                    value, flag = float(raw_v.replace(",", "")), ""
-                except (ValueError, TypeError):
+            for (_, sid, depth), raw_v in zip(sample_cols, sample_vals):
+                if not raw_v:
                     continue
 
-            records.append({
-                "lab":           self.LAB_NAME,
-                "sample_id":     sid,
-                "depth":         depth,
-                "compound":      name,
-                "cas":           cas,
-                "value":         value,
-                "flag":          flag,
-                "unit":          "mg/kg",
-                "lod":           lod_v,
-                "loq":           loq_v,
-                "analysis_type": "SOIL_METALS",
-            })
+                rv = raw_v.upper()
+                fallback = loq_v or lod_v or 0.01
+                if rv in ("N.D.", "ND", "N.D", "N/D"):
+                    value, flag = None, "ND"
+                elif rv in ("<LOQ", "<MRL"):
+                    value, flag = loq_v or fallback, "<LOQ"
+                elif rv in ("<MDL", "<DL"):
+                    value, flag = lod_v or fallback, "<LOD"
+                elif raw_v.startswith("<"):
+                    try:
+                        value, flag = float(raw_v[1:].replace(",", "")), "<LOQ"
+                    except (ValueError, TypeError):
+                        value, flag = fallback, "<LOQ"
+                else:
+                    try:
+                        value, flag = float(raw_v.replace(",", "")), ""
+                    except (ValueError, TypeError):
+                        continue
+
+                records.append({
+                    "lab":           self.LAB_NAME,
+                    "sample_id":     sid,
+                    "depth":         depth,
+                    "compound":      name,
+                    "cas":           cas,
+                    "value":         value,
+                    "flag":          flag,
+                    "unit":          "mg/kg",
+                    "lod":           lod_v,
+                    "loq":           loq_v,
+                    "analysis_type": "SOIL_METALS",
+                })
         return records
 
     # ------------------------------------------------------------------
     def _parse_tph_table(self, table: list) -> list[dict]:
         """Based On EPA8015: rows=samples, cols=DRO/ORO/Total TPH"""
-        h  = [str(c or "").strip() for c in table[0]]
+        clean = [[self._clean_cell(c) for c in row] for row in table]
+        h  = clean[0]
         hl = [x.lower() for x in h]
         col_name = 0
         col_dro  = next((i for i, x in enumerate(hl) if "dro" in x and "oro" not in x), None)
@@ -865,24 +915,24 @@ class AlchemMultiSectionParser(BaseParser):
 
         lod: dict[str, float | None] = {"DRO": None, "ORO": None, "TPH": None}
         loq: dict[str, float]        = {"DRO": 30.0, "ORO": 20.0, "TPH": 50.0}
-        for row in table[1:]:
+        for row in clean[1:]:
             if not row:
                 continue
-            label = str(row[col_name] or "").strip().upper()
+            label = row[col_name].strip().upper() if row[col_name] else ""
             if label not in ("LOD", "LOQ"):
                 continue
             for cmp, ci in [("DRO", col_dro), ("ORO", col_oro), ("TPH", col_tph)]:
                 if ci is None or ci >= len(row):
                     continue
-                v = self._sf(str(row[ci] or "").strip())
+                v = self._sf(row[ci])
                 if v is not None:
                     (lod if label == "LOD" else loq)[cmp] = v  # type: ignore[index]
 
         records: list[dict] = []
-        for row in table[1:]:
+        for row in clean[1:]:
             if not row:
                 continue
-            raw_name = str(row[col_name] or "").strip()
+            raw_name = row[col_name].strip() if row[col_name] else ""
             if not raw_name or raw_name.upper() in ("LOD", "LOQ", "SAMPLE NAME", "NAME", ""):
                 continue
             borehole, depth = self._parse_sample_name(raw_name)
@@ -895,11 +945,11 @@ class AlchemMultiSectionParser(BaseParser):
             ]:
                 if ci is None or ci >= len(row):
                     continue
-                raw_v = str(row[ci] or "").strip()
+                raw_v = row[ci].strip() if row[ci] else ""
                 lq = loq.get(cmp)
                 rv = raw_v.upper()
                 if rv in ("N.D.", "ND", "N.D", "N/D"):
-                    value, flag = lod.get(cmp), "ND"
+                    value, flag = None, "ND"
                 elif rv in ("<LOQ", "<MDL", "<MRL", "<DL"):
                     value, flag = lq, "<LOQ"
                 elif raw_v.startswith("<"):
@@ -932,62 +982,79 @@ class AlchemMultiSectionParser(BaseParser):
 
     # ------------------------------------------------------------------
     def _parse_voc_table(self, table: list) -> list[dict]:
-        """EPA 8260: Name | CAS | Final Conc. [sample1] ... | MDL | MRL"""
-        h  = [str(c or "").strip() for c in table[0]]
-        hl = [x.lower() for x in h]
+        """EPA 8260 multi-sample table:
+           row0: 'Analysis Location:' | sample1 | sample2 | sample3 | (blank)
+           row1: 'Name' | 'CAS' | 'Final Conc...' x N | 'MDL' | 'MRL'
+           row2+: compound | cas | value x N | mdl | mrl
+        """
+        clean = [[self._clean_cell(c) for c in row] for row in table]
+
+        header_row_idx = None
+        for ri in range(min(3, len(clean))):
+            row_lo = [c.lower() for c in clean[ri]]
+            if any("final conc" in c for c in row_lo) and any(c == "cas" for c in row_lo):
+                header_row_idx = ri
+                break
+        if header_row_idx is None:
+            return []
+
+        name_row = clean[0]
+        hdr_row  = clean[header_row_idx]
+        hl = [c.lower() for c in hdr_row]
+
         col_cas = next((i for i, x in enumerate(hl) if x == "cas"), 1)
-        col_mdl = next((i for i, x in enumerate(hl) if x in ("mdl", "lod")), None)
-        col_mrl = next((i for i, x in enumerate(hl) if x in ("mrl", "loq")), None)
+        col_mdl = next((i for i, x in enumerate(hl) if x.startswith("mdl") or x.startswith("lod")), None)
+        col_mrl = next((i for i, x in enumerate(hl) if x.startswith("mrl") or x.startswith("loq")), None)
 
         sample_cols: list[tuple[int, str, str]] = []
-        for i, hdr in enumerate(h):
-            if "final conc" in hdr.lower():
-                raw_sid = re.sub(r'(?i)final\s+conc\.?\s*', '', hdr).strip()
-                borehole, depth = self._parse_sample_name(raw_sid) if raw_sid else ("", "")
-                sid = borehole or raw_sid or f"Sample-{i}"
+        for i, x in enumerate(hl):
+            if "final conc" in x:
+                sid_raw = name_row[i] if i < len(name_row) else ""
+                borehole, depth = self._parse_sample_name(sid_raw) if sid_raw else ("", "")
+                sid = borehole or sid_raw or f"Sample-{i}"
                 sample_cols.append((i, sid, depth))
-
         if not sample_cols:
             return []
 
         records: list[dict] = []
-        for row in table[1:]:
+        for row in clean[header_row_idx + 1:]:
             if not row or not row[0]:
                 continue
-            compound = str(row[0] or "").strip()
+            compound = row[0].strip()
             if not compound or compound.lower() in ("compound name", "name", "nan", ""):
                 continue
-            cas = str(row[col_cas] or "").strip() if col_cas < len(row) else ""
+            cas = row[col_cas].strip() if col_cas < len(row) and row[col_cas] else ""
             if cas.lower() == "nan":
                 cas = ""
             if " " in cas:
                 cas = cas.split()[0]
 
-            mdl_v = self._sf(str(row[col_mdl] or "") if col_mdl is not None and col_mdl < len(row) else "")
-            mrl_v = self._sf(str(row[col_mrl] or "") if col_mrl is not None and col_mrl < len(row) else "")
-            fallback = mrl_v or mdl_v or 0.01
+            mdl_v = self._sf(row[col_mdl]) if col_mdl is not None and col_mdl < len(row) else None
+            mrl_v = self._sf(row[col_mrl]) if col_mrl is not None and col_mrl < len(row) else None
 
             for ci, sid, depth in sample_cols:
                 if ci >= len(row):
                     continue
-                raw_v = str(row[ci] or "").strip()
+                raw_v = row[ci].strip() if row[ci] else ""
                 if not raw_v or raw_v.lower() == "nan":
                     continue
                 rv = raw_v.upper()
                 if rv in ("N.D.", "ND", "N.D", "N/D"):
-                    value, flag = mdl_v, "ND"
-                elif rv in ("<MDL", "<DL", "<MRL", "<LOQ"):
-                    value, flag = fallback, "<LOQ"
+                    value, flag = None, "ND"
+                elif rv in ("<MDL", "<DL"):
+                    value, flag = mdl_v, "<LOD"
+                elif rv in ("<MRL", "<LOQ"):
+                    value, flag = mrl_v, "<LOQ"
                 elif raw_v.startswith("<"):
                     try:
                         value, flag = float(raw_v[1:].replace(",", "")), "<LOQ"
                     except (ValueError, TypeError):
-                        value, flag = fallback, "<LOQ"
+                        value, flag = mrl_v or mdl_v, "<LOQ"
                 else:
                     try:
                         value, flag = float(raw_v.replace(",", "")), ""
                     except (ValueError, TypeError):
-                        value, flag = fallback, "<LOQ"
+                        continue
 
                 records.append({
                     "lab":           self.LAB_NAME,

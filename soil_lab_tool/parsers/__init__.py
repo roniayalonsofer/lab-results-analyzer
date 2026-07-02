@@ -204,8 +204,11 @@ def _is_aminolab_xlsx(file_bytes: bytes) -> bool:
 
 
 def _is_alchem_multi_section_pdf(file_bytes: bytes) -> bool:
-    """Return True if the PDF contains all three Alchem multi-section markers:
-    EPA 6010 (metals), EPA 8015 (TPH), and EPA 8260 (VOC)."""
+    """Return True if the PDF contains at least one Alchem section marker:
+    EPA 6010 (metals), EPA 8015 (TPH), or EPA 8260 (VOC). A report doesn't
+    need all three — e.g. a metals-only follow-up report (single analyte,
+    no TPH/VOC section) uses the identical table layout but only has the
+    EPA 6010 marker."""
     try:
         import io as _io, pdfplumber as _pl
         with _pl.open(_io.BytesIO(file_bytes)) as _pdf:
@@ -215,7 +218,7 @@ def _is_alchem_multi_section_pdf(file_bytes: bytes) -> bool:
         has_metals = bool(_re.search(r'EPA\s*6010', full_text, _re.IGNORECASE))
         has_tph    = bool(_re.search(r'EPA\s*8015|Based\s+On\s+EPA', full_text, _re.IGNORECASE))
         has_voc    = bool(_re.search(r'EPA\s*8260', full_text, _re.IGNORECASE))
-        return has_metals and has_tph and has_voc
+        return has_metals or has_tph or has_voc
     except Exception:
         return False
 
