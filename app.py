@@ -941,31 +941,33 @@ if page == "soil":
     else:
         st.session_state["pid_map"] = {}
 
-    secondary_lab_file = st.file_uploader(
-        "🧪 קובץ מעבדה משנית / אימות (.xlsx, .xls, .pdf) — אופציונלי",
+    secondary_lab_files = st.file_uploader(
+        "🧪 קבצי מעבדה משנית / אימות (.xlsx, .xls, .pdf) — אופציונלי",
         type=["xlsx", "xls", "pdf"],
+        accept_multiple_files=True,
         key="secondary_lab_upload",
-        help="תוצאות מעבדת אימות (QC/split samples). ישולבו בדוח עם סימון SPLIT ליד הנתונים.",
+        help="תוצאות מעבדת אימות (QC/split samples). ניתן להעלות מספר קבצים. ישולבו בדוח עם סימון SPLIT ליד הנתונים.",
     )
-    st.session_state["secondary_lab_file"] = secondary_lab_file
+    st.session_state["secondary_lab_files"] = secondary_lab_files
 
-    if secondary_lab_file is not None:
-        try:
-            _sec_peek = secondary_lab_file.getvalue()
-            _sec_det_lab = auto_detect_lab(secondary_lab_file.name, _sec_peek) or "?"
-            _sec_det_cat = auto_detect_category(secondary_lab_file.name, _sec_peek, _sec_det_lab)
-            _sec_cat_clean = (_sec_det_cat or "").split(" ", 1)[-1] if _sec_det_cat and " " in _sec_det_cat else (_sec_det_cat or "")
-            st.markdown(f"""
+    if secondary_lab_files:
+        for _sec_f in secondary_lab_files:
+            try:
+                _sec_peek = _sec_f.getvalue()
+                _sec_det_lab = auto_detect_lab(_sec_f.name, _sec_peek) or "?"
+                _sec_det_cat = auto_detect_category(_sec_f.name, _sec_peek, _sec_det_lab)
+                _sec_cat_clean = (_sec_det_cat or "").split(" ", 1)[-1] if _sec_det_cat and " " in _sec_det_cat else (_sec_det_cat or "")
+                st.markdown(f"""
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;
                     padding:0.9rem 1rem;margin-top:0.5rem;text-align:center;">
           <div style="font-size:0.65rem;color:#94a3b8;font-weight:700;letter-spacing:0.8px;
-                      text-transform:uppercase;margin-bottom:4px;">מעבדה משנית</div>
+                      text-transform:uppercase;margin-bottom:4px;">מעבדה משנית — {_sec_f.name}</div>
           <div style="font-size:1.2rem;font-weight:800;color:#1e3a4f;">{_sec_det_lab}</div>
           <div style="font-size:0.7rem;color:#64748b;margin-top:4px;">{_sec_cat_clean}</div>
         </div>
             """, unsafe_allow_html=True)
-        except Exception:
-            pass
+            except Exception:
+                pass
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1314,10 +1316,10 @@ if page == "soil":
         thresh_display = ", ".join(tm.threshold_label(k) for k in selected_thresholds) or "ללא ערכי סף"
         st.caption(f"📌 ערכי סף: **{thresh_display}**")
         try:
-            # ── Parse secondary lab file (any lab, any format) ──────────
+            # ── Parse secondary lab files (any lab, any format) ─────────
             secondary_records = []
-            _sec_file = st.session_state.get("secondary_lab_file")
-            if _sec_file is not None:
+            _sec_files = st.session_state.get("secondary_lab_files") or []
+            for _sec_file in _sec_files:
                 try:
                     _sec_raw  = _sec_file.getvalue()
                     _sec_name = _sec_file.name
@@ -1334,13 +1336,13 @@ if page == "soil":
                         _sec_recs = _sec_parser.parse(io.BytesIO(_sec_raw))
                     for r in _sec_recs:
                         r["lab"] = "secondary"
-                    secondary_records = _sec_recs
+                    secondary_records.extend(_sec_recs)
                     st.caption(
-                        f"🔬 מעבדה משנית ({_sec_lab} / {_sec_cat}): "
-                        f"{len(secondary_records)} רשומות"
+                        f"🔬 מעבדה משנית — {_sec_name} ({_sec_lab} / {_sec_cat}): "
+                        f"{len(_sec_recs)} רשומות"
                     )
                 except Exception as _se:
-                    st.warning(f"⚠️ שגיאת קריאת מעבדה משנית: {_se}")
+                    st.warning(f"⚠️ שגיאת קריאת מעבדה משנית ({_sec_file.name}): {_se}")
 
             builder = LabReportExcel(
                 records             = records,
