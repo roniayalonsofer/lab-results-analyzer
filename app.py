@@ -1425,32 +1425,28 @@ if page == "soil":
             )
 
         # ── Uncertain threshold notice + download link ─────────────────
-        _thresh_path = os.path.join(THRESH_DIR, 'soil_vsl_tier1_v7_2024.xlsx')
-        _vsl_path    = os.path.join(THRESH_DIR, 'soil_vsl_v7_full.xlsx')
         st.info(
             "ℹ️ תרכובות המסומנות בכוכבית ( **\\*** ) בדוח — שמן לא התאים בדיוק לשם בטבלת ערכי הסף. "
             "ערך הסף הוצג כ-**'לא קיים'** עבורן, ובעמודת ההערות מופיע שם התרכובת הדומה שנמצאה בטבלה. "
             "מומלץ לבדוק ידנית אם ערך הסף של התרכובת הדומה רלוונטי."
         )
-        _thresh_cols = st.columns(2)
-        if os.path.exists(_thresh_path):
-            with open(_thresh_path, 'rb') as _f:
-                _thresh_cols[0].download_button(
-                    "⬇️ הורד טבלת ערכי סף (TIER1 + VSL)",
-                    data=_f.read(),
-                    file_name="soil_vsl_tier1_v7_2024.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="thresh_dl_btn",
-                )
-        if os.path.exists(_vsl_path):
-            with open(_vsl_path, 'rb') as _f:
-                _thresh_cols[1].download_button(
-                    "⬇️ הורד טבלת VSL המלאה",
-                    data=_f.read(),
-                    file_name="soil_vsl_v7_full.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="vsl_full_dl_btn",
-                )
+        _thresh_files = [
+            ("⬇️ ערכי סף TIER1 + VSL (קרקע)", "ערכי_סף_מעודכנים_גרסה_7_דצמבר_2024.xlsx", "thresh_dl_main"),
+            ("⬇️ ערכי סף PFAS",              "ערכי_סף_PFAS_גרסה_3.xlsx",                "thresh_dl_pfas"),
+            ("⬇️ ערכי סף מי תהום",           "ערכי_סף_מי_תהום.xlsx",                    "thresh_dl_gw"),
+        ]
+        _thresh_cols = st.columns(len(_thresh_files))
+        for _col, (_label, _fname, _key) in zip(_thresh_cols, _thresh_files):
+            _fpath = os.path.join(THRESH_DIR, _fname)
+            if os.path.exists(_fpath):
+                with open(_fpath, 'rb') as _f:
+                    _col.download_button(
+                        _label,
+                        data=_f.read(),
+                        file_name=_fname,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=_key,
+                    )
 
     st.markdown('</div>', unsafe_allow_html=True)
 
