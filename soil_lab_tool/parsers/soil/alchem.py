@@ -650,7 +650,7 @@ class AlchemTPHPDFParser(BaseParser):
                 loq = loq_values.get(name)
 
                 if raw_val.upper() in ("N.D.", "ND", "N/D", "NOT DETECTED", ""):
-                    value, flag = loq, "<LOQ"
+                    value, flag = None, "ND"
                 elif raw_val.upper() in ("<LOQ", "<MRL", "<RL"):
                     value, flag = loq, "<LOQ"
                 else:

@@ -62,8 +62,20 @@ APP_URL = f"http://{LAN_IP}:8501"
 
 
 def _pid_norm(name: str) -> str:
-    """Normalize a borehole name for PID matching: remove dashes and spaces."""
-    return re.sub(r'[-\s]', '', name).strip()
+    """Normalize a borehole name for PID matching.
+
+    Delegates to _pid_key() in soil_lab_tool/core/excel_output.py — that's
+    the function used when *looking up* PID for a sample, while this one is
+    used when *building* the PID map from the field-log file. They must
+    always agree; previously they used different logic and every PID lookup
+    silently failed to match.
+    """
+    from core.excel_output import _pid_key
+    # Some field-log files use "Ķ" (K with cedilla) instead of plain "K" for
+    # the same borehole (a typing/autocorrect artifact) — normalize it so
+    # 'Ķ-31' and 'K-31' resolve to the same key.
+    s = name.replace('Ķ', 'K').replace('ķ', 'k')
+    return _pid_key(s)
 
 
 def _parse_pid_file(uploaded_file) -> dict:
@@ -1207,43 +1219,28 @@ if page == "soil":
     if has_soil_gas:
         any_shown = True
         st.markdown("##### 💨 גז קרקע VOC")
-        gas_indoor_type = st.radio(
-            "סוג ערך סף:",
-            options=[
-                "Soil Vapor — הגנה על אוויר פנים/חוץ מבני",
-                "Ambient Air — אוויר תוך מבני",
-            ],
-            index=0,
-            key="gas_indoor_type",
-            horizontal=True,
-        )
-        _use_ambient = gas_indoor_type == "Ambient Air — אוויר תוך מבני"
+        st.markdown('<div style="font-size:0.8rem;color:#6b7280;">ניתן לבחור Soil Vapor, Ambient Air, או את שניהם יחד — כל הערכים מקורם ב-TIER 1</div>', unsafe_allow_html=True)
         sg_col_r, sg_col_i = st.columns(2)
-        if _use_ambient:
-            # Ambient Air: the threshold sheet has a single column per Res/Ind
-            # (no indoor/outdoor split) — showing Indoor/Outdoor checkboxes
-            # here would be misleading, and Soil Vapor must not apply at all.
-            with sg_col_r:
-                st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 מגורים</div>', unsafe_allow_html=True)
-                sg_res_ambient = st.checkbox("Ambient Air", value=True, key="sg_res_ambient")
-            with sg_col_i:
-                st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 תעשייה</div>', unsafe_allow_html=True)
-                sg_ind_ambient = st.checkbox("Ambient Air", value=False, key="sg_ind_ambient")
-            if sg_res_ambient: selected_thresholds.append("GAS_AMBIENT_RES")
-            if sg_ind_ambient: selected_thresholds.append("GAS_AMBIENT_IND")
-        else:
-            with sg_col_r:
-                st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 מגורים</div>', unsafe_allow_html=True)
-                sg_res_in  = st.checkbox("Indoor — פנים",  value=True,  key="sg_res_in")
-                sg_res_out = st.checkbox("Outdoor — חוץ",  value=False, key="sg_res_out")
-            with sg_col_i:
-                st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 תעשייה</div>', unsafe_allow_html=True)
-                sg_ind_in  = st.checkbox("Indoor — פנים",  value=False, key="sg_ind_in")
-                sg_ind_out = st.checkbox("Outdoor — חוץ",  value=False, key="sg_ind_out")
-            if sg_res_in:  selected_thresholds.append("GAS_INDOOR_RES")
-            if sg_res_out: selected_thresholds.append("GAS_OUTDOOR_RES")
-            if sg_ind_in:  selected_thresholds.append("GAS_INDOOR_IND")
-            if sg_ind_out: selected_thresholds.append("GAS_OUTDOOR_IND")
+        with sg_col_r:
+            st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 מגורים</div>', unsafe_allow_html=True)
+            st.markdown('<div style="font-size:0.75rem;color:#6b7280;">Soil Vapor — הגנה על אוויר פנים/חוץ מבני</div>', unsafe_allow_html=True)
+            sg_res_in  = st.checkbox("Indoor — פנים",  value=True,  key="sg_res_in")
+            sg_res_out = st.checkbox("Outdoor — חוץ",  value=False, key="sg_res_out")
+            st.markdown('<div style="font-size:0.75rem;color:#6b7280;">Ambient Air — אוויר תוך מבני</div>', unsafe_allow_html=True)
+            sg_res_ambient = st.checkbox("Ambient Air", value=False, key="sg_res_ambient")
+        with sg_col_i:
+            st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 תעשייה</div>', unsafe_allow_html=True)
+            st.markdown('<div style="font-size:0.75rem;color:#6b7280;">Soil Vapor — הגנה על אוויר פנים/חוץ מבני</div>', unsafe_allow_html=True)
+            sg_ind_in  = st.checkbox("Indoor — פנים",  value=False, key="sg_ind_in")
+            sg_ind_out = st.checkbox("Outdoor — חוץ",  value=False, key="sg_ind_out")
+            st.markdown('<div style="font-size:0.75rem;color:#6b7280;">Ambient Air — אוויר תוך מבני</div>', unsafe_allow_html=True)
+            sg_ind_ambient = st.checkbox("Ambient Air", value=False, key="sg_ind_ambient")
+        if sg_res_in:      selected_thresholds.append("GAS_INDOOR_RES")
+        if sg_res_out:     selected_thresholds.append("GAS_OUTDOOR_RES")
+        if sg_res_ambient: selected_thresholds.append("GAS_AMBIENT_RES")
+        if sg_ind_in:      selected_thresholds.append("GAS_INDOOR_IND")
+        if sg_ind_out:     selected_thresholds.append("GAS_OUTDOOR_IND")
+        if sg_ind_ambient: selected_thresholds.append("GAS_AMBIENT_IND")
 
     if has_gw:
         any_shown = True

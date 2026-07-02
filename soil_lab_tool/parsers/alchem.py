@@ -757,7 +757,7 @@ def parse_alchem_tph_pdf(file_bytes: bytes) -> list[dict]:
                     ('TPH', tph_raw, loq_tph),
                 ]:
                     if raw_val in ('N.D.', 'ND'):
-                        value, flag = loq, '<'
+                        value, flag = None, 'ND'
                     elif raw_val == '<LOQ':
                         value, flag = loq, '<'
                     else:

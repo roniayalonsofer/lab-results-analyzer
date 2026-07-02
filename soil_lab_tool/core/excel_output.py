@@ -224,7 +224,7 @@ def _translit_borehole_prefix(s: str) -> str:
 def _pid_key(borehole: str) -> str:
     """Normalize borehole name for pid_map lookup.
     Strips קרקע prefix (Bactochem), maps Latin K/k to ק, removes dashes/spaces."""
-    name = borehole.strip()
+    name = borehole.strip().replace('Ķ', 'K').replace('ķ', 'k')
     if name.startswith('קרקע '):
         name = name[len('קרקע '):].strip()
     name = re.sub(r'^[Kk]-?', 'ק', name)
