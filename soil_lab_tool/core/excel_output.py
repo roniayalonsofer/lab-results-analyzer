@@ -1525,11 +1525,10 @@ class LabReportExcel:
                 # Use borehole name only (split_p[sid][0]) when depth is embedded
                 # in the composite key — depth is already shown in the עומק row.
                 for ci, sid in enumerate(samples, sample_start):
-                    display = split_sec[sid][0] if split_sec and sid in split_sec else (
-                        split_p[sid][0] if split_p and sid in split_p else sid
-                    )
-                    c = ws.cell(row=hdr_row, column=ci, value=display)
-                    c.font      = _font(display, bold=True)
+                    # Borehole name already shown once in the "שם קידוח" meta
+                    # row above — leave this row's sample cells blank instead
+                    # of repeating it.
+                    c = ws.cell(row=hdr_row, column=ci, value=None)
                     c.alignment = CENTER
                     c.border    = THIN
 
