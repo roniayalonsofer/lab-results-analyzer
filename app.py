@@ -941,6 +941,31 @@ if page == "soil":
     else:
         st.session_state["pid_map"] = {}
 
+    with st.expander("🔧 ערכי LOD/LOQ/MDL/MRL ידניים — לשימוש כשחסרים בקובץ", expanded=False):
+        st.caption(
+            "ערכים אלו יחולו **רק** על רשומות שבהן הקובץ המקורי לא כלל LOD/LOQ "
+            "(לדוגמה: גיליון TPH של אל-כם כולל LOQ אך לא LOD — זה קיים רק ב-PDF). "
+            "השאירו 0 כדי לא לדרוס נתונים קיימים."
+        )
+        _ov_col_m, _ov_col_t, _ov_col_v = st.columns(3)
+        with _ov_col_m:
+            st.markdown("**מתכות**")
+            st.number_input("LOD ברירת מחדל", min_value=0.0, value=0.0, step=0.01,
+                             format="%.4f", key="ov_lod_metals")
+            st.number_input("LOQ / MRL ברירת מחדל", min_value=0.0, value=0.0, step=0.01,
+                             format="%.4f", key="ov_loq_metals")
+        with _ov_col_t:
+            st.markdown("**TPH**")
+            st.number_input("LOD — DRO", min_value=0.0, value=0.0, step=0.1, key="ov_lod_dro")
+            st.number_input("LOD — ORO", min_value=0.0, value=0.0, step=0.1, key="ov_lod_oro")
+            st.number_input("LOD — TPH כולל", min_value=0.0, value=0.0, step=0.1, key="ov_lod_tph")
+        with _ov_col_v:
+            st.markdown("**VOC / SVOC**")
+            st.number_input("LOD / MDL ברירת מחדל", min_value=0.0, value=0.0, step=0.001,
+                             format="%.4f", key="ov_lod_voc")
+            st.number_input("LOQ / MRL ברירת מחדל", min_value=0.0, value=0.0, step=0.001,
+                             format="%.4f", key="ov_loq_voc")
+
     secondary_lab_files = st.file_uploader(
         "🧪 קבצי מעבדה משנית / אימות (.xlsx, .xls, .pdf) — אופציונלי",
         type=["xlsx", "xls", "pdf"],
@@ -1046,6 +1071,51 @@ if page == "soil":
                 file_summaries.append({"name": fname_i, "records": 0, "ok": False})
 
     records = all_records
+
+    # ── Apply manual LOD/LOQ/MDL/MRL overrides for data missing from the
+    # source file (e.g. Al-Chem's TPH xlsx sheet has LOQ but no LOD row —
+    # that only exists in the PDF version of the same report) ──────────
+    _ov_lod_metals = st.session_state.get("ov_lod_metals") or None
+    _ov_loq_metals = st.session_state.get("ov_loq_metals") or None
+    _ov_lod_voc    = st.session_state.get("ov_lod_voc") or None
+    _ov_loq_voc    = st.session_state.get("ov_loq_voc") or None
+    _ov_tph_lod = {
+        "DRO":       st.session_state.get("ov_lod_dro") or None,
+        "ORO":       st.session_state.get("ov_lod_oro") or None,
+        "TPH":       st.session_state.get("ov_lod_tph") or None,
+        "Total TPH": st.session_state.get("ov_lod_tph") or None,
+    }
+    _has_overrides = any([_ov_lod_metals, _ov_loq_metals, _ov_lod_voc, _ov_loq_voc,
+                          any(_ov_tph_lod.values())])
+    if _has_overrides:
+        for r in records:
+            atype = r.get("analysis_type")
+            if atype == "SOIL_TPH":
+                want_lod = _ov_tph_lod.get(r.get("compound"))
+                if want_lod and not r.get("lod"):
+                    r["lod"] = want_lod
+                    # A record showing '<LOQ' with value==loq is the fallback
+                    # substitution used when no LOD was available at parse
+                    # time — now that we have a real LOD, show that instead.
+                    if r.get("flag") == "<LOQ" and r.get("value") == r.get("loq"):
+                        r["value"] = want_lod
+                        r["flag"] = "<LOD"
+            elif atype == "SOIL_METALS":
+                if _ov_lod_metals and not r.get("lod"):
+                    r["lod"] = _ov_lod_metals
+                    if r.get("flag") == "<LOQ" and r.get("value") == r.get("loq"):
+                        r["value"] = _ov_lod_metals
+                        r["flag"] = "<LOD"
+                if _ov_loq_metals and not r.get("loq"):
+                    r["loq"] = _ov_loq_metals
+            elif atype in ("SOIL_VOC", "SOIL_SVOC"):
+                if _ov_lod_voc and not r.get("lod"):
+                    r["lod"] = _ov_lod_voc
+                    if r.get("flag") == "<LOQ" and r.get("value") == r.get("loq"):
+                        r["value"] = _ov_lod_voc
+                        r["flag"] = "<LOD"
+                if _ov_loq_voc and not r.get("loq"):
+                    r["loq"] = _ov_loq_voc
 
     if not records:
         st.markdown(
