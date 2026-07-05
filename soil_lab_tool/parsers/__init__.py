@@ -547,6 +547,13 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None, lab: st
                 for _pg in _pdf_cat.pages[:3]:
                     _cat_text += (_pg.extract_text() or "")
             _cat_lo = _cat_text.lower()
+            # Alchem TO-15 soil-gas PDF appendix ("נספח לדוח אנליזה") — same
+            # canister/SG-probe report as the xlsx, just in PDF form. Must be
+            # checked BEFORE the generic al-chem catch-all below, otherwise it
+            # gets mis-detected as "soil_tph_pdf" and breaks parsing when the
+            # xlsx + pdf pair are uploaded together.
+            if "canister number" in _cat_lo and ("to-15" in _cat_lo or "analysis location" in _cat_lo):
+                return "soil_gas"
             if "als czech republic" in _cat_lo or "alsglobal.com" in _cat_lo:
                 if "sub-matrix: water" in _cat_lo:
                     return "groundwater"
