@@ -343,7 +343,7 @@ def _dup_rich_text(bh: str):
 # symbol is shown instead and a footnote explaining it is added at the
 # bottom of the table (see _write_legend callers).
 SPLIT_MARK = "#"
-DUP_MARK   = "†"
+DUP_MARK   = "^"
 
 
 def _replace_split_dup_markers(depth_display, is_split_row: bool = False):
@@ -750,6 +750,7 @@ class LabReportExcel:
         lod_map:   dict[str, float | None] = {}
         loq_map:   dict[str, float | None] = {}
         sec_loq_map: dict[str, float | None] = {}
+        sec_lod_map: dict[str, float | None] = {}
         unit_map:  dict[str, str]  = {}
 
         for r in records:
@@ -799,8 +800,8 @@ class LabReportExcel:
             sec_pivot[ncmp][sid] = (r.get("value"), r.get("flag", ""), r.get("lod"))
             if sec_loq_map.get(ncmp) is None and r.get("loq") is not None:
                 sec_loq_map[ncmp] = r["loq"]
-            if lod_map.get(pri_cmp_display.get(ncmp, cmp)) is None and r.get("lod") is not None:
-                lod_map[pri_cmp_display.get(ncmp, cmp)] = r["lod"]
+            if sec_lod_map.get(ncmp) is None and r.get("lod") is not None:
+                sec_lod_map[ncmp] = r["lod"]
 
         # Match primary sids to secondary sids by (borehole, depth) key
         sec_key_to_sid = {}
@@ -836,8 +837,9 @@ class LabReportExcel:
         # Keep ncmp → display name mapping for pivot lookup
         _ncmp_list = all_ncmps
 
-        # Rebuild sec_loq_map keyed by display name
+        # Rebuild sec_loq_map / sec_lod_map keyed by display name
         sec_loq_map = {pri_cmp_display.get(nc, nc): v for nc, v in sec_loq_map.items()}
+        sec_lod_map = {pri_cmp_display.get(nc, nc): v for nc, v in sec_lod_map.items()}
         # Rebuild lod_map and loq_map keyed by display name (already done above for primary)
 
         _DASH = ("-", "dash", None)
@@ -998,7 +1000,8 @@ class LabReportExcel:
                                  depth_map=depth_map, pid_map=self.pid_map,
                                  uncertain_compounds=uncertain_compounds,
                                  has_secondary=has_secondary,
-                                 sec_loq_map=sec_loq_map)
+                                 sec_loq_map=sec_loq_map,
+                                 sec_lod_map=sec_lod_map)
         else:
             self._write_landscape(ws, compounds, samples, pivot, cas_map,
                                   lod_map, loq_map,
@@ -1007,7 +1010,8 @@ class LabReportExcel:
                                   depth_map=depth_map, pid_map=self.pid_map,
                                   uncertain_compounds=uncertain_compounds,
                                   has_secondary=has_secondary,
-                                  sec_loq_map=sec_loq_map)
+                                  sec_loq_map=sec_loq_map,
+                                  sec_lod_map=sec_lod_map)
         return True
 
     def _write_lowflow_sheet(self, ws, records, cfg):
@@ -1360,11 +1364,12 @@ class LabReportExcel:
                         thresh_keys, thresh_vals, hinfo, cfg=None, sample_meta=None,
                         unit_map=None, depth_map=None, pid_map=None,
                         uncertain_compounds=None,
-                        has_secondary=False, sec_loq_map=None):
+                        has_secondary=False, sec_loq_map=None, sec_lod_map=None):
         cfg         = cfg or {}
         sample_meta = sample_meta or {}
         uncertain_compounds = uncertain_compounds or {}
         sec_loq_map = sec_loq_map or {}
+        sec_lod_map = sec_lod_map or {}
         sheet_used_split = False   # tracks whether the # (SPLIT) footnote is needed
         sheet_used_dup   = False   # tracks whether the † (DUP) footnote is needed
         # Separate primary vs secondary sample IDs
@@ -1376,8 +1381,9 @@ class LabReportExcel:
         units_in_header = cfg.get("units_in_header", False)
 
         N_COMPOUND = 2                         # A: compound, B: CAS Number
+        has_sec_lod = has_secondary and any(sec_lod_map.get(c) is not None for c in compounds)
         if include_lod_loq or lod_loq_mode == "both":
-            N_LOD_LOQ = 2 + (1 if has_secondary else 0)  # LOD + LOQ ראשית [+ LOQ משנית]
+            N_LOD_LOQ = 2 + (1 if has_secondary else 0) + (1 if has_sec_lod else 0)  # LOD [+ LOD משנית] + LOQ ראשית [+ LOQ משנית]
         elif lod_loq_mode == "loq":
             N_LOD_LOQ = 1 + (1 if has_secondary else 0)  # LOQ ראשית [+ LOQ משנית]
         else:
@@ -1516,8 +1522,12 @@ class LabReportExcel:
             # ── Column headers row (after all meta rows) ───────────────
             hdr_row = meta_start + len(meta_rows)
             if lod_loq_mode == "both":
+                lod_pri_lbl = f"LOD ראשית [{unit}]" if has_secondary else f"LOD [{unit}]"
                 loq_pri_lbl = f"LOQ ראשית [{unit}]" if has_secondary else f"LOQ [{unit}]"
-                lod_loq_hdrs = [f"LOD [{unit}]", loq_pri_lbl]
+                lod_loq_hdrs = [lod_pri_lbl]
+                if has_sec_lod:
+                    lod_loq_hdrs.append(f"LOD משנית [{unit}]")
+                lod_loq_hdrs.append(loq_pri_lbl)
                 if has_secondary:
                     lod_loq_hdrs.append(f"LOQ משנית [{unit}]")
             elif lod_loq_mode == "loq":
@@ -1613,7 +1623,9 @@ class LabReportExcel:
 
             if include_lod_loq or lod_loq_mode == "both":
                 sec_loq_disp = _round_sf(sec_loq_map.get(cmp)) if has_secondary and sec_loq_map.get(cmp) is not None else ("-" if has_secondary else None)
-                fixed_vals = [cmp, cas, lod_disp, loq_disp] + ([sec_loq_disp] if has_secondary else [])
+                sec_lod_disp = _round_sf(sec_lod_map.get(cmp)) if has_sec_lod and sec_lod_map.get(cmp) is not None else ("-" if has_sec_lod else None)
+                fixed_vals = ([cmp, cas, lod_disp] + ([sec_lod_disp] if has_sec_lod else [])
+                              + [loq_disp] + ([sec_loq_disp] if has_secondary else []))
             elif lod_loq_mode == "loq":
                 sec_loq_disp = _round_sf(sec_loq_map.get(cmp)) if has_secondary and sec_loq_map.get(cmp) is not None else ("-" if has_secondary else None)
                 fixed_vals = [cmp, cas, loq_disp] + ([sec_loq_disp] if has_secondary else [])
@@ -1753,7 +1765,10 @@ class LabReportExcel:
                 if has_secondary:
                     row_data.append("")   # secondary LOQ placeholder for Total TPH
             elif include_lod_loq or lod_loq_mode == "both":
-                row_data = ["Total TPH", "DRO+ORO", "", _round_sf(total_loq)]
+                row_data = ["Total TPH", "DRO+ORO", ""]  # LOD (ראשית) placeholder
+                if has_sec_lod:
+                    row_data.append("")   # LOD משנית placeholder
+                row_data.append(_round_sf(total_loq))
                 if has_secondary:
                     row_data.append("")   # secondary LOQ placeholder
             else:
@@ -1815,11 +1830,12 @@ class LabReportExcel:
                          thresh_keys, thresh_vals, hinfo, cfg=None, sample_meta=None,
                          unit_map=None, depth_map=None, pid_map=None,
                          uncertain_compounds=None,
-                         has_secondary=False, sec_loq_map=None):
+                         has_secondary=False, sec_loq_map=None, sec_lod_map=None):
         cfg      = cfg or {}
         unit_map = unit_map or {}
         uncertain_compounds = uncertain_compounds or {}
         sec_loq_map = sec_loq_map or {}
+        sec_lod_map = sec_lod_map or {}
 
         # Separate primary vs secondary samples for display
         pri_samples  = [s for s in samples if not s.endswith("_SPLIT")]
@@ -1890,12 +1906,14 @@ class LabReportExcel:
                 c.border    = THIN
                 # No fill on header rows 2-4 (rows 1-4 are fill-free)
 
-        # ── Optional LOD header row (per-compound, before LOQ row) ──────
+        # ── Optional LOD header row(s) (per-compound, before LOQ row) ───
         lod_loq_mode = (cfg or {}).get("lod_loq_mode", False)
         data_row = hdr_base + 3
         unit     = hinfo["unit"]
-        if lod_loq_mode == "both" and any(lod_map.get(c) is not None for c in compounds):
-            lod_lbl = f"LOD [{unit}]"
+        has_pri_lod = any(lod_map.get(c) is not None for c in compounds)
+        has_sec_lod = any(sec_lod_map.get(c) is not None for c in compounds)
+        if lod_loq_mode == "both" and (has_pri_lod or has_sec_lod):
+            lod_lbl = f"LOD ראשית [{unit}]" if has_secondary else f"LOD [{unit}]"
             lc = ws.cell(row=data_row, column=1, value=lod_lbl)
             lc.font      = _font(lod_lbl, bold=True)
             lc.alignment = WRAP_C
@@ -1911,6 +1929,25 @@ class LabReportExcel:
                 c.alignment = CENTER
                 c.border    = THIN
             data_row += 1
+
+            # ── Secondary LOD row (when secondary lab has its own LOD data) ──
+            if has_secondary and has_sec_lod:
+                sec_lod_lbl = f"LOD משנית [{unit}]"
+                sc = ws.cell(row=data_row, column=1, value=sec_lod_lbl)
+                sc.font      = _font(sec_lod_lbl, bold=True)
+                sc.alignment = WRAP_C
+                sc.border    = THIN
+                for fc in range(2, cmp_col_start):
+                    ws.cell(row=data_row, column=fc).border = THIN
+                for ci, cmp in enumerate(compounds, cmp_col_start):
+                    slod_val  = sec_lod_map.get(cmp)
+                    slod_disp = _round_sf(slod_val) if isinstance(slod_val, float) else "-"
+                    c = ws.cell(row=data_row, column=ci)
+                    c.value     = slod_disp
+                    c.font      = _font(slod_disp)
+                    c.alignment = CENTER
+                    c.border    = THIN
+                data_row += 1
 
         # ── Optional LOQ header row (per-compound, before thresholds) ──
         if lod_loq_mode:
