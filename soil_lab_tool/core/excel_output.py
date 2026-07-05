@@ -338,6 +338,35 @@ def _dup_rich_text(bh: str):
     return CellRichText(*parts)
 
 
+# ── SPLIT / DUP footnote markers ────────────────────────────────────────
+# Rather than spelling "SPLIT" / "DUP" out next to the depth value, a short
+# symbol is shown instead and a footnote explaining it is added at the
+# bottom of the table (see _write_legend callers).
+SPLIT_MARK = "#"
+DUP_MARK   = "†"
+
+
+def _replace_split_dup_markers(depth_display, is_split_row: bool = False):
+    """
+    Strip literal 'SPLIT' / 'DUP' words out of a depth-display string and
+    replace them with footnote-reference symbols (SPLIT_MARK / DUP_MARK).
+
+    Returns (new_display, used_split, used_dup).
+    """
+    if not depth_display:
+        return depth_display, False, False
+    text = str(depth_display)
+    used_split = is_split_row and bool(re.search(r'SPLIT', text, re.IGNORECASE))
+    used_dup   = bool(re.search(r'DUP', text, re.IGNORECASE))
+    text = re.sub(r'\s*SPLIT\s*', ' ', text, flags=re.IGNORECASE)
+    text = re.sub(r'\s*DUP\s*',   ' ', text, flags=re.IGNORECASE)
+    text = text.strip()
+    marks = (SPLIT_MARK if used_split else "") + (DUP_MARK if used_dup else "")
+    if marks:
+        text = f"{text} {marks}".strip() if text else marks
+    return text, used_split, used_dup
+
+
 def _mixed_rich_text(s: str, bold: bool = False):
     """
     For mixed Hebrew+English strings (e.g. 'VSL קרקע'):
@@ -502,17 +531,17 @@ SHEET_CONFIG: dict[str, dict] = {
     "SOIL_VOC":   {"name": "קרקע VOC",  "unit": "mg/kg", "lod_loq_mode": "both", "nd_shows_loq": True},
     "SOIL_SVOC":  {"name": "קרקע SVOC", "unit": "mg/kg", "lod_loq_mode": "both", "nd_shows_loq": True},
     "SOIL_MBTEX": {"name": "קרקע MBTEX",         "unit": "mg/kg"},
-    "SOIL_TPH":   {"name": "קרקע TPH",            "unit": "mg/kg", "lod_loq_mode": "loq"},
+    "SOIL_TPH":   {"name": "קרקע TPH",            "unit": "mg/kg", "lod_loq_mode": "both"},
     "SOIL_TPH_VOC":   {"name": "קרקע TPH+BTEX",      "unit": "mg/kg"},
     "SOIL_TPH_MBTEX": {"name": "קרקע TPH+MBTEX",     "unit": "mg/kg"},
-    "SOIL_METALS":    {"name": "קרקע מתכות",         "unit": "mg/kg DW", "nd_shows_loq": True, "lod_loq_mode": "loq"},
+    "SOIL_METALS":    {"name": "קרקע מתכות",         "unit": "mg/kg DW", "nd_shows_loq": True, "lod_loq_mode": "both"},
     "SOIL_NUTRIENTS":  {"name": "קרקע כימיה",          "unit": "mg/kg", "nd_shows_loq": True},
     "SOIL_MICROBIOLOGY":{"name": "קרקע חיידקים",      "unit": "CFU/gr", "nd_shows_loq": True},
     "SOIL_GRAIN_SIZE": {"name": "גרנולומטריה",        "unit": "%"},
     "SOIL_PFAS":   {"name": "קרקע PFAS",       "unit": "ng/g"},
-    "GW_VOC":          {"name": "מי תהום VOC",      "unit": "µg/L", "lod_loq_mode": "loq"},
-    "GW_SVOC":         {"name": "מי תהום SVOC",     "unit": "µg/L", "lod_loq_mode": "loq"},
-    "GW_METALS":       {"name": "מי תהום מתכות",   "unit": "µg/L", "lod_loq_mode": "loq"},
+    "GW_VOC":          {"name": "מי תהום VOC",      "unit": "µg/L", "lod_loq_mode": "both"},
+    "GW_SVOC":         {"name": "מי תהום SVOC",     "unit": "µg/L", "lod_loq_mode": "both"},
+    "GW_METALS":       {"name": "מי תהום מתכות",   "unit": "µg/L", "lod_loq_mode": "both"},
     "GW_PFAS":         {"name": "מי תהום PFAS",         "unit": "ng/L"},
     "GW_MICROBIOLOGY": {"name": "מיקרוביולוגיה מי תהום", "unit": "CFU/mL"},
     "LOWFLOW":         {"name": "pH",               "unit": ""},
@@ -1336,6 +1365,8 @@ class LabReportExcel:
         sample_meta = sample_meta or {}
         uncertain_compounds = uncertain_compounds or {}
         sec_loq_map = sec_loq_map or {}
+        sheet_used_split = False   # tracks whether the # (SPLIT) footnote is needed
+        sheet_used_dup   = False   # tracks whether the † (DUP) footnote is needed
         # Separate primary vs secondary sample IDs
         pri_samples = [s for s in samples if "_SEC" not in s]
         sec_samples = [s for s in samples if "_SEC" in s]
@@ -1435,15 +1466,20 @@ class LabReportExcel:
                 return (*_borehole_sort_key(bh), float(dep_clean) if dep_clean else 0.0, 1 if is_split else 0)
             samples = sorted(samples, key=_sec_sort_key)
 
-            # Build display values: SPLIT samples show same borehole, depth="3.0 SPLIT"
+            # Build display values: SPLIT samples show same borehole, depth="3.0 #" (footnote marker)
             split_sec = {}
             for sid in samples:
                 if sid.endswith("_SPLIT"):
                     base = sid[:-6]
                     bh, dep = split_p.get(base, _split_sample_depth(base))
-                    split_sec[sid] = (bh, f"{dep} SPLIT" if dep else "SPLIT")
+                    raw_depth = f"{dep} SPLIT" if dep else "SPLIT"
+                    disp_depth, u_split, u_dup = _replace_split_dup_markers(raw_depth, is_split_row=True)
                 else:
-                    split_sec[sid] = split_p.get(sid, _split_sample_depth(sid))
+                    bh, dep = split_p.get(sid, _split_sample_depth(sid))
+                    disp_depth, u_split, u_dup = _replace_split_dup_markers(dep, is_split_row=False)
+                split_sec[sid] = (bh, disp_depth)
+                sheet_used_split = sheet_used_split or u_split
+                sheet_used_dup   = sheet_used_dup   or u_dup
 
             boreholes = [_dup_rich_text(split_sec[sid][0]) for sid in samples]
             depths    = [split_sec[sid][1] for sid in samples]
@@ -1757,10 +1793,16 @@ class LabReportExcel:
             c.font = Font(**FHE, italic=True, color="808080")
             c.fill = WHITE
             note_row += 1
-        # ── Secondary lab footnote ──────────────────────────────────────
-        if has_secondary:
+        # ── SPLIT / DUP footnotes ────────────────────────────────────────
+        if sheet_used_split:
             c = ws.cell(row=note_row, column=1,
-                        value="SPLIT = תוצאות מעבדה משנית")
+                        value=f"{SPLIT_MARK} = תוצאות מעבדה משנית (SPLIT)")
+            c.font = Font(**FHE, italic=True, color="808080")
+            c.fill = WHITE
+            note_row += 1
+        if sheet_used_dup:
+            c = ws.cell(row=note_row, column=1,
+                        value=f"{DUP_MARK} = דגימת כפל (DUP)")
             c.font = Font(**FHE, italic=True, color="808080")
             c.fill = WHITE
         self._auto_width(ws, N_FIXED + len(samples), hdr_row=hdr_row)
@@ -1848,11 +1890,30 @@ class LabReportExcel:
                 c.border    = THIN
                 # No fill on header rows 2-4 (rows 1-4 are fill-free)
 
-        # ── Optional LOQ header row (per-compound, before thresholds) ──
+        # ── Optional LOD header row (per-compound, before LOQ row) ──────
         lod_loq_mode = (cfg or {}).get("lod_loq_mode", False)
         data_row = hdr_base + 3
+        unit     = hinfo["unit"]
+        if lod_loq_mode == "both" and any(lod_map.get(c) is not None for c in compounds):
+            lod_lbl = f"LOD [{unit}]"
+            lc = ws.cell(row=data_row, column=1, value=lod_lbl)
+            lc.font      = _font(lod_lbl, bold=True)
+            lc.alignment = WRAP_C
+            lc.border    = THIN
+            for fc in range(2, cmp_col_start):
+                ws.cell(row=data_row, column=fc).border = THIN
+            for ci, cmp in enumerate(compounds, cmp_col_start):
+                lod_val  = lod_map.get(cmp)
+                lod_disp = _round_sf(lod_val) if isinstance(lod_val, float) else ""
+                c = ws.cell(row=data_row, column=ci)
+                c.value     = lod_disp
+                c.font      = _font(lod_disp)
+                c.alignment = CENTER
+                c.border    = THIN
+            data_row += 1
+
+        # ── Optional LOQ header row (per-compound, before thresholds) ──
         if lod_loq_mode:
-            unit     = hinfo["unit"]
             loq_lbl  = f"LOQ ראשית [{unit}]" if has_secondary else f"LOQ [{unit}]"
             lc = ws.cell(row=data_row, column=1, value=loq_lbl)
             lc.font      = _font(loq_lbl, bold=True)
@@ -1927,21 +1988,26 @@ class LabReportExcel:
         # ── Sample data rows ─────────────────────────────────────────────
         first_sample_row = data_row   # remember for borehole-merge pass
         has_gray = False              # tracks whether any gray-filled cell was written
+        sheet_used_split = False      # tracks whether the # (SPLIT) footnote is needed
+        sheet_used_dup   = False      # tracks whether the † (DUP) footnote is needed
 
         for sid in samples:
             borehole, depth_str = split_map[sid]
             row_meta: list[tuple] = []
             col_vals: list = []
 
-            # SPLIT rows: borehole=same as primary, depth="3.0 SPLIT" (matching image format)
+            # SPLIT rows: borehole=same as primary, depth="3.0 #" (footnote marker)
             if has_secondary and depth_str == "SPLIT":
                 base_sid = sid[:-6] if sid.endswith("_SPLIT") else sid
                 base_bh, base_dep = split_map.get(base_sid, _split_sample_depth(base_sid))
                 bh_cell_val = _dup_rich_text(base_bh)
                 depth_display = f"{base_dep} SPLIT" if base_dep else "SPLIT"
+                depth_display, u_split, u_dup = _replace_split_dup_markers(depth_display, is_split_row=True)
             else:
                 bh_cell_val = _dup_rich_text(borehole)
-                depth_display = depth_str
+                depth_display, u_split, u_dup = _replace_split_dup_markers(depth_str, is_split_row=False)
+            sheet_used_split = sheet_used_split or u_split
+            sheet_used_dup   = sheet_used_dup   or u_dup
 
             pid_cell = _pid_lookup_split(pid_map, borehole, depth_str) if has_pid else None
             if has_depth:
@@ -2093,6 +2159,20 @@ class LabReportExcel:
                 c.font = Font(**FEN, italic=True, color="808080")
                 c.fill = WHITE
                 note_row += 1
+
+        # ── SPLIT / DUP footnotes ────────────────────────────────────────
+        if sheet_used_split:
+            c = ws.cell(row=note_row, column=1,
+                        value=f"{SPLIT_MARK} = תוצאות מעבדה משנית (SPLIT)")
+            c.font = Font(**FHE, italic=True, color="808080")
+            c.fill = WHITE
+            note_row += 1
+        if sheet_used_dup:
+            c = ws.cell(row=note_row, column=1,
+                        value=f"{DUP_MARK} = דגימת כפל (DUP)")
+            c.font = Font(**FHE, italic=True, color="808080")
+            c.fill = WHITE
+            note_row += 1
 
         self._auto_width(ws, total_cols)
 
