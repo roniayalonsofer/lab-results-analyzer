@@ -122,6 +122,14 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800;900&display=swap');
 
 * { box-sizing: border-box; font-family: 'Heebo', sans-serif !important; }
+/* Do not override the icon font — otherwise Streamlit's built-in icons
+   (e.g. the expander arrow "keyboard_arrow_down") render as raw text
+   instead of the icon glyph. */
+[data-testid="stIconMaterial"],
+span[class*="material-symbols"],
+i[class*="material-icons"] {
+    font-family: 'Material Symbols Rounded', 'Material Symbols Outlined', 'Material Icons' !important;
+}
 html, body {
     direction: ltr;
     font-family: 'Heebo', sans-serif !important;
