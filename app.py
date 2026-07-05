@@ -970,27 +970,35 @@ if page == "soil":
           יש להשאיר 0 כדי לא לשנות נתונים שכבר קיימים בקובץ.
         </div>
         """, unsafe_allow_html=True)
-        _ov_col_m, _ov_col_t, _ov_col_v = st.columns(3)
-        with _ov_col_m:
-            st.markdown("**מתכות**")
-            st.number_input("ברירת מחדל ל-LOD", min_value=0.0, value=0.0, step=0.01,
-                             format="%.4f", key="ov_lod_metals")
-            st.number_input("ברירת מחדל ל-LOQ (MRL)", min_value=0.0, value=0.0, step=0.01,
-                             format="%.4f", key="ov_loq_metals")
-        with _ov_col_t:
-            st.markdown("**TPH**")
-            st.number_input("LOD — DRO", min_value=0.0, value=0.0, step=0.1, key="ov_lod_dro")
-            st.number_input("LOQ — DRO", min_value=0.0, value=0.0, step=0.1, key="ov_loq_dro")
-            st.number_input("LOD — ORO", min_value=0.0, value=0.0, step=0.1, key="ov_lod_oro")
-            st.number_input("LOQ — ORO", min_value=0.0, value=0.0, step=0.1, key="ov_loq_oro")
-            st.number_input("LOD — TPH כולל", min_value=0.0, value=0.0, step=0.1, key="ov_lod_tph")
-            st.number_input("LOQ — TPH כולל", min_value=0.0, value=0.0, step=0.1, key="ov_loq_tph")
-        with _ov_col_v:
-            st.markdown("**VOC / SVOC**")
-            st.number_input("ברירת מחדל ל-LOD (MDL)", min_value=0.0, value=0.0, step=0.001,
-                             format="%.4f", key="ov_lod_voc")
-            st.number_input("ברירת מחדל ל-LOQ (MRL)", min_value=0.0, value=0.0, step=0.001,
-                             format="%.4f", key="ov_loq_voc")
+        def _render_override_columns(_key_suffix: str):
+            _ov_col_m, _ov_col_t, _ov_col_v = st.columns(3)
+            with _ov_col_m:
+                st.markdown("**מתכות**")
+                st.number_input("ברירת מחדל ל-LOD", min_value=0.0, value=0.0, step=0.01,
+                                 format="%.4f", key=f"ov_lod_metals{_key_suffix}")
+                st.number_input("ברירת מחדל ל-LOQ (MRL)", min_value=0.0, value=0.0, step=0.01,
+                                 format="%.4f", key=f"ov_loq_metals{_key_suffix}")
+            with _ov_col_t:
+                st.markdown("**TPH**")
+                st.number_input("LOD — DRO", min_value=0.0, value=0.0, step=0.1, key=f"ov_lod_dro{_key_suffix}")
+                st.number_input("LOQ — DRO", min_value=0.0, value=0.0, step=0.1, key=f"ov_loq_dro{_key_suffix}")
+                st.number_input("LOD — ORO", min_value=0.0, value=0.0, step=0.1, key=f"ov_lod_oro{_key_suffix}")
+                st.number_input("LOQ — ORO", min_value=0.0, value=0.0, step=0.1, key=f"ov_loq_oro{_key_suffix}")
+                st.number_input("LOD — TPH כולל", min_value=0.0, value=0.0, step=0.1, key=f"ov_lod_tph{_key_suffix}")
+                st.number_input("LOQ — TPH כולל", min_value=0.0, value=0.0, step=0.1, key=f"ov_loq_tph{_key_suffix}")
+            with _ov_col_v:
+                st.markdown("**VOC / SVOC**")
+                st.number_input("ברירת מחדל ל-LOD (MDL)", min_value=0.0, value=0.0, step=0.001,
+                                 format="%.4f", key=f"ov_lod_voc{_key_suffix}")
+                st.number_input("ברירת מחדל ל-LOQ (MRL)", min_value=0.0, value=0.0, step=0.001,
+                                 format="%.4f", key=f"ov_loq_voc{_key_suffix}")
+
+        _ov_tab_primary, _ov_tab_secondary = st.tabs(["🧪 מעבדה ראשית", "🔬 מעבדה משנית"])
+        with _ov_tab_primary:
+            _render_override_columns("")
+        with _ov_tab_secondary:
+            st.caption("הערכים בטאב זה יחולו רק על רשומות שהועלו כ'קבצי מעבדה משנית / אימות' למטה.")
+            _render_override_columns("_sec")
 
     secondary_lab_files = st.file_uploader(
         "🧪 קבצי מעבדה משנית / אימות (.xlsx, .xls, .pdf) — אופציונלי",
@@ -1448,6 +1456,56 @@ if page == "soil":
                     )
                 except Exception as _se:
                     st.warning(f"⚠️ שגיאת קריאת מעבדה משנית ({_sec_file.name}): {_se}")
+
+            # ── Apply manual LOD/LOQ overrides dedicated to the secondary lab ──
+            _ov_lod_metals_sec = st.session_state.get("ov_lod_metals_sec") or None
+            _ov_loq_metals_sec = st.session_state.get("ov_loq_metals_sec") or None
+            _ov_lod_voc_sec    = st.session_state.get("ov_lod_voc_sec") or None
+            _ov_loq_voc_sec    = st.session_state.get("ov_loq_voc_sec") or None
+            _ov_tph_lod_sec = {
+                "DRO":       st.session_state.get("ov_lod_dro_sec") or None,
+                "ORO":       st.session_state.get("ov_lod_oro_sec") or None,
+                "TPH":       st.session_state.get("ov_lod_tph_sec") or None,
+                "Total TPH": st.session_state.get("ov_lod_tph_sec") or None,
+            }
+            _ov_tph_loq_sec = {
+                "DRO":       st.session_state.get("ov_loq_dro_sec") or None,
+                "ORO":       st.session_state.get("ov_loq_oro_sec") or None,
+                "TPH":       st.session_state.get("ov_loq_tph_sec") or None,
+                "Total TPH": st.session_state.get("ov_loq_tph_sec") or None,
+            }
+            _has_overrides_sec = any([_ov_lod_metals_sec, _ov_loq_metals_sec,
+                                       _ov_lod_voc_sec, _ov_loq_voc_sec,
+                                       any(_ov_tph_lod_sec.values()), any(_ov_tph_loq_sec.values())])
+            if _has_overrides_sec:
+                for r in secondary_records:
+                    atype = r.get("analysis_type")
+                    if atype == "SOIL_TPH":
+                        want_lod = _ov_tph_lod_sec.get(r.get("compound"))
+                        if want_lod and not r.get("lod"):
+                            r["lod"] = want_lod
+                            if r.get("flag") == "<LOQ" and r.get("value") == r.get("loq"):
+                                r["value"] = want_lod
+                                r["flag"] = "<LOD"
+                        want_loq = _ov_tph_loq_sec.get(r.get("compound"))
+                        if want_loq and not r.get("loq"):
+                            r["loq"] = want_loq
+                    elif atype == "SOIL_METALS":
+                        if _ov_lod_metals_sec and not r.get("lod"):
+                            r["lod"] = _ov_lod_metals_sec
+                            if r.get("flag") == "<LOQ" and r.get("value") == r.get("loq"):
+                                r["value"] = _ov_lod_metals_sec
+                                r["flag"] = "<LOD"
+                        if _ov_loq_metals_sec and not r.get("loq"):
+                            r["loq"] = _ov_loq_metals_sec
+                    elif atype in ("SOIL_VOC", "SOIL_SVOC"):
+                        if _ov_lod_voc_sec and not r.get("lod"):
+                            r["lod"] = _ov_lod_voc_sec
+                            if r.get("flag") == "<LOQ" and r.get("value") == r.get("loq"):
+                                r["value"] = _ov_lod_voc_sec
+                                r["flag"] = "<LOD"
+                        if _ov_loq_voc_sec and not r.get("loq"):
+                            r["loq"] = _ov_loq_voc_sec
 
             builder = LabReportExcel(
                 records             = records,
