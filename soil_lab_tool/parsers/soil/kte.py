@@ -332,7 +332,7 @@ class KTESoilParser(BaseParser):
 
                 # Value
                 if raw_val.lower() in ("not detected", "nd", "n.d.", "n/d", "<dl", "<lor", ""):
-                    value, flag, lod = None, "ND", lor
+                    value, flag, lod = lor, "<LOD", lor
                 else:
                     v, f = self._vp.parse(raw_val)
                     if f in ("<", "<LOD", "<LOQ") or (v is None and raw_val.startswith("<")):

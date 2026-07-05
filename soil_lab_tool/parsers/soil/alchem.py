@@ -191,8 +191,8 @@ class AlchemSoilParser(BaseParser):
 
                 # Map detection flags
                 if raw_val.upper() in ("N.D.", "ND", "N/D", "NOT DETECTED", ""):
-                    value = None
-                    flag  = "ND"
+                    value = lod
+                    flag  = "<LOD"
                 elif raw_val.lower() in ("<mdl", "<dl"):
                     value = lod
                     flag  = "<LOD"
@@ -309,8 +309,8 @@ class AlchemSoilParser(BaseParser):
                 loq = loq_per_col.get(ci)
 
                 if raw_val.upper() in ("N.D.", "ND", "N/D"):
-                    value = None
-                    flag  = "ND"
+                    value = loq
+                    flag  = "<LOQ"
                 elif raw_val.lower() in ("<loq", "<mrl", "<rl"):
                     value = loq    # use per-column LOQ if available, else None
                     flag  = "<LOQ"
@@ -391,7 +391,7 @@ class AlchemSoilParser(BaseParser):
                 sample_id = sample_ids[i] if i < len(sample_ids) else f"Sample-{i+1}"
 
                 if raw_val.upper() in ("N.D.", "ND", "N/D", "NOT DETECTED", ""):
-                    value, flag = None, "ND"
+                    value, flag = lod, "<LOD"
                 elif raw_val.lower() in ("<mdl", "<dl"):
                     value, flag = lod, "<LOD"
                 elif raw_val.lower() in ("<mrl", "<loq", "<rl"):
@@ -668,7 +668,7 @@ class AlchemTPHPDFParser(BaseParser):
                 loq = loq_values.get(name)
 
                 if raw_val.upper() in ("N.D.", "ND", "N/D", "NOT DETECTED", ""):
-                    value, flag = None, "ND"
+                    value, flag = lod, "<LOD"
                 elif raw_val.upper() in ("<LOQ", "<MRL", "<RL"):
                     value, flag = loq, "<LOQ"
                 else:
@@ -868,7 +868,7 @@ class AlchemMultiSectionParser(BaseParser):
                 rv = raw_v.upper()
                 fallback = loq_v or lod_v or 0.01
                 if rv in ("N.D.", "ND", "N.D", "N/D"):
-                    value, flag = None, "ND"
+                    value, flag = lod_v or fallback, "<LOD"
                 elif rv in ("<LOQ", "<MRL"):
                     value, flag = loq_v or fallback, "<LOQ"
                 elif rv in ("<MDL", "<DL"):
@@ -949,7 +949,7 @@ class AlchemMultiSectionParser(BaseParser):
                 lq = loq.get(cmp)
                 rv = raw_v.upper()
                 if rv in ("N.D.", "ND", "N.D", "N/D"):
-                    value, flag = None, "ND"
+                    value, flag = lq, "<LOQ"
                 elif rv in ("<LOQ", "<MDL", "<MRL", "<DL"):
                     value, flag = lq, "<LOQ"
                 elif raw_v.startswith("<"):
@@ -1040,7 +1040,7 @@ class AlchemMultiSectionParser(BaseParser):
                     continue
                 rv = raw_v.upper()
                 if rv in ("N.D.", "ND", "N.D", "N/D"):
-                    value, flag = None, "ND"
+                    value, flag = mdl_v, "<LOD"
                 elif rv in ("<MDL", "<DL"):
                     value, flag = mdl_v, "<LOD"
                 elif rv in ("<MRL", "<LOQ"):

@@ -520,6 +520,14 @@ class ALSSoilParser(BaseParser):
                     r["flag"] = "dash"
                     r["value"] = None
 
+        # Any remaining "ND" (a genuine per-compound non-detect within an
+        # otherwise-tested category, not swept into "dash" above) should
+        # always display its numeric LOQ value rather than blank text.
+        for r in records:
+            if r["flag"] == "ND":
+                r["flag"] = "<LOQ"
+                r["value"] = r.get("loq")
+
         return records
 
     def _analysis_type(self, compound: str, cas: str = "", method: str = "") -> str:
@@ -627,7 +635,7 @@ class ALSSoilParser(BaseParser):
                         sid = sample_ids[j] if j < len(sample_ids) else f"Sample-{j + 1}"
                         rv  = val_str.strip()
                         if not rv or rv in ("----", "---", "--"):
-                            value, flag = lor, "ND"
+                            value, flag = lor, "<LOQ"
                         elif rv.startswith("<"):
                             try:
                                 value = float(rv[1:])

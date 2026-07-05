@@ -102,7 +102,7 @@ class KTESoilGasParser(BaseParser):
                 sample_id = _sample_id(ci, i)
 
                 if raw_val.upper() in ("N.D.", "ND", "N/D", "NOT DETECTED", ""):
-                    value, flag = lod, "ND"
+                    value, flag = lod, "<LOD"
                 elif raw_val.upper() in ("<DL", "<MDL", "<LOD", "<MRL"):
                     value, flag = lod, "<LOD"
                 elif raw_val.upper() == "<LOQ":

@@ -199,7 +199,7 @@ class MachonEnergyParser(BaseParser):
                             loq      = _parse_float(row, 5)
                             raw_val  = row[6]
                             if raw_val.upper() in ("ND", "N.D.", "N/D", "NOT DETECTED", "", "NAN"):
-                                value, flag = None, "ND"
+                                value, flag = lod, "<LOD"
                                 result_raw = "ND"
                             else:
                                 value, flag = self._vp.parse(raw_val)
@@ -290,7 +290,7 @@ class MachonEnergyParser(BaseParser):
             raw_val = str(vals[col_result]).strip() if col_result < len(vals) else ""
 
             if raw_val.upper() in ("ND", "N.D.", "N/D", "NOT DETECTED", "", "NAN"):
-                value, flag = None, "ND"
+                value, flag = lod, "<LOD"
                 result_raw = "ND"
             else:
                 value, flag = self._vp.parse(raw_val)

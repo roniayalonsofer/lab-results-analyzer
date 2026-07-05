@@ -205,7 +205,7 @@ def _analysis_type(section: str | None, unit: str) -> str:
 def _parse_result(raw: str, loq: float | None) -> tuple[float | None, str]:
     r = raw.strip()
     if r.lower().replace(" ", "") in ("notdetected", "nd", "n.d."):
-        return loq, "ND"
+        return loq, "<LOQ"
     if r.startswith("<"):
         try:
             return float(r[1:]), "<LOQ"
@@ -483,7 +483,7 @@ def _parse_lines(lines: list[str]) -> list[dict]:
                     "compound":      compound,
                     "cas":           "",
                     "value":         loq_v,
-                    "flag":          "ND",
+                    "flag":          "<LOQ",
                     "unit":          unit,
                     "lod":           None,
                     "loq":           loq_v,

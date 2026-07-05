@@ -128,7 +128,7 @@ class RJLeePFASParser(BaseParser):
             for compound in compound_cols:
                 raw = str(row[compound]).strip()
                 if raw.lower() in _ND_VALUES:
-                    value, flag, loq = None, "ND", _DEFAULT_LOQ
+                    value, flag, loq = _DEFAULT_LOQ, "<LOQ", _DEFAULT_LOQ
                 else:
                     try:
                         value = float(raw)

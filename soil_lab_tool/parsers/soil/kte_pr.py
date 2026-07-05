@@ -194,7 +194,7 @@ class KTEPRParser(BaseParser):
                 if raw_val.startswith("<") or raw_val.lower() in ("nd", "not detected",
                                                                     "bdl", "blq"):
                     value = lor
-                    flag = "ND"
+                    flag = "<LOQ"
                 else:
                     try:
                         value = float(raw_val.replace(",", ""))

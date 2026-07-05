@@ -272,7 +272,7 @@ class MachonHaneftSoilParser(BaseParser):
                     continue
 
                 if raw_val.lower() in ("nd", "n.d.", "not detected", "<dl"):
-                    value, flag = None, "ND"
+                    value, flag = detection_limit, "<LOD"
                 elif raw_val.startswith("<"):
                     value, flag = self._vp.parse(raw_val)
                 else:
@@ -283,7 +283,7 @@ class MachonHaneftSoilParser(BaseParser):
                         value, flag = self._vp.parse(raw_val)
                     if (value is not None and detection_limit is not None
                             and value <= detection_limit + 1e-9):
-                        value, flag = None, "ND"
+                        value, flag = detection_limit, "<LOD"
 
                 records.append({
                     "lab":           self.LAB_NAME,
@@ -421,7 +421,7 @@ class MachonHaneftSoilParser(BaseParser):
 
                 lod = lod_per_col.get(col)
                 if raw_val.lower() in ("not detected", "nd", "n.d.", "<dl"):
-                    value, flag = None, "ND"
+                    value, flag = lod, "<LOD"
                 elif raw_val.startswith("<"):
                     # Below detection/quantitation limit — extract the numeric threshold
                     # as the LOD for this cell and mark as below-LOD (not just ND).
@@ -441,7 +441,7 @@ class MachonHaneftSoilParser(BaseParser):
                         value, flag = self._vp.parse(raw_val)
                     # Treat numeric value ≤ LOD as not-detected (same as MBTEX logic)
                     if value is not None and lod is not None and value <= lod + 1e-9:
-                        value, flag = None, "ND"
+                        value, flag = lod, "<LOD"
 
                 records.append({
                     "lab":           self.LAB_NAME,
@@ -569,8 +569,9 @@ class MachonHaneftSoilParser(BaseParser):
                 if not raw_val or raw_val.lower() in ("nan", ""):
                     continue
 
+                lod_v = lod_per_col.get(ci)
                 if raw_val.lower() in ("not detected", "nd", "n.d.", "<dl"):
-                    value, flag = None, "ND"
+                    value, flag = lod_v, "<LOD"
                 elif raw_val.startswith("<"):
                     value, flag = self._vp.parse(raw_val)
                 else:
@@ -582,9 +583,8 @@ class MachonHaneftSoilParser(BaseParser):
                     # Machon HaNeft shimshon reports write the LOD value in cells
                     # where a compound was not detected ("גבול גילוי הבדיקה" = ND).
                     # Treat any numeric value ≤ LOD as not-detected.
-                    lod_v = lod_per_col.get(ci)
                     if value is not None and lod_v is not None and value <= lod_v + 1e-9:
-                        value, flag = None, "ND"
+                        value, flag = lod_v, "<LOD"
 
                 records.append({
                     "lab":           self.LAB_NAME,
@@ -719,7 +719,7 @@ class MachonHaneftSoilParser(BaseParser):
                     continue
 
                 if raw_val.lower() in ("not detected", "nd", "n.d."):
-                    value, flag = None, "ND"
+                    value, flag = lod, "<LOD"
                 elif raw_val.startswith("<"):
                     value, flag = self._vp.parse(raw_val)
                 else:
