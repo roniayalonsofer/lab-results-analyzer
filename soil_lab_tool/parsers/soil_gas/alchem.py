@@ -16,11 +16,21 @@ N.D. = Not Detected (below LOD)
 from __future__ import annotations
 
 import io
+import re
 
 import pandas as pd
 
 from parsers.base import BaseParser
 from core.lab_value_parser import LabValueParser
+
+# The Alchem xlsx sheet itself has NO date column at all (only "Analysis
+# Time", e.g. "19:24") — the actual date only appears in the accompanying
+# PDF appendix ("נספח לדוח אנליזה"), in a line such as:
+#   "20/02/2026 :הזילנא עוציב ךיראת ..."   (= "תאריך ביצוע אנליזה: 20/02/2026")
+# Hebrew text extracted from these PDFs comes out character-reversed, so we
+# match the reversed form of "ביצוע" ("עוציב") rather than the normal word.
+_DATE_RE           = re.compile(r"\d{2}/\d{2}/\d{4}")
+_PERFORMED_MARKER  = "עוציב"   # reversed "ביצוע" (= "performed")
 
 
 class AlchemSoilGasParser(BaseParser):
@@ -31,7 +41,38 @@ class AlchemSoilGasParser(BaseParser):
         self._vp = LabValueParser()
 
     # ------------------------------------------------------------------
-    def parse(self, file_obj: io.BytesIO) -> list[dict]:
+    def _extract_report_date(self, pdf_bytes_list) -> str:
+        """Pull the 'analysis performed' date (DD/MM/YYYY) out of the first
+        matching PDF appendix, if any was uploaded alongside the xlsx."""
+        if not pdf_bytes_list:
+            return ""
+        try:
+            import pdfplumber
+        except Exception:
+            return ""
+        for pdf_bytes in pdf_bytes_list:
+            if not pdf_bytes:
+                continue
+            try:
+                with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+                    text = pdf.pages[0].extract_text() or ""
+            except Exception:
+                continue
+            for line in text.split("\n"):
+                if _PERFORMED_MARKER in line:
+                    m = _DATE_RE.search(line)
+                    if m:
+                        return m.group(0)
+            # Fallback: any date found anywhere on the page
+            m = _DATE_RE.search(text)
+            if m:
+                return m.group(0)
+        return ""
+
+    # ------------------------------------------------------------------
+    def parse(self, file_obj: io.BytesIO, pdf_bytes: list | None = None) -> list[dict]:
+        report_date = self._extract_report_date(pdf_bytes)
+
         xl = pd.ExcelFile(file_obj)
         sheet = xl.sheet_names[0]
         raw = xl.parse(sheet, header=None, dtype=str).fillna("")
@@ -139,7 +180,10 @@ class AlchemSoilGasParser(BaseParser):
                     "loq":           loq,
                     "analysis_type": "SOIL_GAS_VOC",
                     "canister_num":  canister_nums[i]  if i < len(canister_nums)  else "",
-                    "sampling_date": analysis_times[i] if i < len(analysis_times) else "",
+                    "sampling_date": (f"{report_date} {analysis_times[i]}".strip()
+                                      if report_date and i < len(analysis_times)
+                                      else (analysis_times[i] if i < len(analysis_times) else "")),
+                    "report_date":   report_date,
                     "pid_reading":   pid_readings[i]   if i < len(pid_readings)   else "",
                 })
 
