@@ -980,8 +980,11 @@ if page == "soil":
         with _ov_col_t:
             st.markdown("**TPH**")
             st.number_input("LOD — DRO", min_value=0.0, value=0.0, step=0.1, key="ov_lod_dro")
+            st.number_input("LOQ — DRO", min_value=0.0, value=0.0, step=0.1, key="ov_loq_dro")
             st.number_input("LOD — ORO", min_value=0.0, value=0.0, step=0.1, key="ov_lod_oro")
+            st.number_input("LOQ — ORO", min_value=0.0, value=0.0, step=0.1, key="ov_loq_oro")
             st.number_input("LOD — TPH כולל", min_value=0.0, value=0.0, step=0.1, key="ov_lod_tph")
+            st.number_input("LOQ — TPH כולל", min_value=0.0, value=0.0, step=0.1, key="ov_loq_tph")
         with _ov_col_v:
             st.markdown("**VOC / SVOC**")
             st.number_input("ברירת מחדל ל-LOD (MDL)", min_value=0.0, value=0.0, step=0.001,
@@ -1108,8 +1111,14 @@ if page == "soil":
         "TPH":       st.session_state.get("ov_lod_tph") or None,
         "Total TPH": st.session_state.get("ov_lod_tph") or None,
     }
+    _ov_tph_loq = {
+        "DRO":       st.session_state.get("ov_loq_dro") or None,
+        "ORO":       st.session_state.get("ov_loq_oro") or None,
+        "TPH":       st.session_state.get("ov_loq_tph") or None,
+        "Total TPH": st.session_state.get("ov_loq_tph") or None,
+    }
     _has_overrides = any([_ov_lod_metals, _ov_loq_metals, _ov_lod_voc, _ov_loq_voc,
-                          any(_ov_tph_lod.values())])
+                          any(_ov_tph_lod.values()), any(_ov_tph_loq.values())])
     if _has_overrides:
         for r in records:
             atype = r.get("analysis_type")
@@ -1123,6 +1132,9 @@ if page == "soil":
                     if r.get("flag") == "<LOQ" and r.get("value") == r.get("loq"):
                         r["value"] = want_lod
                         r["flag"] = "<LOD"
+                want_loq = _ov_tph_loq.get(r.get("compound"))
+                if want_loq and not r.get("loq"):
+                    r["loq"] = want_loq
             elif atype == "SOIL_METALS":
                 if _ov_lod_metals and not r.get("lod"):
                     r["lod"] = _ov_lod_metals
