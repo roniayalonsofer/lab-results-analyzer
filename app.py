@@ -952,20 +952,20 @@ if page == "soil":
     else:
         st.session_state["pid_map"] = {}
 
-    with st.expander("🔶 מילוי ידני של ערכי LOQ / LOD / MRL / MDL — אופציונלי", expanded=False):
+    with st.expander("🔶 מילוי ידני של ערכי סף (LOQ, LOD, MRL, MDL) — אופציונלי", expanded=False):
         st.markdown("""
         <div class="override-banner">
           ⚠️ <b>אופציונלי</b> — יש למלא רק אם רוצים. הערכים האלה יחולו <b>רק</b> על רשומות
-          שבהן הקובץ המקורי לא כלל LOD/LOQ (לדוגמה: גיליון TPH של אל-כם כולל LOQ אך לא LOD —
+          שבהן הקובץ המקורי לא כלל ערך סף מתאים (לדוגמה: גיליון TPH של אל-כם כולל LOQ אך לא LOD —
           זה קיים רק ב-PDF המקביל). השאירו 0 כדי לא לדרוס נתונים קיימים בקובץ.
         </div>
         """, unsafe_allow_html=True)
         _ov_col_m, _ov_col_t, _ov_col_v = st.columns(3)
         with _ov_col_m:
             st.markdown("**מתכות**")
-            st.number_input("LOD ברירת מחדל", min_value=0.0, value=0.0, step=0.01,
+            st.number_input("ברירת מחדל ל-LOD", min_value=0.0, value=0.0, step=0.01,
                              format="%.4f", key="ov_lod_metals")
-            st.number_input("LOQ / MRL ברירת מחדל", min_value=0.0, value=0.0, step=0.01,
+            st.number_input("ברירת מחדל ל-LOQ (MRL)", min_value=0.0, value=0.0, step=0.01,
                              format="%.4f", key="ov_loq_metals")
         with _ov_col_t:
             st.markdown("**TPH**")
@@ -974,9 +974,9 @@ if page == "soil":
             st.number_input("LOD — TPH כולל", min_value=0.0, value=0.0, step=0.1, key="ov_lod_tph")
         with _ov_col_v:
             st.markdown("**VOC / SVOC**")
-            st.number_input("LOD / MDL ברירת מחדל", min_value=0.0, value=0.0, step=0.001,
+            st.number_input("ברירת מחדל ל-LOD (MDL)", min_value=0.0, value=0.0, step=0.001,
                              format="%.4f", key="ov_lod_voc")
-            st.number_input("LOQ / MRL ברירת מחדל", min_value=0.0, value=0.0, step=0.001,
+            st.number_input("ברירת מחדל ל-LOQ (MRL)", min_value=0.0, value=0.0, step=0.001,
                              format="%.4f", key="ov_loq_voc")
 
     secondary_lab_files = st.file_uploader(
