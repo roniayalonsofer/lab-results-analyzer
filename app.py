@@ -394,6 +394,17 @@ section[data-testid="stMain"] {
     margin-bottom: 0.75rem;
     border-right: 3px solid #16a34a;
 }
+.override-banner {
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: 8px;
+    padding: 0.9rem 1.1rem;
+    direction: rtl;
+    font-size: 0.875rem;
+    color: #92400e;
+    margin-bottom: 0.75rem;
+    border-right: 4px solid #f59e0b;
+}
 
 /* analysis-type pill badges */
 .type-badge {
@@ -941,12 +952,14 @@ if page == "soil":
     else:
         st.session_state["pid_map"] = {}
 
-    with st.expander("🔧 ערכי LOD/LOQ/MDL/MRL ידניים — לשימוש כשחסרים בקובץ", expanded=False):
-        st.caption(
-            "ערכים אלו יחולו **רק** על רשומות שבהן הקובץ המקורי לא כלל LOD/LOQ "
-            "(לדוגמה: גיליון TPH של אל-כם כולל LOQ אך לא LOD — זה קיים רק ב-PDF). "
-            "השאירו 0 כדי לא לדרוס נתונים קיימים."
-        )
+    with st.expander("🔶 מילוי ידני של ערכי LOQ / LOD / MRL / MDL — אופציונלי", expanded=False):
+        st.markdown("""
+        <div class="override-banner">
+          ⚠️ <b>אופציונלי</b> — יש למלא רק אם רוצים. הערכים האלה יחולו <b>רק</b> על רשומות
+          שבהן הקובץ המקורי לא כלל LOD/LOQ (לדוגמה: גיליון TPH של אל-כם כולל LOQ אך לא LOD —
+          זה קיים רק ב-PDF המקביל). השאירו 0 כדי לא לדרוס נתונים קיימים בקובץ.
+        </div>
+        """, unsafe_allow_html=True)
         _ov_col_m, _ov_col_t, _ov_col_v = st.columns(3)
         with _ov_col_m:
             st.markdown("**מתכות**")
