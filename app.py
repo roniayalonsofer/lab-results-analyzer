@@ -1092,12 +1092,30 @@ if page == "soil":
     _parse_files = _data_files if _data_files else all_raw
 
     with st.spinner(f"מנתח {'קבצים' if n_files > 1 else 'קובץ'}..."):
-        for fname_i, raw_i in _parse_files:
+        for _file_idx, (fname_i, raw_i) in enumerate(_parse_files, 1):
             try:
                 try:
                     file_records = parser.parse(io.BytesIO(raw_i), pdf_bytes=_pdf_raws)
                 except TypeError:
                     file_records = parser.parse(io.BytesIO(raw_i))
+
+                # ── Disambiguate sample_id collisions across different files ──
+                # Two separate lab jobs/uploads can reuse the same location
+                # label (e.g. "SG-2") for physically different samples taken
+                # on different dates. If a sample_id from this file already
+                # appeared in an earlier file in this same upload, rename it
+                # (using its canister number, when available, or the
+                # filename) so the two don't get merged into one column.
+                existing_sids = {r.get("sample_id") for r in all_records}
+                colliding = {sid for sid in (r.get("sample_id") for r in file_records)
+                             if sid in existing_sids}
+                if colliding:
+                    disambig = str(_file_idx)
+                    for r in file_records:
+                        if r.get("sample_id") in colliding:
+                            tag = r.get("canister_num") or fname_i.rsplit(".", 1)[0]
+                            r["sample_id"] = f"{r['sample_id']} [{tag or disambig}]"
+
                 all_records.extend(file_records)
                 file_summaries.append({"name": fname_i, "records": len(file_records), "ok": True})
             except Exception as e:

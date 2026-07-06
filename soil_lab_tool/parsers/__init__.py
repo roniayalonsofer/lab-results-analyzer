@@ -9,6 +9,7 @@ import re as _re
 from parsers.base import BaseParser
 
 from parsers.soil_gas.alchem    import AlchemSoilGasParser
+from parsers.soil_gas.alchem_pdf import AlchemSoilGasPDFParser
 from parsers.soil_gas.kte       import KTESoilGasParser
 from parsers.soil.alchem        import AlchemSoilParser, AlchemMultiSectionParser
 from parsers.alchem             import AlchemTPHPDFParser
@@ -29,6 +30,7 @@ from parsers.pfas.rj_lee            import RJLeePFASParser
 
 _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
     ("alchem",        "soil_gas"):    AlchemSoilGasParser,
+    ("alchem",        "soil_gas_pdf"): AlchemSoilGasPDFParser,
     ("kte",           "soil_gas"):    KTESoilGasParser,
     ("מכון האנרגיה",  "soil_gas"):   MachonEnergyParser,
     ("מכון האנרגיה",  "soil"):       MachonEnergyParser,
@@ -547,13 +549,6 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None, lab: st
                 for _pg in _pdf_cat.pages[:3]:
                     _cat_text += (_pg.extract_text() or "")
             _cat_lo = _cat_text.lower()
-            # Alchem TO-15 soil-gas PDF appendix ("נספח לדוח אנליזה") — same
-            # canister/SG-probe report as the xlsx, just in PDF form. Must be
-            # checked BEFORE the generic al-chem catch-all below, otherwise it
-            # gets mis-detected as "soil_tph_pdf" and breaks parsing when the
-            # xlsx + pdf pair are uploaded together.
-            if "canister number" in _cat_lo and ("to-15" in _cat_lo or "analysis location" in _cat_lo):
-                return "soil_gas"
             if "als czech republic" in _cat_lo or "alsglobal.com" in _cat_lo:
                 if "sub-matrix: water" in _cat_lo:
                     return "groundwater"
@@ -566,6 +561,18 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None, lab: st
             pass
         if _is_alchem_multi_section_pdf(file_bytes):
             return "soil"
+        if lab == "alchem" and file_bytes and filename.lower().endswith('.pdf'):
+            try:
+                import pdfplumber as _pl, io as _io2
+                with _pl.open(_io2.BytesIO(file_bytes)) as _p:
+                    _gas_text = ""
+                    for _pg in _p.pages[:2]:
+                        _gas_text += (_pg.extract_text() or "")
+                    _gas_lo = _gas_text.lower()
+                    if "canister number" in _gas_lo or "to-15" in _gas_lo or "to15" in _gas_lo:
+                        return "soil_gas_pdf"
+            except Exception:
+                pass
         if file_bytes and filename.lower().endswith('.pdf'):
             try:
                 import pdfplumber as _pl, io as _io2
