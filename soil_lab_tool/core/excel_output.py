@@ -715,6 +715,11 @@ class LabReportExcel:
                 # Heuristic: rest is a single English word (no digit prefix)
                 if re.match(r'^[a-z]+', rest) and not re.match(r'^\d', rest):
                     s = rest
+            # Bare element symbol → full name (e.g. "pb" → "lead"), so that a
+            # lab reporting the bare symbol ("Pb") and a lab reporting the
+            # "symbol - name" style ("Pb - Lead") land in the same column
+            # instead of being treated as two different compounds.
+            s = ThresholdManager._METAL_SYMBOL_NAME.get(s, s)
             # Normalize -ium / -um endings (aluminium vs aluminum, etc.)
             s = re.sub(r'inium$', 'inum', s)
             s = re.sub(r'ium$', 'um', s)
