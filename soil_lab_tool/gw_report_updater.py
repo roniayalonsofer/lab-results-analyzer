@@ -864,8 +864,20 @@ def _update_field_table(doc: Document, field_data: dict, wells: list):
         for ci, c in enumerate(header.cells)
         if c.text.strip() in wells
     }
-    for field, ri in FIELD_ROWS.items():
-        if ri >= len(tbl.rows):
+    # Look up each row by its actual label (column 0), the same way the
+    # single-well branch above already does — NOT by a fixed row index.
+    # Different documents order these rows differently (e.g. some list
+    # "טמפרטורה" before "pH"/"EC", others after), so a hardcoded index
+    # silently writes each value into the wrong row on documents whose
+    # order doesn't match the assumption.
+    name_to_row = {}
+    for ri, row in enumerate(tbl.rows):
+        row_label = row.cells[0].text.strip().rstrip("*")
+        name_to_row[row_label] = ri
+
+    for field in FIELD_ROWS:
+        ri = name_to_row.get(field)
+        if ri is None or ri >= len(tbl.rows):
             continue
         row = tbl.rows[ri]
         for well, ci in well_col.items():
@@ -873,6 +885,38 @@ def _update_field_table(doc: Document, field_data: dict, wells: list):
             if val is not None:
                 txt = _fmt_field_val(val)
                 _set_cell(row.cells[ci], txt, highlight=True)
+
+
+def _extract_target_thresholds(tbl) -> dict:
+    """
+    Read this table's own site-specific "ריכוזי יעד לסיום ניטור" row (the
+    target concentrations that determine when monitoring can end for this
+    particular site) and return {param: threshold}, matching COL_PARAMS'
+    column positions (cells[3+ci]).
+
+    This is what should actually decide the bold/red exceedance marking —
+    different sites have different approved targets (set per-site by the
+    regulator), so a single hardcoded threshold is wrong in general: it
+    can flag a result as an exceedance when it's well under this site's
+    own approved target. Returns {} if no such row is found, so callers
+    can fall back to a generic default.
+    """
+    for row in tbl.rows:
+        cells = row.cells
+        if len(cells) < 3 + len(COL_PARAMS):
+            continue
+        label = cells[2].text.strip()
+        if "יעד" in label and ("ניטור" in label or "סיום" in label):
+            out = {}
+            for ci, param in enumerate(COL_PARAMS):
+                txt = cells[3 + ci].text.strip()
+                try:
+                    out[param] = float(txt)
+                except ValueError:
+                    continue
+            if out:
+                return out
+    return {}
 
 
 def _update_historical_tables(doc: Document, new_date: str,
@@ -895,6 +939,7 @@ def _update_historical_tables(doc: Document, new_date: str,
         sample = samples[well]
         results = sample.get("results", {})
         floating = sample.get("floating_layer", False)
+        table_thresh = _extract_target_thresholds(tbl)
 
         last = _last_row_for_well(tbl, well)
         if last < 0:
@@ -917,7 +962,7 @@ def _update_historical_tables(doc: Document, new_date: str,
                 if 3 + ci >= len(cells):
                     break
                 val = results.get(param)
-                thresh = THRESH.get(param)
+                thresh = table_thresh.get(param, THRESH.get(param))
                 if val is None:
                     txt, exceeds = "<0.001", False
                 else:
@@ -925,6 +970,66 @@ def _update_historical_tables(doc: Document, new_date: str,
                     txt = str(val)
                 color = RGBColor(0xC0, 0x00, 0x00) if exceeds else None
                 _set_cell(cells[3 + ci], txt, bold=exceeds, color=color, highlight=True)
+
+
+def _update_historical_field_table_layout_a(doc: Document, new_date: str,
+                                             samples: dict, wells_order: list):
+    """
+    Append one new row per well to the historical field-findings table
+    ("טבלה מספר 2 – ממצאי בדיקות השדה בעבר") for simple (Layout A)
+    documents, where field history lives in its own dedicated table
+    (columns: קידוח, תאריך, pH, EC, טמפרטורה, ...) rather than inside a
+    per-well block (that's Layout B, handled by
+    _update_historical_field_table). This table was previously never
+    updated for Layout A documents at all.
+
+    The table is located by content signature (a "קידוח"/"תאריך" header
+    row followed by several recognized field-parameter names), and the
+    column→field mapping is read from that header row rather than
+    assumed, so it works regardless of column order.
+    """
+    ti, header_cells = None, None
+    for cand_ti, tbl in enumerate(doc.tables):
+        for row in tbl.rows:
+            cells = [c.text.strip() for c in row.cells]
+            if len(cells) < 4 or cells[0] != "קידוח" or cells[1] != "תאריך":
+                continue
+            hint_hits = sum(1 for c in cells[2:] if c.rstrip("*") in _FIELD_PARAM_HINTS)
+            if hint_hits >= 3:
+                ti, header_cells = cand_ti, cells
+                break
+        if ti is not None:
+            break
+    if ti is None:
+        return  # no such table in this document — nothing to do
+
+    tbl = doc.tables[ti]
+    col_field = {}
+    for ci, label in enumerate(header_cells):
+        if ci < 2:
+            continue
+        key = _FIELD_ROW_ALIASES.get(label.rstrip("*"))
+        if key and key != "__date__":
+            col_field[ci] = key
+
+    for well in wells_order:
+        if well not in samples:
+            continue
+        sample = samples[well]
+        field = sample.get("field", {})
+        last = _last_row_for_well(tbl, well)
+        if last < 0:
+            continue
+        new_row = _insert_row_after(tbl, last, last)
+        cells = new_row.cells
+        if len(cells) > 1:
+            _set_cell(cells[1], new_date, highlight=True)
+        for ci, key in col_field.items():
+            if ci >= len(cells):
+                continue
+            val = field.get(key)
+            if val is not None:
+                _set_cell(cells[ci], _fmt_field_val(val), highlight=True)
 
 
 def _detect_layout(doc: Document) -> str:
@@ -1661,6 +1766,7 @@ def run_update_bytes(
                 )
         else:
             _update_historical_tables(doc, new_date, samples, wells_order)
+            _update_historical_field_table_layout_a(doc, new_date, samples, wells_order)
 
         # ── Update narrative text (title month/year, date/sampler gaps,
         #    BTEX concentration summary sentence) ────────────────────────
