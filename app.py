@@ -1686,7 +1686,7 @@ if page == "home":
 # ══════════════════════════════════════════════════════════════════
 elif page == "groundwater":
     _render_nav("groundwater")
-    from soil_lab_tool.gw_report_updater import run_update_bytes
+    from soil_lab_tool.gw_report_updater import run_update_bytes, parse_bactochem_pdf
 
     st.markdown(
         '<div class="page-wrapper">'
@@ -1714,7 +1714,11 @@ elif page == "groundwater":
             word_file = st.file_uploader("📄 דוח Word קודם (.docx)", type=["docx"], key="gw_word")
             st.caption("⚠️ לפני העלאה: פתח את הדוח ב-Word ← Review ← Accept All Changes ← שמור. ללא זאת העדכון עלול להיכשל.")
             if lab_type_code == "bactochem":
-                lab_file = st.file_uploader("🧪 תוצאות מעבדה — בקטוכם (.pdf)", type=["pdf"], key="gw_lab")
+                bactochem_files = st.file_uploader(
+                    "🧪 תוצאות מעבדה — בקטוכם (.pdf, ניתן להעלות כמה דיגומים בבת אחת)",
+                    type=["pdf"], accept_multiple_files=True, key="gw_lab_bactochem_multi",
+                )
+                st.caption("💡 אפשר להעלות כמה קבצי PDF של דיגומים שונים יחד — הם ימוינו לפי תאריך הדיגום ויוחלו בזה אחר זה על אותו דוח.")
             else:
                 lab_files = st.file_uploader(
                     "🧪 תעודות מעבדה — אמינולאב (.pdf, קובץ אחד לכל באר)",
@@ -1724,7 +1728,7 @@ elif page == "groundwater":
             field_file = st.file_uploader("📋 טופס ממצאי שדה (.pdf, אופציונלי)", type=["pdf"], key="gw_field")
 
         if lab_type_code == "bactochem":
-            lab_ready = bool(lab_file)
+            lab_ready = bool(bactochem_files)
         else:
             lab_ready = bool(lab_files)
 
@@ -1732,26 +1736,80 @@ elif page == "groundwater":
             if st.button("⚡ עדכן דוח", type="primary", use_container_width=True, key="gw_update_btn"):
                 with st.spinner("מעבד... ⏳"):
                     try:
-                        lab_pdf_bytes = (
-                            lab_file.read() if lab_type_code == "bactochem"
-                            else [f.read() for f in lab_files]
-                        )
-                        out_word, _ = run_update_bytes(
-                            word_file.read(),
-                            lab_pdf_bytes,
-                            None,
-                            field_pdf_bytes=field_file.read() if field_file else None,
-                            lab_type=lab_type_code,
-                        )
-                        st.success("✅ הדוח עודכן בהצלחה!")
-                        st.download_button(
-                            "⬇️ הורד דוח Word מעודכן",
-                            data=out_word,
-                            file_name="דוח_ניטור_מעודכן.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            use_container_width=True,
-                            key="gw_dl_periodic",
-                        )
+                        if lab_type_code == "bactochem":
+                            import tempfile as _tempfile
+                            from pathlib import Path as _Path
+                            from datetime import datetime as _datetime
+
+                            # Read each round's PDF once and parse its sampling
+                            # date so the rounds can be applied in chronological
+                            # order (oldest → newest), each one updating the
+                            # Word doc produced by the previous round.
+                            rounds = []
+                            for f in bactochem_files:
+                                pdf_bytes = f.read()
+                                with _tempfile.TemporaryDirectory() as _tmp:
+                                    _p = _Path(_tmp) / "lab.pdf"
+                                    _p.write_bytes(pdf_bytes)
+                                    _date = parse_bactochem_pdf(str(_p)).get("sampling_date")
+                                rounds.append({"name": f.name, "bytes": pdf_bytes, "date": _date})
+
+                            def _sort_key(r):
+                                try:
+                                    return _datetime.strptime(r["date"], "%d.%m.%y")
+                                except Exception:
+                                    return _datetime.max
+                            rounds.sort(key=_sort_key)
+
+                            current_word = word_file.read()
+                            processed, failed = [], None
+                            for r in rounds:
+                                try:
+                                    current_word, _ = run_update_bytes(
+                                        current_word, r["bytes"], None,
+                                        field_pdf_bytes=None, lab_type="bactochem",
+                                    )
+                                    processed.append(r)
+                                except Exception as round_err:
+                                    failed = (r, round_err)
+                                    break
+
+                            if processed:
+                                st.success(
+                                    "✅ עודכנו " + str(len(processed)) + " דיגומים: "
+                                    + ", ".join(r["date"] or r["name"] for r in processed)
+                                )
+                                st.download_button(
+                                    "⬇️ הורד דוח Word מעודכן",
+                                    data=current_word,
+                                    file_name="דוח_ניטור_מעודכן.docx",
+                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    use_container_width=True,
+                                    key="gw_dl_periodic",
+                                )
+                            if failed:
+                                r, err = failed
+                                msg = f"⚠️ העיבוד נעצר בקובץ '{r['name']}' (תאריך דיגום: {r['date'] or 'לא זוהה'}): {err}"
+                                if processed:
+                                    msg += "\n\nהדיגומים שלפניו כן עודכנו — אפשר להוריד את הדוח החלקי למעלה, לתקן את הקובץ הבעייתי, ולהעלות אותו שוב בנפרד יחד עם הדוח שהורדת."
+                                st.error(msg)
+                        else:
+                            out_word, _ = run_update_bytes(
+                                word_file.read(),
+                                [f.read() for f in lab_files],
+                                None,
+                                field_pdf_bytes=field_file.read() if field_file else None,
+                                lab_type=lab_type_code,
+                            )
+                            st.success("✅ הדוח עודכן בהצלחה!")
+                            st.download_button(
+                                "⬇️ הורד דוח Word מעודכן",
+                                data=out_word,
+                                file_name="דוח_ניטור_מעודכן.docx",
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                use_container_width=True,
+                                key="gw_dl_periodic",
+                            )
                     except Exception as e:
                         st.error(f"שגיאה בעיבוד: {e}")
         else:
