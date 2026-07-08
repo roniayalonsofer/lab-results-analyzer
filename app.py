@@ -1726,6 +1726,15 @@ elif page == "groundwater":
                 )
         with col2:
             field_file = st.file_uploader("📋 טופס ממצאי שדה (.pdf, אופציונלי)", type=["pdf"], key="gw_field")
+            gw_author_name = st.text_input(
+                "✍️ מחבר הדוח (אופציונלי)", key="gw_author_name",
+                help="אם תמלאו — יוזן אוטומטית בעמוד השער של הדוח.",
+            )
+            gw_submission_date = st.text_input(
+                "📆 תאריך הגשה (אופציונלי)", key="gw_submission_date",
+                placeholder="לדוגמה: 08/07/2026",
+                help="אם תמלאו — יוזן אוטומטית בעמוד השער של הדוח.",
+            )
 
         if lab_type_code == "bactochem":
             lab_ready = bool(bactochem_files)
@@ -1768,6 +1777,8 @@ elif page == "groundwater":
                                     current_word, _ = run_update_bytes(
                                         current_word, r["bytes"], None,
                                         field_pdf_bytes=None, lab_type="bactochem",
+                                        author_name=gw_author_name,
+                                        submission_date=gw_submission_date,
                                     )
                                     processed.append(r)
                                 except Exception as round_err:
@@ -1800,6 +1811,8 @@ elif page == "groundwater":
                                 None,
                                 field_pdf_bytes=field_file.read() if field_file else None,
                                 lab_type=lab_type_code,
+                                author_name=gw_author_name,
+                                submission_date=gw_submission_date,
                             )
                             st.success("✅ הדוח עודכן בהצלחה!")
                             st.download_button(

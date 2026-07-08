@@ -287,15 +287,19 @@ def parse_bactochem_pdf(pdf_path: str) -> dict:
     # Well-code token appears right after that label in one of two forms:
     #   - hyphenated, no space (e.g. "5-תמ" mirrored == "מת-5")
     #   - space-separated (e.g. "3 פפ" mirrored == "פפ-3" / "פפ 3")
+    # An optional apostrophe/geresh (' or ׳) can appear between the dash
+    # and the letters (e.g. "1-'תמ" mirrored == "מת'-1") depending on how
+    # the lab formats the well code — tolerate it without changing the
+    # normalized well_id we emit ("מת-<n>").
     segments = []
     for i, line in enumerate(lines):
         if "רפסמ" not in line or "המגודה" not in line:
             continue
         if "בלנק" in line or "קיפ" in line:
             continue
-        m = re.search(r"(\d+)-['׳]?([א-ת]{1,3})(?!\S)", line)
+        m = re.search(r"(\d+)-['\u05f3]?([א-ת]{1,3})(?!\S)", line)
         if not m:
-            m = re.search(r"(\d+)\s+['׳]?([א-ת]{1,3})(?:\s|$|-)", line)
+            m = re.search(r"(\d+)\s+['\u05f3]?([א-ת]{1,3})(?:\s|$|-)", line)
         if m:
             segments.append((f"מת-{m.group(1)}", i))
     segments.append((None, len(lines)))  # sentinel
@@ -1170,12 +1174,83 @@ def _heb_join_values(items):
     return ", ".join(items[:-1]) + f" ו-{items[-1]}"
 
 
+def _replace_value_after_anchor(paragraph, anchor: str, new_value: str,
+                                 value_charset: str = r'[\d\./\-]') -> bool:
+    """
+    Find `anchor` in the paragraph's concatenated text — which may span
+    multiple runs — then replace whatever value immediately follows it
+    (a contiguous run of characters matching `value_charset`, e.g. a date)
+    with `new_value`, regardless of how many runs the anchor or the old
+    value happen to be split across.
+
+    Word frequently fragments text into many small runs after
+    track-changes / spellcheck / re-saves, which breaks naive
+    "check the very next run" replacement logic in two ways: it can miss
+    the value entirely (if the anchor itself is split across runs), or it
+    can overwrite only the first fragment of the old value and leave the
+    rest sitting right next to the new one. This handles both.
+
+    Returns True if a replacement was made.
+    """
+    runs = paragraph.runs
+    if not runs:
+        return False
+
+    chars = []  # (char, run_idx) for every character in the paragraph
+    for ridx, r in enumerate(runs):
+        for ch in r.text:
+            chars.append((ch, ridx))
+
+    full_text = "".join(c for c, _ in chars)
+    anchor_pos = full_text.find(anchor)
+    if anchor_pos == -1:
+        return False
+
+    n = len(chars)
+    anchor_end = anchor_pos + len(anchor)
+    i = anchor_end
+    while i < n and chars[i][0] in " \t":  # skip whitespace right after anchor
+        i += 1
+
+    pat = re.compile(value_charset)
+    value_end = i
+    while value_end < n and pat.match(chars[value_end][0]):
+        value_end += 1
+    if value_end <= i:
+        return False  # nothing value-like follows the anchor
+
+    run_spans = []
+    pos = 0
+    for r in runs:
+        run_spans.append((pos, pos + len(r.text)))
+        pos += len(r.text)
+
+    first_touched = None
+    for ridx, (s, e) in enumerate(run_spans):
+        if e <= anchor_end or s >= value_end:
+            continue  # run not part of the value span at all
+        text = runs[ridx].text
+        local_start = max(anchor_end, s) - s
+        local_end = min(value_end, e) - s
+        prefix = text[:local_start]
+        suffix = text[local_end:]
+        if first_touched is None:
+            runs[ridx].text = prefix + " " + new_value + suffix
+            runs[ridx].font.highlight_color = WD_COLOR_INDEX.YELLOW
+            first_touched = ridx
+        else:
+            runs[ridx].text = prefix + suffix
+    return True
+
+
 def _update_title_month_year(doc: Document, new_dt: datetime) -> bool:
     """Update the report title's month + year wherever it appears in a title paragraph."""
     month_name = HEBREW_MONTHS[new_dt.month - 1]
     year = new_dt.year
     updated = False
     month_pat = re.compile(r'^(' + '|'.join(HEBREW_MONTHS) + r')(\s+\d{4})?$')
+    stray_year_pat = re.compile(r'^\s*\d{4}\s*$')
+    whitespace_pat = re.compile(r'^\s*$')
 
     for p in doc.paragraphs:
         if "ניטור מי תהום" not in p.text:
@@ -1188,9 +1263,30 @@ def _update_title_month_year(doc: Document, new_dt: datetime) -> bool:
                 leading = run.text[: len(run.text) - len(run.text.lstrip())]
                 run.text = f"{leading}{month_name} {year}"
                 run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                # If next run held only a standalone year, clear it
-                if i + 1 < len(runs) and re.match(r'^\s*\d{4}\s*$', runs[i + 1].text):
-                    runs[i + 1].text = ""
+                # Clear any stray leftover year fragment(s) that may follow —
+                # possibly separated from this run by whitespace-only runs,
+                # a common artifact of Word's run-splitting. We only clear
+                # the whitespace runs too once a stray year is actually
+                # found past them, so we don't disturb normal spacing when
+                # there's nothing to fix.
+                j = i + 1
+                lookahead = []
+                found_year = False
+                while j < len(runs):
+                    t = runs[j].text
+                    if t.strip() and stray_year_pat.match(t):
+                        lookahead.append(j)
+                        found_year = True
+                        j += 1
+                        continue
+                    if whitespace_pat.match(t):
+                        lookahead.append(j)
+                        j += 1
+                        continue
+                    break
+                if found_year:
+                    for jj in lookahead:
+                        runs[jj].text = ""
                 updated = True
     return updated
 
@@ -1201,15 +1297,20 @@ def _update_narrative_placeholders(doc: Document, date_str: str, sampler_name: s
     sampling sentences only (identified by the anchor phrase 'נערך דיגום').
     This must NOT touch unrelated mentions of dates/'מר X' elsewhere in the
     document (e.g. historical references in the background section).
+
+    Uses _replace_value_after_anchor() rather than naive adjacent-run
+    matching, because Word often splits both the anchor text ("בתאריך")
+    and the old date across several small runs — adjacent-run matching
+    then either misses the date entirely or leaves stray fragments of the
+    old date sitting right next to the newly-inserted one.
     """
     for p in doc.paragraphs:
         if "נערך דיגום" not in p.text:
             continue
+        _replace_value_after_anchor(p, "בתאריך", date_str, value_charset=r'[\d\./\-]')
+
         runs = p.runs
         for i, run in enumerate(runs):
-            if i > 0 and runs[i - 1].text.rstrip().endswith("בתאריך"):
-                run.text = date_str
-                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
             if sampler_name and run.text.strip() == "מר" and i + 1 < len(runs):
                 runs[i + 1].text = sampler_name
                 runs[i + 1].font.highlight_color = WD_COLOR_INDEX.YELLOW
@@ -1276,6 +1377,105 @@ def _update_concentration_summary(doc: Document, results: dict):
         return
 
 
+def _update_summary_well_bullets(doc: Document, samples: dict):
+    """
+    Rebuild the per-well BTEX/MTBE bullets in the 'סיכום' section
+    (e.g. 'בקידוח מת-2 אותרו בנזן ו-MTBE בריכוזים של ... בהתאמה;') so they
+    reflect the latest round's results, per well. Some report templates
+    (e.g. multi-well sites) list results per well like this instead of — or
+    in addition to — the single combined sentence handled by
+    _update_concentration_summary. Only touches paragraphs that already
+    start with 'בקידוח <well>' for a well present in `samples`.
+    """
+    ORDERED = [("MTBE", "MTBE"), ("בנזן", "בנזן"), ("אתיל בנזן", "אתיל בנזן"),
+               ("טולואן", "טולואן"), ("קסילן", "קסילן")]
+
+    for well, sample in samples.items():
+        results = sample.get("results", {})
+        detected = [(name, results.get(heb)) for name, heb in ORDERED if results.get(heb) is not None]
+
+        if not detected:
+            sentence = f'בקידוח {well} לא אותרו מרכיבי BTEX/MTBE בריכוזים מעל סף הזיהוי.'
+        elif len(detected) == 1:
+            name, val = detected[0]
+            sentence = f'בקידוח {well} אותר {name} בריכוז של {val} מ"ג לליטר.'
+        else:
+            names = _heb_join_words([n for n, _ in detected])
+            vals = _heb_join_values([f'{v} מ"ג לליטר' for _, v in detected])
+            sentence = f'בקידוח {well} אותרו {names} בריכוזים של {vals} בהתאמה.'
+
+        anchor = f"בקידוח {well}"
+        for p in doc.paragraphs:
+            text = p.text.strip()
+            if not text.startswith(anchor):
+                continue
+            if "אותר" not in text and "לא אותרו" not in text:
+                continue
+            runs = p.runs
+            if not runs:
+                continue
+            # Preserve the paragraph's own closing punctuation style
+            # (bullets in this section may end with ';' or '.').
+            out_sentence = sentence
+            if text.endswith(";"):
+                out_sentence = out_sentence.rstrip(".") + ";"
+            runs[0].text = out_sentence
+            runs[0].font.highlight_color = WD_COLOR_INDEX.YELLOW
+            for extra in runs[1:]:
+                extra.text = ""
+            break
+
+
+def _update_report_meta(doc: Document, author_name: str = None, submission_date: str = None):
+    """
+    Fill in the report-metadata table on the cover page: the report
+    author's name, and the submission date. Layout observed:
+    alternating label-row / value-row pairs in column 1 (signature area in
+    column 0), e.g.:
+        ['חתימה', 'מחבר הדו"ח']   <- label row
+        ['',      'ערן רזניק']    <- value row (name goes here)
+        ['חתימה', 'הדו"ח מאשר']
+        ['',      'אחיעד ווייס']
+        ['',      'תאריך הגשה']   <- label row; value row may not exist yet
+    Only touches the table if it actually looks like this metadata table
+    (has a 'מחבר' label), so it's a no-op on documents structured
+    differently. Both arguments are optional — pass None/empty to leave
+    that field untouched.
+    """
+    if not author_name and not submission_date:
+        return
+    if not doc.tables:
+        return
+
+    tbl = doc.tables[0]
+    labels = [row.cells[1].text.strip() if len(row.cells) > 1 else "" for row in tbl.rows]
+    if not any("מחבר" in lbl for lbl in labels):
+        return  # doesn't look like the metadata table — don't touch it
+
+    if author_name:
+        for ri, lbl in enumerate(labels):
+            if "מחבר" in lbl and ri + 1 < len(tbl.rows):
+                _set_cell(tbl.rows[ri + 1].cells[1], author_name, highlight=True)
+                break
+
+    if submission_date:
+        for ri, lbl in enumerate(labels):
+            if "תאריך" in lbl and "הגש" in lbl:
+                next_is_label = False
+                if ri + 1 < len(tbl.rows):
+                    nxt = labels[ri + 1]
+                    next_is_label = any(k in nxt for k in ("מחבר", "מאשר", "חתימה", "תאריך"))
+                if ri + 1 < len(tbl.rows) and not next_is_label:
+                    # An existing value row (either still blank, or already
+                    # holding a date from a previous call) — overwrite it.
+                    _set_cell(tbl.rows[ri + 1].cells[1], submission_date, highlight=True)
+                else:
+                    new_row = tbl.add_row()
+                    if len(new_row.cells) > 1:
+                        _set_cell(new_row.cells[1], submission_date, highlight=True)
+                break
+
+
 def _replace_chart_image(doc: Document, shape_idx: int, img_path: str):
     if shape_idx >= len(doc.inline_shapes):
         return
@@ -1304,6 +1504,8 @@ def run_update_bytes(
     mk_xls_bytes: bytes = None,
     field_pdf_bytes: bytes = None,   # reserved for future OCR use
     lab_type: str = "bactochem",     # "bactochem" or "aminolab"
+    author_name: str = None,         # optional: fills the cover-page "מחבר הדו"ח" field
+    submission_date: str = None,     # optional: fills the cover-page "תאריך הגשה" field
 ) -> tuple:
     """
     Process all inputs in memory and return (updated_word_bytes, updated_mk_xls_bytes).
@@ -1476,6 +1678,9 @@ def run_update_bytes(
         else:
             _update_narrative_placeholders(doc, full_date_str, sampler_name)
             _update_concentration_summary(doc, combined_results)
+            _update_summary_well_bullets(doc, samples)
+
+        _update_report_meta(doc, author_name=author_name, submission_date=submission_date)
 
         # Replace chart images (shape 1 = Benzene, shape 2 = MTBE)
         for chart_idx, sh_name in enumerate(["בנזן", "MTBE"]):
