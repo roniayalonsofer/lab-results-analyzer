@@ -293,9 +293,9 @@ def parse_bactochem_pdf(pdf_path: str) -> dict:
             continue
         if "בלנק" in line or "קיפ" in line:
             continue
-        m = re.search(r'(\d+)-([א-ת]{1,3})(?!\S)', line)
+        m = re.search(r"(\d+)-['׳]?([א-ת]{1,3})(?!\S)", line)
         if not m:
-            m = re.search(r'(\d+)\s+([א-ת]{1,3})(?:\s|$|-)', line)
+            m = re.search(r"(\d+)\s+['׳]?([א-ת]{1,3})(?:\s|$|-)", line)
         if m:
             segments.append((f"מת-{m.group(1)}", i))
     segments.append((None, len(lines)))  # sentinel
