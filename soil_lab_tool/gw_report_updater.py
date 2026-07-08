@@ -628,10 +628,21 @@ def _set_cell(cell, text, bold=False, color=None, highlight=False):
     for p in cell.paragraphs[1:]:
         p._element.getparent().remove(p._element)
 
-    if bold:
-        keep.bold = True
+    # Explicitly set bold/color state — not just when turning them ON.
+    # `keep` is often a run inherited from a deep-copied template row (new
+    # historical-table rows are cloned from the previous round's row), so
+    # it can already carry bold/red formatting from an earlier exceedance.
+    # Only ever setting `bold = True` / a color and never clearing them
+    # means that formatting would persist forever on every later row, even
+    # once a value drops back under threshold.
+    keep.bold = bool(bold)
     if color:
         keep.font.color.rgb = color
+    else:
+        rPr = keep._element.get_or_add_rPr()
+        color_elm = rPr.find(qn("w:color"))
+        if color_elm is not None:
+            rPr.remove(color_elm)
     if highlight:
         keep.font.highlight_color = WD_COLOR_INDEX.YELLOW
 
@@ -945,7 +956,14 @@ def _update_historical_tables(doc: Document, new_date: str,
         if last < 0:
             continue
 
-        new_row = _insert_row_after(tbl, last, last)
+        # If a row for this exact well+date already exists (e.g. the same
+        # round's PDF was accidentally included twice in a multi-round
+        # upload, or the document was reprocessed with overlapping
+        # rounds), overwrite that row instead of inserting a duplicate.
+        if tbl.rows[last].cells[1].text.strip() == new_date:
+            new_row = tbl.rows[last]
+        else:
+            new_row = _insert_row_after(tbl, last, last)
         cells = new_row.cells
         # NOTE: cells[0] (well name) is often a vertically-merged cell shared
         # across the whole table — do NOT write to it here, or it will wipe
@@ -1020,7 +1038,10 @@ def _update_historical_field_table_layout_a(doc: Document, new_date: str,
         last = _last_row_for_well(tbl, well)
         if last < 0:
             continue
-        new_row = _insert_row_after(tbl, last, last)
+        if len(tbl.rows[last].cells) > 1 and tbl.rows[last].cells[1].text.strip() == new_date:
+            new_row = tbl.rows[last]
+        else:
+            new_row = _insert_row_after(tbl, last, last)
         cells = new_row.cells
         if len(cells) > 1:
             _set_cell(cells[1], new_date, highlight=True)
@@ -1535,13 +1556,15 @@ def _update_report_meta(doc: Document, author_name: str = None, submission_date:
     """
     Fill in the report-metadata table on the cover page: the report
     author's name, and the submission date. Layout observed:
-    alternating label-row / value-row pairs in column 1 (signature area in
-    column 0), e.g.:
         ['חתימה', 'מחבר הדו"ח']   <- label row
         ['',      'ערן רזניק']    <- value row (name goes here)
         ['חתימה', 'הדו"ח מאשר']
         ['',      'אחיעד ווייס']
-        ['',      'תאריך הגשה']   <- label row; value row may not exist yet
+        ['',      'תאריך הגשה']   <- label row; the date value goes in
+                                      THIS row's own first cell (column 0),
+                                      not a new row — unlike the name
+                                      fields, there's no signature to leave
+                                      room for here.
     Only touches the table if it actually looks like this metadata table
     (has a 'מחבר' label), so it's a no-op on documents structured
     differently. Both arguments are optional — pass None/empty to leave
@@ -1566,18 +1589,20 @@ def _update_report_meta(doc: Document, author_name: str = None, submission_date:
     if submission_date:
         for ri, lbl in enumerate(labels):
             if "תאריך" in lbl and "הגש" in lbl:
-                next_is_label = False
+                if len(tbl.rows[ri].cells) > 0:
+                    _set_cell(tbl.rows[ri].cells[0], submission_date, highlight=True)
+                # Clean up a stray extra value row that an earlier version
+                # of this function may have added below (it incorrectly
+                # inserted a new row instead of writing into this row's
+                # own first cell) — otherwise the date would appear twice.
                 if ri + 1 < len(tbl.rows):
-                    nxt = labels[ri + 1]
-                    next_is_label = any(k in nxt for k in ("מחבר", "מאשר", "חתימה", "תאריך"))
-                if ri + 1 < len(tbl.rows) and not next_is_label:
-                    # An existing value row (either still blank, or already
-                    # holding a date from a previous call) — overwrite it.
-                    _set_cell(tbl.rows[ri + 1].cells[1], submission_date, highlight=True)
-                else:
-                    new_row = tbl.add_row()
-                    if len(new_row.cells) > 1:
-                        _set_cell(new_row.cells[1], submission_date, highlight=True)
+                    nxt_cells = tbl.rows[ri + 1].cells
+                    nxt0 = nxt_cells[0].text.strip() if len(nxt_cells) > 0 else ""
+                    nxt1 = nxt_cells[1].text.strip() if len(nxt_cells) > 1 else ""
+                    next_is_label = any(k in nxt1 for k in ("מחבר", "מאשר", "חתימה", "תאריך"))
+                    looks_like_stray_date = bool(re.match(r'^[\d/\.\-]+$', nxt1))
+                    if not nxt0 and not next_is_label and looks_like_stray_date:
+                        _set_cell(nxt_cells[1], "")
                 break
 
 
