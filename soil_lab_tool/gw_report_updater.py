@@ -607,6 +607,46 @@ THRESH = {
 }
 COL_PARAMS = ["MTBE", "בנזן", "טולואן", "אתיל בנזן", "קסילן"]
 
+# Different site templates order these columns differently (some put MTBE
+# first, others last) and even spell Xylene two different ways ("קסילן" vs
+# "כסילן"). Map every spelling variant seen so far to one canonical name —
+# the same canonical names used as keys in `results` dicts from the PDF
+# parsers and in THRESH above.
+_PARAM_CANONICAL = {
+    "MTBE": "MTBE",
+    "בנזן": "בנזן",
+    "טולואן": "טולואן",
+    "אתיל בנזן": "אתיל בנזן",
+    "קסילן": "קסילן",
+    "כסילן": "קסילן",  # alternate spelling for Xylene used by some templates
+}
+
+
+def _detect_chem_table_columns(tbl) -> dict:
+    """
+    Read a chemistry-history table's own header block to build a
+    {column_index: canonical_param_name} map, instead of assuming a fixed
+    column order starting at COL_PARAMS[0]. Checks the first few rows (the
+    header block, which may span 2-3 rows for name/units/standard) and
+    picks whichever row has the most recognizable chemical-name cells.
+    Returns {} if no header row with recognizable names is found, so
+    callers can fall back to the fixed COL_PARAMS order for older/simpler
+    documents.
+    """
+    best_row, best_hits = None, 0
+    for row in tbl.rows[:4]:
+        hits = sum(1 for c in row.cells if c.text.strip() in _PARAM_CANONICAL)
+        if hits > best_hits:
+            best_hits, best_row = hits, row
+    if best_row is None or best_hits == 0:
+        return {}
+    col_map = {}
+    for ci, c in enumerate(best_row.cells):
+        label = c.text.strip()
+        if label in _PARAM_CANONICAL:
+            col_map[ci] = _PARAM_CANONICAL[label]
+    return col_map
+
 
 def _set_cell(cell, text, bold=False, color=None, highlight=False):
     """
@@ -898,35 +938,45 @@ def _update_field_table(doc: Document, field_data: dict, wells: list):
                 _set_cell(row.cells[ci], txt, highlight=True)
 
 
-def _extract_target_thresholds(tbl) -> dict:
+def _extract_target_thresholds(tbl, col_map: dict = None) -> dict:
     """
-    Read this table's own site-specific "ריכוזי יעד לסיום ניטור" row (the
-    target concentrations that determine when monitoring can end for this
-    particular site) and return {param: threshold}, matching COL_PARAMS'
-    column positions (cells[3+ci]).
+    Read this table's own site-specific threshold row — either a
+    "ריכוזי יעד לסיום ניטור" (monitoring end-target, set per-site by the
+    regulator) or a "תקן מי שתייה" (drinking-water standard) row,
+    whichever this particular template uses — and return
+    {canonical_param: threshold}.
 
-    This is what should actually decide the bold/red exceedance marking —
-    different sites have different approved targets (set per-site by the
-    regulator), so a single hardcoded threshold is wrong in general: it
-    can flag a result as an exceedance when it's well under this site's
-    own approved target. Returns {} if no such row is found, so callers
-    can fall back to a generic default.
+    This is what should actually decide the bold/red exceedance marking.
+    A single hardcoded threshold is wrong in general: different sites use
+    different standards, and a value can be well under THIS site's own
+    threshold while looking like an exceedance under a generic one (or
+    vice-versa). Returns {} if no such row is found, so callers can fall
+    back to a generic default.
     """
+    if col_map is None:
+        col_map = _detect_chem_table_columns(tbl)
+    if not col_map:
+        col_map = {3 + i: p for i, p in enumerate(COL_PARAMS)}
+
     for row in tbl.rows:
         cells = row.cells
-        if len(cells) < 3 + len(COL_PARAMS):
+        if len(cells) < 3:
             continue
         label = cells[2].text.strip()
-        if "יעד" in label and ("ניטור" in label or "סיום" in label):
-            out = {}
-            for ci, param in enumerate(COL_PARAMS):
-                txt = cells[3 + ci].text.strip()
-                try:
-                    out[param] = float(txt)
-                except ValueError:
-                    continue
-            if out:
-                return out
+        is_target_row = ("יעד" in label and ("ניטור" in label or "סיום" in label)) or "תקן" in label
+        if not is_target_row:
+            continue
+        out = {}
+        for ci, param in col_map.items():
+            if ci >= len(cells):
+                continue
+            txt = cells[ci].text.strip()
+            try:
+                out[param] = float(txt)
+            except ValueError:
+                continue
+        if out:
+            return out
     return {}
 
 
@@ -950,7 +1000,17 @@ def _update_historical_tables(doc: Document, new_date: str,
         sample = samples[well]
         results = sample.get("results", {})
         floating = sample.get("floating_layer", False)
-        table_thresh = _extract_target_thresholds(tbl)
+
+        # Column order for MTBE/BTEX varies by site template (some put
+        # MTBE first, others last) and Xylene is spelled two different
+        # ways ("קסילן"/"כסילן") — read the table's own header instead of
+        # assuming COL_PARAMS' fixed order. Falls back to that fixed order
+        # only if the header can't be recognized.
+        col_map = _detect_chem_table_columns(tbl)
+        if not col_map:
+            col_map = {3 + i: p for i, p in enumerate(COL_PARAMS)}
+        table_thresh = _extract_target_thresholds(tbl, col_map)
+        chem_cols = sorted(col_map)
 
         last = _last_row_for_well(tbl, well)
         if last < 0:
@@ -973,12 +1033,14 @@ def _update_historical_tables(doc: Document, new_date: str,
 
         if floating:
             _set_cell(cells[3], "לא נדגם עקב שכבה צפה", highlight=True)
-            for ci in range(4, min(8, len(cells))):
-                _set_cell(cells[ci], "")
+            for ci in chem_cols:
+                if ci != 3 and ci < len(cells):
+                    _set_cell(cells[ci], "")
         else:
-            for ci, param in enumerate(COL_PARAMS):
-                if 3 + ci >= len(cells):
-                    break
+            for ci in chem_cols:
+                if ci >= len(cells):
+                    continue
+                param = col_map[ci]
                 val = results.get(param)
                 thresh = table_thresh.get(param, THRESH.get(param))
                 if val is None:
@@ -987,7 +1049,7 @@ def _update_historical_tables(doc: Document, new_date: str,
                     exceeds = thresh is not None and val > thresh
                     txt = str(val)
                 color = RGBColor(0xC0, 0x00, 0x00) if exceeds else None
-                _set_cell(cells[3 + ci], txt, bold=exceeds, color=color, highlight=True)
+                _set_cell(cells[ci], txt, bold=exceeds, color=color, highlight=True)
 
 
 def _update_historical_field_table_layout_a(doc: Document, new_date: str,
@@ -1417,12 +1479,29 @@ def _update_title_month_year(doc: Document, new_dt: datetime) -> bool:
     return updated
 
 
+_CURRENT_ROUND_TRIGGERS = [
+    "נערך דיגום",
+    "דיגום תקופתי",
+    "נערך ניטור מי תהום",
+    "נערך ניטור בתחנה",
+]
+
+
 def _update_narrative_placeholders(doc: Document, date_str: str, sampler_name: str):
     """
     Replace the date and sampler-name VALUE runs in the CURRENT-ROUND
-    sampling sentences only (identified by the anchor phrase 'נערך דיגום').
-    This must NOT touch unrelated mentions of dates/'מר X' elsewhere in the
-    document (e.g. historical references in the background section).
+    sampling sentences only. This must NOT touch unrelated mentions of
+    dates/'מר X' elsewhere in the document (e.g. historical references in
+    the background section, which also often start with "בתאריך").
+
+    Different site templates phrase this sentence differently — compare
+    "בתאריך X נערך דיגום תקופתי של מי התהום בקידוחים..." vs "בתאריך X נערך
+    בתחנה דיגום תקופתי על ידי מר..." vs "בתאריך X נערך ניטור מי תהום
+    בקידוח...". Matching on the paragraph both STARTING with "בתאריך" and
+    containing one of several known trigger phrases catches all of these
+    while still excluding unrelated historical sentences (pipe-integrity
+    tests, well installation, well development) that also start with
+    "בתאריך" but describe a different kind of event.
 
     Uses _replace_value_after_anchor() rather than naive adjacent-run
     matching, because Word often splits both the anchor text ("בתאריך")
@@ -1431,7 +1510,10 @@ def _update_narrative_placeholders(doc: Document, date_str: str, sampler_name: s
     old date sitting right next to the newly-inserted one.
     """
     for p in doc.paragraphs:
-        if "נערך דיגום" not in p.text:
+        text = p.text.strip()
+        if not text.startswith("בתאריך"):
+            continue
+        if not any(trig in text for trig in _CURRENT_ROUND_TRIGGERS):
             continue
         _replace_value_after_anchor(p, "בתאריך", date_str, value_charset=r'[\d\./\-]')
 
