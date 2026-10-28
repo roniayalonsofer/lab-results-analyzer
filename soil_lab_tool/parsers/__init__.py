@@ -136,6 +136,25 @@ def _is_kte_soil_gas_excel(sheet_names: list[str]) -> bool:
 _MACHON_HANEFT_MARKERS = ("EPA 8270", "EPA 3550", "תעודת בדיקה", "גבול גילוי")
 
 
+def _is_machon_haneft_certificate_excel(file_bytes: bytes) -> bool:
+    """Strict check for a Machon HaNeft test certificate (xlsx).
+
+    Layout: first sheet (often named "TPH", which Alchem's sheet-name check
+    also matches) has "תעודת בדיקה מס'" in the header block and EPA method
+    codes (8015D / 3550B / 8260D / 8270) in the results block. Both markers
+    are required so this can safely run before the Alchem checks."""
+    try:
+        import io
+        import pandas as pd
+        xl = pd.ExcelFile(io.BytesIO(file_bytes))
+        df = xl.parse(xl.sheet_names[0], header=None, dtype=str, nrows=40).fillna("")
+        flat = " ".join(df.values.flatten().tolist())
+        return ("תעודת בדיקה מס" in flat
+                and any(m in flat for m in ("EPA 8015", "EPA 3550", "EPA 8260", "EPA 8270")))
+    except Exception:
+        return False
+
+
 def _is_machon_haneft_excel(file_bytes: bytes) -> bool:
     """Return True if any of the first 15 rows in the first sheet contain a
     Machon HaNeft marker string."""
@@ -457,6 +476,8 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
             import io
             import pandas as pd
             xl = pd.ExcelFile(io.BytesIO(file_bytes))
+            if _is_machon_haneft_certificate_excel(file_bytes):
+                return "מכון הנפט"
             if _is_alchem_excel(xl.sheet_names):
                 return "alchem"
             if _is_alchem_soil_gas_numeric(xl.sheet_names, file_bytes):

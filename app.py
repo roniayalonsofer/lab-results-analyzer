@@ -1012,8 +1012,10 @@ if page == "soil":
         _display_lab = lab
         if uploaded_files and lab == "🔍 זיהוי אוטומטי":
             try:
-                _peek = uploaded_files[0].getvalue()
-                _det  = auto_detect_lab(uploaded_files[0].name, _peek)
+                _peek_file = next((f for f in uploaded_files
+                                   if not f.name.lower().endswith(".pdf")), uploaded_files[0])
+                _peek = _peek_file.getvalue()
+                _det  = auto_detect_lab(_peek_file.name, _peek)
                 _display_lab = _det or "KTE"
             except Exception:
                 _display_lab = "?"
@@ -1132,26 +1134,31 @@ if page == "soil":
     fname     = " | ".join(f for f, _ in all_raw)
     raw_bytes = all_raw[0][1]
 
+    # PDFs are companion copies of the data files (see _parse_files below),
+    # so lab/category detection looks at the data files first. Otherwise a
+    # PDF listed first decides the lab and the xlsx is parsed by the wrong parser.
+    _detect_raw = [(n, b) for n, b in all_raw if not n.lower().endswith(".pdf")] or all_raw
+
     if lab == "🔍 זיהוי אוטומטי":
         detected_lab = None
-        for _fn, _fb in all_raw:
+        for _fn, _fb in _detect_raw:
             _det = auto_detect_lab(_fn, _fb)
             if _det and _det != "KTE":
                 detected_lab = _det
                 break
         if not detected_lab:
-            detected_lab = auto_detect_lab(all_raw[0][0], all_raw[0][1]) or "KTE"
+            detected_lab = auto_detect_lab(_detect_raw[0][0], _detect_raw[0][1]) or "KTE"
         lab = detected_lab
 
     if category_raw == 'auto':
         category = None
-        for _fn, _fb in all_raw:
+        for _fn, _fb in _detect_raw:
             _cat = auto_detect_category(_fn, _fb, lab=lab)
             if _cat and _cat != "soil":
                 category = _cat
                 break
         if not category:
-            category = auto_detect_category(all_raw[0][0], all_raw[0][1], lab=lab) or "soil"
+            category = auto_detect_category(_detect_raw[0][0], _detect_raw[0][1], lab=lab) or "soil"
         cat_info = f"זוהה אוטומטית: **{category}**"
     else:
         category = category_raw

@@ -538,8 +538,11 @@ class MachonHaneftSoilParser(BaseParser):
         # Find data_start: first row after the header where col-0 looks like a
         # sample name (not a metadata / units / LOD / CAS row).
         col_name = 0
+        # NOTE: no "" here — "".startswith("") is always True, which made every
+        # row look like metadata and silently dropped the first samples
+        # (blank/"nan" cells are already skipped by the val_lo check below).
         _SKIP_PREFIXES = ("גבול", "lod", "loq", "cas", "units", "method",
-                          "limit", "mg/kg", "%", "nan", "")
+                          "limit", "mg/kg", "%", "nan", "יחידות", "שיטה")
         data_start = btex_header_row + _LOOKAHEAD   # safe default
         for i in range(btex_header_row + 1, min(btex_header_row + _LOOKAHEAD + 2, len(raw))):
             val    = str(raw.iloc[i, col_name]).strip()
