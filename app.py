@@ -467,7 +467,10 @@ a.dest:hover { transform: translateY(-3px); box-shadow: 0 10px 26px rgba(30,58,7
 .faq summary { cursor: pointer; font-weight: 700; color: #1e3a4f; }
 .faq details p { margin: 0.7rem 0 0; color: #475569; line-height: 1.6; }
 @media (max-width: 900px) { .feat-grid-4 { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 560px) { .feat-grid-4 { grid-template-columns: 1fr; } }
+@media (max-width: 560px) {
+    .feat-grid-4 { grid-template-columns: repeat(2, 1fr); gap: 0.6rem; }
+    .feat-grid-4 .feat { padding: 1rem 0.6rem; }
+}
 
 /* the global `div, span, p { font-size: inherit !important }` rule needs !important to be overridden */
 .feat-icon { font-size: 1.7rem !important; }
@@ -479,9 +482,30 @@ a.dest:hover { transform: translateY(-3px); box-shadow: 0 10px 26px rgba(30,58,7
 .hero-badge { font-size: 0.85rem !important; }
 .hero-home p { font-size: 1.15rem !important; }
 @media (max-width: 760px) {
+    html, body { font-size: 16px; }
     .feat-grid, .dest-grid { grid-template-columns: 1fr; }
-    .hero-home { padding: 2.2rem 1.5rem; }
-    .hero-home h1 { font-size: 2rem; }
+    .hero { padding: 1.6rem 1.25rem; border-radius: 14px; }
+    .hero h1 { font-size: 1.7rem !important; }
+    .hero-home { padding: 2rem 1.25rem; }
+    .hero-home h1 { font-size: 1.9rem !important; }
+    .hero-home p { font-size: 1rem !important; }
+    .cta-row a.cta { flex: 1 1 100%; justify-content: center; }
+    /* content column: tighter side padding */
+    [data-testid="stMain"] .block-container > [data-testid="stVerticalBlock"] > *:not(:has(.nav-bar)):not(:has(.footer)) {
+        padding-left: 0.9rem; padding-right: 0.9rem;
+    }
+    /* nav: compact, links share one row */
+    .nav-bar { height: auto; padding: 8px 10px; flex-wrap: wrap; gap: 6px; }
+    .nav-logo span { display: none; }
+    .nav-logo img { height: 34px !important; }
+    .nav-links { width: 100%; gap: 4px; }
+    .nav-link {
+        flex: 1; text-align: center; white-space: nowrap;
+        padding: 8px 6px !important; font-size: 0.85rem !important;
+    }
+    .step-row { flex-direction: column; }
+    .stat-grid { grid-template-columns: 1fr; }
+    .footer { padding: 1rem; font-size: 0.85rem; }
 }
 
 /* Footer */
@@ -1077,7 +1101,7 @@ def _render_nav(active: str):
     st.markdown(
         f'<div class="nav-bar">'
         f'<div class="nav-logo">'
-        f'{logo_html}'
+        f'<a href="?page=home" target="_self" style="display:flex;">{logo_html}</a>'
         f'<span style="color:rgba(255,255,255,0.55);font-size:1rem;font-family:Heebo,sans-serif;">'
         f'מערכת ניתוח תוצאות</span>'
         f'</div>'
@@ -1121,6 +1145,17 @@ if page == "soil":
         '[data-testid="stSidebar"] .sidebar-label{color:#1e3a4f!important;font-size:0.9rem;'
         'text-transform:none;letter-spacing:0;border-bottom:none;margin:1.25rem 0 0.4rem;}'
         '[data-testid="stSidebar"] hr{border-color:#e2e8f0!important;}'
+        '@media (max-width:760px){'
+        '[data-testid="stAppViewContainer"]{flex-direction:column!important;}'
+        '[data-testid="stAppViewContainer"] > section[data-testid="stSidebar"]{'
+        'width:100%!important;min-width:0!important;max-width:100%!important;'
+        'height:auto!important;order:2;border-left:0;border-top:1px solid #e2e8f0;}'
+        '[data-testid="stSidebarContent"]{height:auto!important;overflow:visible!important;}'
+        '[data-testid="stSidebarResizeHandle"]{display:none!important;}'
+        '[data-testid="stApp"]{position:relative!important;height:auto!important;min-height:100vh;overflow:visible!important;}'
+        '[data-testid="stAppViewContainer"]{position:relative!important;height:auto!important;min-height:100vh;overflow:visible!important;}'
+        '[data-testid="stMain"]{position:relative!important;order:1;flex:none!important;height:auto!important;overflow:visible!important;}'
+        '}'
         '[data-testid="stMain"] .block-container>[data-testid="stVerticalBlock"]>'
         '*:not(:has(.nav-bar)):not(:has(.footer)){'
         'max-width:1100px;width:100%;margin-left:auto!important;margin-right:auto!important;'
