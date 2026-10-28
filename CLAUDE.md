@@ -37,6 +37,8 @@ Maps `(lab_key, category_key) → ParserClass`. Lab keys are lowercase strings (
 3. Add detection logic to `auto_detect_lab()` and `auto_detect_category()` in the same file.
 4. If the lab name can appear in filenames, add it to the filename-hint block at the top of `auto_detect_lab()`.
 
+Detection runs on the **data files first** (non-PDF); PDFs uploaded next to an xlsx are companion copies and must not decide the lab/parser (`app.py`). Put the most specific signature (e.g. Machon HaNeft certificate header + EPA codes) *before* sheet-name heuristics (a sheet called `TPH` matches Alchem). Never put `""` in a `startswith` prefix tuple — it matches everything. See `.claude/skills/lab-app-dev/SKILL.md` → "Lessons learned".
+
 ### Analysis types
 
 Defined by convention (string keys): `SOIL_VOC`, `SOIL_SVOC`, `SOIL_TPH`, `SOIL_METALS`, `SOIL_PFAS`, `SOIL_GAS_VOC`, `GW_VOC`, `GW_PFAS`, `LOWFLOW`. The Excel output builder (`core/excel_output.py`) maps each to a sheet name and unit label. Unknown types are silently skipped.
