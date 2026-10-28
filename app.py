@@ -451,6 +451,24 @@ a.dest:hover { transform: translateY(-3px); box-shadow: 0 10px 26px rgba(30,58,7
     padding: 6px 14px; border-radius: 999px; background: #fff; border: 1px solid #d3e1e8;
     color: #1e3a4f; font-size: 0.9rem; font-weight: 600;
 }
+/* ── Guide page ── */
+.feat-grid-4 { grid-template-columns: repeat(4, 1fr); }
+.tbl-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 12px; }
+.tbl-wrap .lab-table th:first-child { border-top-right-radius: 11px; }
+.tbl-wrap .lab-table th:last-child { border-top-left-radius: 11px; }
+.tbl-wrap .lab-table tbody tr:nth-child(even) td { background: #f8fafc; }
+.legend-swatch { display: inline-block; padding: 4px 22px; border-radius: 6px; border: 1px solid #cbd5e1; font-weight: 600; }
+.faq { display: flex; flex-direction: column; gap: 10px; }
+.faq details {
+    background: #fff; border: 1px solid #e8eef3; border-radius: 12px; padding: 0.9rem 1.2rem;
+    box-shadow: 0 1px 6px rgba(30,58,79,.04); transition: box-shadow .15s, border-color .15s;
+}
+.faq details[open] { border-color: #4a7a8a; box-shadow: 0 4px 16px rgba(30,58,79,.1); }
+.faq summary { cursor: pointer; font-weight: 700; color: #1e3a4f; }
+.faq details p { margin: 0.7rem 0 0; color: #475569; line-height: 1.6; }
+@media (max-width: 900px) { .feat-grid-4 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .feat-grid-4 { grid-template-columns: 1fr; } }
+
 /* the global `div, span, p { font-size: inherit !important }` rule needs !important to be overridden */
 .feat-icon { font-size: 1.7rem !important; }
 .feat-title { font-size: 1.1rem !important; }
@@ -2128,10 +2146,11 @@ elif page == "groundwater":
 
     # ── TAB 2: Annual report ─────────────────────────────────────────────────
     with gw_tab2:
-        st.markdown("### 📅 יצירת דוח שנתי")
-        st.info(
-            "המערכת תייצר דוח שנתי על בסיס הדוח התקופתי האחרון + תוצאות המעבדה של כל "
-            "הדיגומים שבוצעו השנה. הדוח יכלול טבלאות מצטברות מעודכנות וסיכום אוטומטי."
+        st.markdown(
+            '<div class="section-title">📅 יצירת דוח שנתי</div>'
+            '<div class="info-banner">המערכת תייצר דוח שנתי על בסיס הדוח התקופתי האחרון + תוצאות '
+            'המעבדה של כל הדיגומים שבוצעו השנה. הדוח יכלול טבלאות מצטברות מעודכנות וסיכום אוטומטי.</div>',
+            unsafe_allow_html=True,
         )
 
         ann_col1, ann_col2 = st.columns(2)
@@ -2267,7 +2286,6 @@ elif page == "groundwater":
                 unsafe_allow_html=True,
             )
 
-    st.markdown('</div>', unsafe_allow_html=True)
     st.markdown(_FOOTER, unsafe_allow_html=True)
 
 
@@ -2284,35 +2302,21 @@ elif page == "guide":
         '<p>כל מה שצריך לדעת לניתוח תוצאות מעבדה סביבתיות</p>'
         '</div>'
 
-        '<div class="card">'
-        '<div class="card-header">🚀 שלבי השימוש במערכת</div>'
-        '<div class="steps">'
-        '<div class="step">'
-        '<div class="step-num">1</div>'
-        '<div class="step-title">בחר מעבדה</div>'
-        '<div class="step-desc">בחר מתוך הרשימה או השתמש בזיהוי אוטומטי</div>'
-        '</div>'
-        '<div class="step">'
-        '<div class="step-num">2</div>'
-        '<div class="step-title">העלה קובץ</div>'
-        '<div class="step-desc">PDF, Excel (XLSX/XLS) או CSV</div>'
-        '</div>'
-        '<div class="step">'
-        '<div class="step-num">3</div>'
-        '<div class="step-title">בחר ערכי סף</div>'
-        '<div class="step-desc">VSL, TIER1, GW לפי סוג האתר</div>'
-        '</div>'
-        '<div class="step">'
-        '<div class="step-num">4</div>'
-        '<div class="step-title">הורד דוח</div>'
-        '<div class="step-desc">Excel + Word עם צביעה אוטומטית</div>'
-        '</div>'
-        '</div>'
+        '<div class="section-title">🚀 שלבי השימוש במערכת</div>'
+        '<div class="feat-grid feat-grid-4">'
+        '<div class="feat"><div class="feat-icon">🏭</div><div class="feat-title">1. בחירת מעבדה</div>'
+        '<div class="feat-desc">מתוך הרשימה, או זיהוי אוטומטי</div></div>'
+        '<div class="feat"><div class="feat-icon">📤</div><div class="feat-title">2. העלאת קובץ</div>'
+        '<div class="feat-desc">PDF, Excel (XLSX/XLS) או CSV</div></div>'
+        '<div class="feat"><div class="feat-icon">🎯</div><div class="feat-title">3. בחירת ערכי סף</div>'
+        '<div class="feat-desc">VSL, TIER 1, מי תהום — לפי סוג האתר</div></div>'
+        '<div class="feat"><div class="feat-icon">📥</div><div class="feat-title">4. הורדת דוח</div>'
+        '<div class="feat-desc">Excel + Word עם צביעה אוטומטית</div></div>'
         '</div>'
 
         '<div class="card">'
         '<div class="card-header">🏭 מעבדות נתמכות</div>'
-        '<table class="lab-table">'
+        '<div class="tbl-wrap"><table class="lab-table">'
         '<thead><tr>'
         '<th>מעבדה</th>'
         '<th>פורמטים נתמכים</th>'
@@ -2327,7 +2331,7 @@ elif page == "guide":
         '<td>קרקע, מי תהום, גז קרקע, PFAS</td></tr>'
         '<tr><td><strong>מכון הנפט</strong></td>'
         '<td><span class="badge badge-blue">Excel</span></td>'
-        '<td>קרקע (VOC, SVOC, מתכות)</td></tr>'
+        '<td>קרקע (VOC, SVOC, מתכות, TPH, BTEX, MTBE)</td></tr>'
         '<tr><td><strong>מכון האנרגיה</strong></td>'
         '<td><span class="badge badge-blue">Excel</span></td>'
         '<td>קרקע, גז קרקע</td></tr>'
@@ -2346,23 +2350,44 @@ elif page == "guide":
         '<tr><td><strong>XRF (אלכם)</strong></td>'
         '<td><span class="badge badge-blue">Excel</span><span class="badge badge-gray">CSV</span></td>'
         '<td>קרקע — ניתוח מתכות XRF</td></tr>'
-        '</tbody></table>'
+        '</tbody></table></div>'
         '</div>'
 
         '<div class="card">'
-        '<div class="card-header">מקרא צבעים בדוח הפלט</div>'
-        '<table class="lab-table">'
+        '<div class="card-header">🎨 מקרא צבעים בדוח הפלט</div>'
+        '<div class="tbl-wrap"><table class="lab-table">'
         '<thead><tr><th>צבע</th><th>משמעות</th></tr></thead>'
         '<tbody>'
-        '<tr><td><span style="background:#FFFF00;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">צהוב</span></td>'
+        '<tr><td><span class="legend-swatch" style="background:#FFFF00;">צהוב</span></td>'
         '<td>חריגה מ-VSL</td></tr>'
-        '<tr><td><span style="background:#ADD8E6;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">כחול</span></td>'
-        '<td>חריגה מ-TIER1 מגורים</td></tr>'
-        '<tr><td><span style="background:#FFB6C1;padding:4px 20px;border-radius:4px;border:1px solid #ccc;">ורוד</span></td>'
-        '<td>חריגה מ-TIER1 תעשייה</td></tr>'
-        '<tr><td><strong style="font-size:13px;">מודגש</strong></td>'
-        '<td>ערכים החורגים מערך סף הגילוי מודגשים (LOQ גבוה מסף)</td></tr>'
-        '</tbody></table>'
+        '<tr><td><span class="legend-swatch" style="background:#ADD8E6;">כחול</span></td>'
+        '<td>חריגה מ-TIER 1 מגורים</td></tr>'
+        '<tr><td><span class="legend-swatch" style="background:#FFB6C1;">ורוד</span></td>'
+        '<td>חריגה מ-TIER 1 תעשייה</td></tr>'
+        '<tr><td><span class="legend-swatch" style="background:#D3D3D3;">אפור</span></td>'
+        '<td>לא זוהה, אך גבול הגילוי גבוה מערך הסף — אי אפשר לשלול חריגה</td></tr>'
+        '<tr><td><strong>מודגש</strong></td>'
+        '<td>ערך הסף נמוך מגבול הגילוי / הכימות (LOQ גבוה מסף)</td></tr>'
+        '<tr><td><strong dir="ltr">&lt;50</strong></td>'
+        '<td>הערך נמוך מגבול הכימות (LOQ) שבתעודה; המספר הוא הגבול עצמו</td></tr>'
+        '</tbody></table></div>'
+        '</div>'
+
+        '<div class="section-title">❓ שאלות נפוצות</div>'
+        '<div class="faq">'
+        '<details><summary>הופיעה ההודעה "לא נמצאו רשומות" — מה לעשות?</summary>'
+        '<p>ודאו שהקובץ הוא תעודת המעבדה המקורית ושהמעבדה והקטגוריה שנבחרו מתאימות לו. '
+        'אם הזיהוי האוטומטי טעה, בחרו את המעבדה והקטגוריה ידנית בסרגל הצד ונסו שוב.</p></details>'
+        '<details><summary>מה ההבדל בין LOD ל-LOQ?</summary>'
+        '<p>LOD הוא גבול הגילוי — מתחתיו אי אפשר לקבוע שהחומר קיים. LOQ הוא גבול הכימות — '
+        'הערך הנמוך ביותר שאפשר לדווח עליו כמספר. ערך כמו <b dir="ltr">&lt;50</b> אומר שהתוצאה מתחת ל-LOQ.</p></details>'
+        '<details><summary>מה פירוש כוכבית ליד שם תרכובת?</summary>'
+        '<p>שם התרכובת בתעודה לא התאים בדיוק לשם בטבלת ערכי הסף. ערך הסף מוצג כ"לא קיים", '
+        'ובעמודת ההערות מופיע השם הדומה שנמצא. כדאי לבדוק ידנית אם הוא רלוונטי.</p></details>'
+        '<details><summary>אפשר להעלות כמה קבצים יחד?</summary>'
+        '<p>כן, מאותה מעבדה. כשמעלים PDF לצד קובץ Excel של אותה תעודה, הנתונים נקראים מה-Excel וה-PDF משמש כעותק נלווה.</p></details>'
+        '<details><summary>למה אין ערך סף לתרכובת מסוימת?</summary>'
+        '<p>ערכי הסף נלקחים מטבלאות VSL ו-TIER 1 המעודכנות (גרסה 7). אם לתרכובת אין שם ערך בטבלה, מוצג "לא קיים".</p></details>'
         '</div>'
         '</div>',
         unsafe_allow_html=True,
