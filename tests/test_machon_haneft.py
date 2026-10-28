@@ -36,6 +36,7 @@ def _workbook() -> bytes:
         ws.cell(row=33 + i, column=5, value=40 + i)
     ws["E35"] = "<50"  # ORO of SAMPLES[2]
     hdr = 50
+    # (BTEX cell C{hdr+6+2} below is overwritten with "<0.03" after the loop)
     for ci, h in enumerate(["MTBE", "בנזן", "טולואן", "אתיל-בנזן", "קסילן"], start=3):
         ws.cell(row=hdr, column=ci, value=h)
     ws.cell(row=hdr, column=1, value="בדיקה")
@@ -51,6 +52,7 @@ def _workbook() -> bytes:
         ws.cell(row=hdr + 6 + i, column=1, value=s)
         for ci in range(3, 8):
             ws.cell(row=hdr + 6 + i, column=ci, value=1.5 + i)
+    ws.cell(row=hdr + 6 + 2, column=3, value="<0.03")  # MTBE of SAMPLES[2]
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -79,6 +81,14 @@ def test_tph_below_50_is_loq_not_lod():
     r = next(r for r in recs if r["sample_id"] == SAMPLES[2]
              and r["compound"] == "ORO" and r["analysis_type"] == "SOIL_TPH")
     assert (r["flag"], r["value"], r["loq"], r["lod"]) == ("<LOQ", 50.0, 50.0, None)
+
+
+def test_btex_below_limit_keeps_printed_limit():
+    """'<0.03' must stay 0.03 (flag <LOQ), not be halved to 0.015."""
+    recs = MachonHaneftSoilParser().parse(io.BytesIO(_workbook()))
+    r = next(r for r in recs if r["sample_id"] == SAMPLES[2]
+             and r["compound"] == "MTBE" and r["analysis_type"] == "SOIL_MBTEX")
+    assert (r["flag"], r["value"], r["loq"]) == ("<LOQ", 0.03, 0.03)
 
 
 def test_excel_detected_as_machon_haneft_not_alchem():

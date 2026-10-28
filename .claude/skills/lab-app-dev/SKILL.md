@@ -103,7 +103,8 @@ This skill must get better every session. Triggers and actions:
 - **Silent data loss is the main risk.** A parser can return a plausible-looking record count while missing samples. Always compare the sample list from the certificate against `{r["sample_id"]}` and check each sample has every expected analysis type.
 - **PDF + xlsx pair from the same lab** (e.g. Machon HaNeft 1018 / 6408): the xlsx is the data source, the PDF is a visual copy. The app parses only the non-PDF files when both are uploaded.
 - **2026-10-28 — Machon HaNeft TPH limit is LOQ (Roni confirmed).** The TPH limit row (50) is a LOQ; `<50` must be `flag="<LOQ"`, `value=loq`, `loq=50`, `lod=None`. Rule: keep LOD and LOQ rows separate in parsers; use the label printed in the certificate, never merge them.
-- **Open questions for Roni (verify before changing):** (2) BTEX records carry `lod` but not `loq`, although the xlsx has a "גבול כימות" row. (3) ALS PDF parser (`ALSSoilPDFParser`) returns 0 records on the PR2601739 TPH layout (the XLS version parses fine).
+- **2026-10-28 — Excel showed `<0.015` for a certificate value `<0.03`.** `LabValueParser.parse("<0.03")` returns `(0.015, '<')` (half the limit). Rule: when a certificate prints `<X`, keep X (`value=X, flag="<LOQ", loq=X`); never let the half-limit convention leak into the report. Always check the *generated Excel cells* against the certificate, not only the parsed records (also check `number_format`: `<LOQ` numbers display as `<X` through the format `"<"0.0##`). Other parsers may still use `LabValueParser` for `<X` — check them when they are touched.
+- **Open questions for Roni (verify before changing):** (3) ALS PDF parser (`ALSSoilPDFParser`) returns 0 records on the PR2601739 TPH layout (the XLS version parses fine).
 
 ## Sample locations (real client files, never committed)
 

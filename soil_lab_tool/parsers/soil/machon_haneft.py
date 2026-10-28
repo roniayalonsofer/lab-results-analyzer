@@ -588,7 +588,14 @@ class MachonHaneftSoilParser(BaseParser):
                 if raw_val.lower() in ("not detected", "nd", "n.d.", "<dl"):
                     value, flag = lod_v, "<LOD"
                 elif raw_val.startswith("<"):
-                    value, flag = self._vp.parse(raw_val)
+                    # "<0.03" is the certificate's quantitation limit. Keep the
+                    # printed limit (LabValueParser would return half of it and
+                    # the report would show "<0.015").
+                    try:
+                        cell_limit = float(raw_val[1:].replace(",", "").strip())
+                        value, flag = cell_limit, "<LOQ"
+                    except ValueError:
+                        value, flag = self._vp.parse(raw_val)
                 else:
                     try:
                         value = float(raw_val.replace(",", ""))
@@ -610,6 +617,7 @@ class MachonHaneftSoilParser(BaseParser):
                     "flag":          flag,
                     "unit":          "mg/kg",
                     "lod":           lod_per_col.get(ci),
+                    "loq":           loq_per_col.get(ci),
                     "analysis_type": "SOIL_MBTEX",
                 })
 
