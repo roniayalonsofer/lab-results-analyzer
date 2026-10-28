@@ -337,6 +337,135 @@ p, label, div, span, input, select { font-size: inherit !important; }
 }
 .lab-table tr:hover td { background: #f8fafc; }
 
+/* ── Global layout: every page's content sits in one centered column ── */
+[data-testid="stMain"] .block-container > [data-testid="stVerticalBlock"] {
+    gap: 1.25rem;
+    padding-top: 0;
+}
+[data-testid="stMain"] .block-container > [data-testid="stVerticalBlock"] > *:not(:has(.nav-bar)):not(:has(.footer)) {
+    max-width: 1100px;
+    width: 100%;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    padding-left: 2rem;
+    padding-right: 2rem;
+}
+.page-wrapper { max-width: 100%; padding: 0.5rem 0; }
+
+/* ── Tabs ── */
+[role="tablist"] { gap: 6px; border-bottom: 1px solid #e2e8f0; }
+[data-testid="stTab"] {
+    padding: 0.7rem 1.3rem;
+    border-radius: 10px 10px 0 0;
+    color: #64748b;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s, color .15s;
+}
+[data-testid="stTab"]:hover { background: #eef5f8; color: #1e3a4f; }
+[data-testid="stTab"][aria-selected="true"] { color: #1e3a4f; background: #ffffff; }
+
+/* ── Inputs in the main area ── */
+[data-testid="stMain"] [data-testid="stTextInputRootElement"] {
+    background: #ffffff;
+    border: 1.5px solid #d3e1e8;
+    border-radius: 12px;
+    min-height: 46px;
+    transition: border-color .15s, box-shadow .15s;
+}
+[data-testid="stMain"] [data-testid="stTextInputRootElement"]:focus-within {
+    border-color: #4a7a8a;
+    box-shadow: 0 0 0 3px rgba(74,122,138,0.15);
+}
+
+/* ── Radio as pills ── */
+[data-testid="stRadioGroup"] { gap: 10px; }
+[data-testid="stRadioOption"] {
+    background: #ffffff;
+    border: 1.5px solid #d3e1e8;
+    border-radius: 999px;
+    padding: 6px 18px;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+}
+[data-testid="stRadioOption"]:hover { border-color: #4a7a8a; }
+[data-testid="stRadioOption"][data-selected="true"] {
+    border-color: #1e3a4f;
+    background: #e8f4f8;
+    font-weight: 700;
+}
+
+/* ── Home page ── */
+.hero-home { padding: 3.5rem 3rem; position: relative; overflow: hidden; }
+.hero-home::after {
+    content: ""; position: absolute; left: -80px; top: -80px; width: 320px; height: 320px;
+    border-radius: 50%; background: rgba(255,255,255,0.07);
+}
+.hero-badge {
+    display: inline-block; padding: 5px 14px; border-radius: 999px; margin-bottom: 1rem;
+    background: rgba(255,255,255,0.15); font-size: 0.85rem; font-weight: 600; letter-spacing: .3px;
+}
+.hero-home h1 { font-size: 2.8rem; line-height: 1.2; }
+.hero-home p { max-width: 640px; }
+.cta-row { display: flex; gap: 0.9rem; flex-wrap: wrap; margin-top: 1.75rem; position: relative; z-index: 1; }
+a.cta {
+    display: inline-flex; align-items: center; gap: 8px; padding: 0.85rem 1.8rem; border-radius: 12px;
+    font-size: 1.05rem; font-weight: 700; text-decoration: none !important;
+    transition: transform .15s, box-shadow .15s, background .15s;
+}
+a.cta:hover { transform: translateY(-2px); }
+a.cta-primary { background: #ffffff; color: #1e3a4f !important; box-shadow: 0 6px 18px rgba(0,0,0,.18); }
+a.cta-primary:hover { box-shadow: 0 10px 26px rgba(0,0,0,.25); }
+a.cta-ghost { background: transparent; color: #ffffff !important; border: 1.5px solid rgba(255,255,255,.6); }
+a.cta-ghost:hover { background: rgba(255,255,255,.12); }
+
+.section-title { font-size: 1.25rem; font-weight: 800; color: #1e3a4f; margin: 1.25rem 0 0.9rem; }
+.feat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+.feat {
+    background: #fff; border: 1px solid #e8eef3; border-radius: 16px; padding: 1.5rem 1.25rem;
+    box-shadow: 0 2px 12px rgba(30,58,79,.05); text-align: center;
+    transition: transform .15s, box-shadow .15s;
+}
+.feat:hover { transform: translateY(-3px); box-shadow: 0 10px 26px rgba(30,58,79,.12); }
+.feat-icon {
+    width: 52px; height: 52px; border-radius: 14px; margin: 0 auto 0.9rem;
+    background: linear-gradient(135deg, #e8f4f8, #d3e8ef); font-size: 1.6rem;
+    display: flex; align-items: center; justify-content: center;
+}
+.feat-title { font-weight: 800; color: #1e3a4f; font-size: 1.1rem; }
+.feat-desc { font-size: 0.95rem; color: #64748b; margin-top: 6px; line-height: 1.5; }
+
+.dest-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+a.dest {
+    display: block; background: #fff; border: 1px solid #e8eef3; border-radius: 16px; padding: 1.6rem;
+    text-decoration: none !important; box-shadow: 0 2px 12px rgba(30,58,79,.05);
+    transition: transform .15s, box-shadow .15s, border-color .15s;
+}
+a.dest:hover { transform: translateY(-3px); box-shadow: 0 10px 26px rgba(30,58,79,.14); border-color: #4a7a8a; }
+.dest-title { font-weight: 800; font-size: 1.2rem; color: #1e3a4f; }
+.dest-desc { color: #64748b; margin-top: 6px; font-size: 0.95rem; line-height: 1.5; }
+.dest-go { color: #2d5a6e; font-weight: 700; margin-top: 12px; font-size: 0.95rem; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+    padding: 6px 14px; border-radius: 999px; background: #fff; border: 1px solid #d3e1e8;
+    color: #1e3a4f; font-size: 0.9rem; font-weight: 600;
+}
+/* the global `div, span, p { font-size: inherit !important }` rule needs !important to be overridden */
+.feat-icon { font-size: 1.7rem !important; }
+.feat-title { font-size: 1.1rem !important; }
+.feat-desc, .dest-desc, .dest-go { font-size: 0.95rem !important; }
+.section-title { font-size: 1.25rem !important; }
+.dest-title { font-size: 1.2rem !important; }
+.chip { font-size: 0.9rem !important; }
+.hero-badge { font-size: 0.85rem !important; }
+.hero-home p { font-size: 1.15rem !important; }
+@media (max-width: 760px) {
+    .feat-grid, .dest-grid { grid-template-columns: 1fr; }
+    .hero-home { padding: 2.2rem 1.5rem; }
+    .hero-home h1 { font-size: 2rem; }
+}
+
 /* Footer */
 .footer {
     background: #1e3a4f;
@@ -1793,30 +1922,49 @@ if page == "home":
     _render_nav("home")
     st.markdown(
         '<div class="page-wrapper">'
-        '<div class="hero">'
-        '<h1>מערכת ניתוח נתוני קרקע</h1>'
-        '<p>ניתוח אוטומטי של דוחות מעבדה סביבתיים — זיהוי תרכובות, השוואה לערכי סף VSL ו-TIER1, והפקת דוחות Excel מקצועיים</p>'
+        '<div class="hero hero-home">'
+        '<span class="hero-badge">אדמה · אפיון ושיקום אתרים</span>'
+        '<h1>ניתוח תוצאות מעבדה סביבתיות<br>בלחיצה אחת</h1>'
+        '<p>העלו תעודת מעבדה וקבלו טבלה מסודרת — זיהוי מעבדה ותרכובות, השוואה לערכי סף VSL ו-TIER 1, והפקת דוחות Excel ו-Word מקצועיים.</p>'
+        '<div class="cta-row">'
+        '<a class="cta cta-primary" href="?page=soil" target="_self">📊 התחל ניתוח נתונים</a>'
+        '<a class="cta cta-ghost" href="?page=groundwater" target="_self">💧 דוחות מי תהום</a>'
+        '</div>'
         '</div>'
         '</div>',
         unsafe_allow_html=True,
     )
 
     st.markdown(
-        '<div style="display:flex;gap:1rem;justify-content:center;margin:1rem 0;">'
-        '<a href="?page=soil" target="_self" style="background:#1e3a4f;color:white;padding:0.75rem 2rem;border-radius:8px;text-decoration:none;font-size:1.1rem;font-weight:600;">📊 התחל ניתוח נתונים</a>'
-        '<a href="?page=groundwater" target="_self" style="background:#4a7a8a;color:white;padding:0.75rem 2rem;border-radius:8px;text-decoration:none;font-size:1.1rem;font-weight:600;">💧 דוחות מי תהום</a>'
+        '<div class="section-title">איך זה עובד</div>'
+        '<div class="feat-grid">'
+        '<div class="feat"><div class="feat-icon">📤</div><div class="feat-title">1. העלאת קבצים</div><div class="feat-desc">PDF, Excel או CSV ישירות מהמעבדה — כמה קבצים בבת אחת</div></div>'
+        '<div class="feat"><div class="feat-icon">⚙️</div><div class="feat-title">2. עיבוד אוטומטי</div><div class="feat-desc">זיהוי המעבדה, הקטגוריה, התרכובות וערכי הסף</div></div>'
+        '<div class="feat"><div class="feat-icon">📥</div><div class="feat-title">3. הורדת דוח</div><div class="feat-desc">Excel ו-Word מעוצבים עם סימון חריגות בצבע</div></div>'
         '</div>',
         unsafe_allow_html=True,
     )
 
     st.markdown(
-        '<div class="page-wrapper">'
-        '<div class="steps">'
-        '<div class="step"><div class="step-num">1</div><div class="step-title">העלאת קבצים</div><div class="step-desc">PDF, Excel או CSV מהמעבדה</div></div>'
-        '<div class="step"><div class="step-num">2</div><div class="step-title">עיבוד אוטומטי</div><div class="step-desc">זיהוי מעבדה, תרכובות וערכי סף</div></div>'
-        '<div class="step"><div class="step-num">3</div><div class="step-title">הורדת דוח</div><div class="step-desc">Excel מקצועי עם צביעה אוטומטית</div></div>'
-        '</div>'
+        '<div class="section-title">במה להתחיל</div>'
+        '<div class="dest-grid">'
+        '<a class="dest" href="?page=soil" target="_self"><div class="dest-title">📊 ניתוח נתונים</div>'
+        '<div class="dest-desc">קרקע, גז קרקע, PFAS ומי תהום — השוואה לערכי סף ותצוגה מקדימה לפני ההורדה</div>'
+        '<div class="dest-go">לניתוח ←</div></a>'
+        '<a class="dest" href="?page=groundwater" target="_self"><div class="dest-title">💧 דוחות מי תהום</div>'
+        '<div class="dest-desc">עדכון דוח ניטור תקופתי מתוצאות הסבב האחרון, או יצירת דוח שנתי מלא</div>'
+        '<div class="dest-go">לדוחות ←</div></a>'
         '</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        '<div class="section-title">מעבדות נתמכות</div>'
+        '<div class="chips">'
+        + "".join(f'<span class="chip">{n}</span>' for n in
+                  ("KTE", "Alchem / אלכם", "ALS", "Aminolab / אמינולאב", "Bactochem / בקטוכם",
+                   "מכון הנפט", "מכון האנרגיה", "RJ Lee"))
+        + '</div>',
         unsafe_allow_html=True,
     )
 

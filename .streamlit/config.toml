@@ -1,0 +1,3 @@
+[theme]
+# Brand navy instead of Streamlit's default red for tabs, radios, checkboxes, focus rings.
+primaryColor = "#1e3a4f"
