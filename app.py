@@ -370,14 +370,7 @@ section[data-testid="stMain"] {
 }
 
 /* section-card for soil page */
-.section-card {
-    background: #ffffff;
-    border: 1px solid #e2eef3;
-    border-radius: 12px;
-    padding: 1.5rem;
-    margin: 0 2rem 1rem;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-}
+.section-card { display: none; }
 
 /* banners */
 .info-banner {
@@ -440,35 +433,117 @@ section[data-testid="stMain"] {
 
 /* upload zone */
 [data-testid="stFileUploader"] {
-    border: 2px dashed #cbd5e1;
-    border-radius: 8px;
-    padding: 0.5rem;
-    background: #f8fafc;
-    transition: border-color 0.2s;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 1.25rem 1.5rem;
+    box-shadow: 0 2px 12px rgba(30,58,79,0.06);
+    transition: box-shadow .2s, border-color .2s;
 }
 [data-testid="stFileUploader"]:hover {
     border-color: #4a7a8a;
-    background: #f0f7fa;
+    box-shadow: 0 6px 20px rgba(30,58,79,0.12);
 }
 [data-testid="stFileUploader"] label {
-    font-size: 0.95rem !important;
-    font-weight: 600 !important;
-    color: #334155 !important;
+    font-size: 1.05rem !important;
+    font-weight: 700 !important;
+    color: #1e3a4f !important;
+    margin-bottom: 0.6rem !important;
 }
+[data-testid="stFileUploaderDropzone"] {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 0.9rem !important;
+    min-height: 130px;
+    padding: 1.5rem !important;
+    background: linear-gradient(180deg, #f6fafc 0%, #eef5f8 100%) !important;
+    border: 2px dashed #9db9c6 !important;
+    border-radius: 12px !important;
+    cursor: pointer;
+    transition: background .2s, border-color .2s;
+}
+[data-testid="stFileUploaderDropzone"]:hover {
+    border-color: #2d5a6e !important;
+    background: #e6f1f5 !important;
+}
+[data-testid="stFileUploaderDropzone"] button {
+    min-height: 46px;
+    padding: 0.5rem 1.8rem !important;
+    border-radius: 999px !important;
+    background: #1e3a4f !important;
+    border: none !important;
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    box-shadow: 0 2px 8px rgba(30,58,79,0.25);
+    transition: transform .15s, box-shadow .15s, background .15s;
+    cursor: pointer;
+}
+[data-testid="stFileUploaderDropzone"] button:hover {
+    background: #2d5a6e !important;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(30,58,79,0.3);
+}
+[data-testid="stFileUploaderDropzone"] button p { display: none !important; }
+[data-testid="stFileUploaderDropzone"] button::after {
+    content: "בחירת קבצים";
+    font-size: 1rem;
+}
+[data-testid="stFileUploaderDropzoneInstructions"] {
+    direction: rtl;
+    text-align: center;
+}
+[data-testid="stFileUploaderDropzoneInstructions"] span {
+    font-size: 0 !important;
+    color: #64748b;
+}
+[data-testid="stFileUploaderDropzoneInstructions"] span::after {
+    content: "או גררי קבצים לכאן · עד 200MB לקובץ";
+    font-size: 0.85rem;
+}
+
+/* buttons (all) */
+.stButton button, .stDownloadButton button,
+[data-testid="stBaseButton-primary"], [data-testid="stBaseButton-secondary"] {
+    min-height: 46px;
+    padding: 0.55rem 1.6rem;
+    border-radius: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform .15s, box-shadow .15s, background .15s, border-color .15s;
+}
+.stButton button:hover, .stDownloadButton button:hover { transform: translateY(-1px); }
+.stButton button:active, .stDownloadButton button:active { transform: translateY(0); }
+[data-testid="stBaseButton-primary"] {
+    background: linear-gradient(135deg, #1e3a4f, #2d5a6e);
+    color: #ffffff;
+    border: none;
+    box-shadow: 0 3px 10px rgba(30,58,79,0.25);
+}
+[data-testid="stBaseButton-primary"]:hover {
+    background: linear-gradient(135deg, #2d5a6e, #4a7a8a);
+    box-shadow: 0 8px 20px rgba(30,58,79,0.3);
+}
+[data-testid="stBaseButton-secondary"]:not([data-testid="stFileUploaderDropzone"] button) {
+    background: #ffffff;
+    color: #1e3a4f;
+    border: 1.5px solid #c5d6de;
+}
+[data-testid="stBaseButton-secondary"]:hover { border-color: #4a7a8a; background: #f0f7fa; }
 
 /* download button */
 .stDownloadButton button {
     width: 100%;
     background: linear-gradient(135deg, #1e3a4f, #2d5a6e);
     color: white;
-    font-weight: 700;
-    font-size: 0.95rem;
-    border-radius: 8px;
+    font-size: 1rem;
     border: none;
-    padding: 0.65rem;
+    box-shadow: 0 3px 10px rgba(30,58,79,0.25);
 }
 .stDownloadButton button:hover {
     background: linear-gradient(135deg, #2d5a6e, #4a7a8a);
+    box-shadow: 0 8px 20px rgba(30,58,79,0.3);
 }
 
 /* metric cards */
@@ -835,17 +910,31 @@ if page == "soil":
         '<style>'
         '[data-testid="stAppViewContainer"] > section[data-testid="stSidebar"]{'
         'display:flex!important;'
-        'background:#1e293b;'
-        'min-width:15rem!important;max-width:16rem!important;width:15.5rem!important;'
+        'background:#ffffff;border-left:1px solid #e2e8f0;box-shadow:2px 0 16px rgba(30,58,79,0.06);'
+        'min-width:16rem!important;max-width:17rem!important;width:16.5rem!important;'
         'flex-shrink:0!important;}'
-        '[data-testid="stSidebarContent"]{direction:rtl;}'
-        '[data-testid="stSidebar"] *{color:#e2e8f0!important;}'
-        '[data-testid="stSidebar"] input{color:#111827!important;}'
+        '[data-testid="stSidebarContent"]{direction:rtl;padding:1rem 0.5rem;}'
+        '[data-testid="stSidebar"] *{color:#1e3a4f!important;}'
+        '[data-testid="stSidebar"] input{color:#1e3a4f!important;background:#f6fafc!important;}'
+        '[data-testid="stSidebar"] div:has(>input){'
+        'background:#f6fafc!important;border:1.5px solid #d3e1e8!important;border-radius:12px!important;'
+        'min-height:44px;transition:border-color .15s,box-shadow .15s;}'
+        '[data-testid="stSidebar"] div:has(>input):focus-within,'
+        '[data-testid="stSidebar"] div:has(>input):hover{'
+        'border-color:#4a7a8a!important;box-shadow:0 0 0 3px rgba(74,122,138,0.15);}'
         '[data-testid="stSidebar"] [data-baseweb="select"] span,'
-        '[data-testid="stSidebar"] [data-baseweb="select"] div{color:#111827!important;}'
+        '[data-testid="stSidebar"] [data-baseweb="select"] div{color:#1e3a4f!important;}'
         '[data-testid="stSidebar"] .stSelectbox label,'
         '[data-testid="stSidebar"] .stTextInput label,'
-        '[data-testid="stSidebar"] .stCheckbox label{color:#94a3b8!important;}'
+        '[data-testid="stSidebar"] .stCheckbox label{color:#64748b!important;}'
+        '[data-testid="stSidebar"] .sidebar-label{color:#1e3a4f!important;font-size:0.9rem;'
+        'text-transform:none;letter-spacing:0;border-bottom:none;margin:1.25rem 0 0.4rem;}'
+        '[data-testid="stSidebar"] hr{border-color:#e2e8f0!important;}'
+        '[data-testid="stMain"] .block-container>[data-testid="stVerticalBlock"]>'
+        '*:not(:has(.nav-bar)):not(:has(.footer)){'
+        'max-width:1100px;width:100%;margin-left:auto!important;margin-right:auto!important;'
+        'padding-left:2rem;padding-right:2rem;}'
+        '[data-testid="stMain"] .block-container>[data-testid="stVerticalBlock"]{gap:1.25rem;padding-top:0;}'
         '[data-testid="stSidebarCollapseButton"],'
         '[data-testid="stSidebarNavCollapseButton"],'
         '[data-testid="collapsedControl"],'
@@ -865,10 +954,9 @@ if page == "soil":
     with st.sidebar:
         st.markdown(
             f'<div style="text-align:center;padding:0.5rem 0 0.75rem;">'
-            f'<div style="background:white;border-radius:2px;padding:0.6rem 0.8rem;'
-            f'margin-bottom:0.5rem;display:inline-block;width:90%;">'
+            f'<div style="padding:0.4rem 0.8rem;margin-bottom:0.5rem;display:inline-block;width:90%;">'
             f'{_nav_logo_small}</div>'
-            f'<div style="font-size:0.7rem;color:#94a3b8;margin-top:4px;">Lab Results Analyzer</div>'
+            f'<div style="font-size:0.75rem;color:#64748b;margin-top:4px;">Lab Results Analyzer</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -1032,7 +1120,7 @@ if page == "soil":
 
     if not uploaded_files:
         st.markdown("""
-        <div class="info-banner" style="margin:0 2rem;">
+        <div class="info-banner">
           ℹ️ העלה קובץ דוח מעבדה כדי להתחיל — המערכת תזהה אוטומטית את סוג הניתוח
         </div>
         """, unsafe_allow_html=True)
@@ -1196,7 +1284,7 @@ if page == "soil":
     detected = [r for r in records if r.get('flag') not in ('ND', '<LOD') and r.get('value') is not None]
 
     st.markdown(f"""
-    <div class="success-banner" style="margin:0 2rem 0.5rem;">
+    <div class="success-banner">
       ✅ {cat_info} &nbsp;|&nbsp; Parser: <code>{type(parser).__name__}</code>
       {"&nbsp;|&nbsp; " + " ".join(f'<b>{s["name"]}</b>: {s["records"]} רשומות' for s in file_summaries) if n_files > 1 else ""}
     </div>
@@ -1230,7 +1318,7 @@ if page == "soil":
         f'{_TYPE_LABELS.get(t, t)}</span>'
         for t in by_type
     )
-    st.markdown(f'<div style="margin:0.5rem 2rem;">{badges}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div>{badges}</div>', unsafe_allow_html=True)
 
     # ── THRESHOLD SELECTION ───────────────────────────────────────
     found_atypes  = list(by_type.keys())
