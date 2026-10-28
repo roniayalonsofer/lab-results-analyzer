@@ -102,7 +102,8 @@ This skill must get better every session. Triggers and actions:
   (c) `_SKIP_PREFIXES` contained `""`; `str.startswith("")` is always True, so every row looked like metadata and the first samples of the BTEX table were silently dropped (4 of 21 samples). Rule: never put an empty string in a prefix tuple; after any parser change check *samples × analysis types* counts, not just total records.
 - **Silent data loss is the main risk.** A parser can return a plausible-looking record count while missing samples. Always compare the sample list from the certificate against `{r["sample_id"]}` and check each sample has every expected analysis type.
 - **PDF + xlsx pair from the same lab** (e.g. Machon HaNeft 1018 / 6408): the xlsx is the data source, the PDF is a visual copy. The app parses only the non-PDF files when both are uploaded.
-- **Open questions for Roni (verify before changing):** (1) Machon HaNeft TPH `<50`: the certificate calls 50 "LOQ" but the parser stores it as `lod` with flag `<LOD`. (2) BTEX records carry `lod` but not `loq`, although the xlsx has a "גבול כימות" row. (3) ALS PDF parser (`ALSSoilPDFParser`) returns 0 records on the PR2601739 TPH layout (the XLS version parses fine).
+- **2026-10-28 — Machon HaNeft TPH limit is LOQ (Roni confirmed).** The TPH limit row (50) is a LOQ; `<50` must be `flag="<LOQ"`, `value=loq`, `loq=50`, `lod=None`. Rule: keep LOD and LOQ rows separate in parsers; use the label printed in the certificate, never merge them.
+- **Open questions for Roni (verify before changing):** (2) BTEX records carry `lod` but not `loq`, although the xlsx has a "גבול כימות" row. (3) ALS PDF parser (`ALSSoilPDFParser`) returns 0 records on the PR2601739 TPH layout (the XLS version parses fine).
 
 ## Sample locations (real client files, never committed)
 

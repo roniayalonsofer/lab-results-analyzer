@@ -34,6 +34,7 @@ def _workbook() -> bytes:
         ws.cell(row=33 + i, column=3, value=100 + i)
         ws.cell(row=33 + i, column=4, value=60 + i)
         ws.cell(row=33 + i, column=5, value=40 + i)
+    ws["E35"] = "<50"  # ORO of SAMPLES[2]
     hdr = 50
     for ci, h in enumerate(["MTBE", "בנזן", "טולואן", "אתיל-בנזן", "קסילן"], start=3):
         ws.cell(row=hdr, column=ci, value=h)
@@ -70,6 +71,14 @@ def test_tph_and_btex_both_present():
     recs = get_parser("מכון הנפט", "soil").parse(io.BytesIO(_workbook()))
     types = {r["analysis_type"] for r in recs}
     assert {"SOIL_TPH", "SOIL_MBTEX"} <= types
+
+
+def test_tph_below_50_is_loq_not_lod():
+    """The certificate's TPH limit row is labelled LOQ, so '<50' means <LOQ."""
+    recs = MachonHaneftSoilParser().parse(io.BytesIO(_workbook()))
+    r = next(r for r in recs if r["sample_id"] == SAMPLES[2]
+             and r["compound"] == "ORO" and r["analysis_type"] == "SOIL_TPH")
+    assert (r["flag"], r["value"], r["loq"], r["lod"]) == ("<LOQ", 50.0, 50.0, None)
 
 
 def test_excel_detected_as_machon_haneft_not_alchem():

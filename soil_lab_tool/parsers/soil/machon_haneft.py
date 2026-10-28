@@ -360,15 +360,19 @@ class MachonHaneftSoilParser(BaseParser):
         # Matches "גבול גילוי" (detection limit), "LOD", "LOQ", "גבול כימות" rows.
         # When only some compound columns have a value, the highest found is used
         # as fallback for the others (same instrument / same method implies same limit).
+        # LOD and LOQ rows are kept apart: certificates that only print a "LOQ"
+        # row (Machon HaNeft TPH, LOQ=50) must yield "<LOQ", not "<LOD".
         lod_per_col: dict[int, float] = {}
+        loq_per_col: dict[int, float] = {}
         for i in range(header_row_idx + 1, data_start):
             val_a = str(raw.iloc[i, col_name]).strip().lower()
-            is_lod_row = (
-                "גבול גילוי" in val_a or "גבול כימות" in val_a
-                or val_a in ("lod", "loq", "detection limit", "quantitation limit")
-            )
-            if not is_lod_row:
+            is_loq_row = ("גבול כימות" in val_a
+                          or val_a in ("loq", "quantitation limit"))
+            is_lod_row = ("גבול גילוי" in val_a
+                          or val_a in ("lod", "detection limit"))
+            if not (is_lod_row or is_loq_row):
                 continue
+            target = loq_per_col if is_loq_row else lod_per_col
             found: dict[int, float] = {}
             for col in (col_dro, col_oro, col_tph):
                 if col is None or col >= raw.shape[1]:
@@ -382,7 +386,7 @@ class MachonHaneftSoilParser(BaseParser):
                 fallback = max(found.values())
                 for col in (col_dro, col_oro, col_tph):
                     if col is not None:
-                        lod_per_col[col] = found.get(col, fallback)
+                        target[col] = found.get(col, fallback)
 
         # Parse data rows — compound order: DRO | ORO | Total TPH (Total last = rightmost column)
         params = []
@@ -420,17 +424,21 @@ class MachonHaneftSoilParser(BaseParser):
                     continue
 
                 lod = lod_per_col.get(col)
+                loq = loq_per_col.get(col)
                 if raw_val.lower() in ("not detected", "nd", "n.d.", "<dl"):
                     value, flag = lod, "<LOD"
                 elif raw_val.startswith("<"):
-                    # Below detection/quantitation limit — extract the numeric threshold
-                    # as the LOD for this cell and mark as below-LOD (not just ND).
+                    # "<50": below the limit printed in the cell. With a LOD row
+                    # in the certificate it is "<LOD"; otherwise the limit is the
+                    # quantitation limit -> "<LOQ" (value = limit, the app's
+                    # convention for <LOQ records).
                     try:
                         cell_limit = float(raw_val[1:].replace(",", "").strip())
-                        # Use the cell-embedded limit as LOD if not set from metadata row
-                        if lod is None:
-                            lod = cell_limit
-                        value, flag = None, "<LOD"
+                        if lod is not None:
+                            value, flag = None, "<LOD"
+                        else:
+                            loq = loq if loq is not None else cell_limit
+                            value, flag = loq, "<LOQ"
                     except ValueError:
                         value, flag = self._vp.parse(raw_val)
                 else:
@@ -439,9 +447,12 @@ class MachonHaneftSoilParser(BaseParser):
                         flag = ""
                     except ValueError:
                         value, flag = self._vp.parse(raw_val)
-                    # Treat numeric value ≤ LOD as not-detected (same as MBTEX logic)
+                    # Treat numeric value ≤ limit as not-detected (same as MBTEX logic)
                     if value is not None and lod is not None and value <= lod + 1e-9:
                         value, flag = lod, "<LOD"
+                    elif value is not None and lod is None and loq is not None \
+                            and value <= loq + 1e-9:
+                        value, flag = loq, "<LOQ"
 
                 records.append({
                     "lab":           self.LAB_NAME,
@@ -452,6 +463,7 @@ class MachonHaneftSoilParser(BaseParser):
                     "flag":          flag,
                     "unit":          "mg/kg",
                     "lod":           lod,
+                    "loq":           loq,
                     "analysis_type": "SOIL_TPH",
                 })
 
