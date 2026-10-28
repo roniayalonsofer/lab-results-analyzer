@@ -468,7 +468,7 @@ section[data-testid="stMain"] {
     border-color: #2d5a6e !important;
     background: #e6f1f5 !important;
 }
-[data-testid="stFileUploaderDropzone"] button {
+[data-testid="stFileUploaderDropzone"] button[data-testid="stBaseButton-secondary"] {
     min-height: 46px;
     padding: 0.5rem 1.8rem !important;
     border-radius: 999px !important;
@@ -480,13 +480,13 @@ section[data-testid="stMain"] {
     transition: transform .15s, box-shadow .15s, background .15s;
     cursor: pointer;
 }
-[data-testid="stFileUploaderDropzone"] button:hover {
+[data-testid="stFileUploaderDropzone"] button[data-testid="stBaseButton-secondary"]:hover {
     background: #2d5a6e !important;
     transform: translateY(-1px);
     box-shadow: 0 6px 16px rgba(30,58,79,0.3);
 }
-[data-testid="stFileUploaderDropzone"] button p { display: none !important; }
-[data-testid="stFileUploaderDropzone"] button::after {
+[data-testid="stFileUploaderDropzone"] button[data-testid="stBaseButton-secondary"] p { display: none !important; }
+[data-testid="stFileUploaderDropzone"] button[data-testid="stBaseButton-secondary"]::after {
     content: "בחירת קבצים";
     font-size: 1rem;
 }
@@ -525,7 +525,7 @@ section[data-testid="stMain"] {
     background: linear-gradient(135deg, #2d5a6e, #4a7a8a);
     box-shadow: 0 8px 20px rgba(30,58,79,0.3);
 }
-[data-testid="stBaseButton-secondary"]:not([data-testid="stFileUploaderDropzone"] button) {
+[data-testid="stBaseButton-secondary"]:not([data-testid="stFileUploaderDropzone"] button[data-testid="stBaseButton-secondary"]) {
     background: #ffffff;
     color: #1e3a4f;
     border: 1.5px solid #c5d6de;
@@ -670,15 +670,111 @@ def _build_pivot_table(recs):
         return df[['תרכובת', 'sample_id', 'value']]
 
 
+_PREVIEW_CSS = """<style>
+.pv-wrap{direction:rtl;max-height:520px;overflow:auto;border:1px solid #e2e8f0;border-radius:14px;
+  background:#fff;box-shadow:0 2px 12px rgba(30,58,79,.06);}
+.pv-tbl{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;font-size:.82rem;color:#1e3a4f;}
+.pv-tbl td{padding:7px 12px;border-bottom:1px solid #eef2f6;border-left:1px solid #f1f5f9;white-space:nowrap;
+  text-align:center;background:#fff;}
+.pv-tbl tr:hover td{filter:brightness(.97);}
+.pv-tbl td.pv-num{direction:ltr;unicode-bidi:isolate;font-variant-numeric:tabular-nums;}
+.pv-tbl td.pv-lbl{text-align:right;font-weight:600;}
+.pv-tbl td.pv-hdr{position:sticky;top:0;z-index:3;background:#1e3a4f;color:#fff;font-weight:700;border-bottom:4px solid #1e3a4f;}
+.pv-tbl td.pv-c1{position:sticky;right:0;z-index:2;}
+.pv-tbl td.pv-hdr.pv-c1{z-index:4;}
+.pv-tbl td.pv-title{background:#f6fafc;text-align:right;font-weight:700;border-bottom:1px solid #d3e1e8;}
+.pv-legend{direction:rtl;display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:6px 0 10px;
+  font-size:.8rem;color:#475569;}
+.pv-chip{display:inline-flex;align-items:center;gap:6px;}
+.pv-chip i{display:inline-block;width:14px;height:14px;border-radius:4px;border:1px solid #cbd5e1;}
+</style>"""
+
 _PREVIEW_LEGEND = (
-    '<div style="font-size:0.75rem;direction:rtl;margin-top:6px;display:flex;'
-    'gap:10px;align-items:center;">'
-    '<span style="background:#FFFF00;padding:2px 10px;border-radius:2px;'
-    'border:1px solid #ccc;">מעל VSL</span>'
-    '<span style="background:#FFC000;padding:2px 10px;border-radius:2px;'
-    'border:1px solid #ccc;">מעל Tier 1</span>'
+    '<div class="pv-legend">'
+    '<span class="pv-chip"><i style="background:#FFFF00"></i>מעל VSL</span>'
+    '<span class="pv-chip"><i style="background:#ADD8E6"></i>מעל Tier 1 מגורים</span>'
+    '<span class="pv-chip"><i style="background:#FFB6C1"></i>מעל Tier 1 תעשייה</span>'
+    '<span class="pv-chip"><i style="background:#D3D3D3"></i>לא זוהה, אך גבול הגילוי גבוה מערך הסף</span>'
+    '<span class="pv-chip">&lt;X = מתחת לגבול הכימות</span>'
     '</div>'
 )
+
+
+def _fmt_preview_cell(cell) -> str:
+    v = cell.value
+    if v is None:
+        return ""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        txt = "%.6g" % v
+        if '"<"' in (cell.number_format or ""):
+            txt = "<" + txt
+        return txt
+    return str(v)
+
+
+def _sheet_to_html(ws) -> str:
+    """Render an openpyxl worksheet as a styled, scrollable HTML table that
+    follows the Excel fills/bold, with a sticky header row and first column."""
+    import html as _html
+
+    spans, covered = {}, set()
+    for mr in ws.merged_cells.ranges:
+        spans[(mr.min_row, mr.min_col)] = (mr.max_row - mr.min_row + 1,
+                                           mr.max_col - mr.min_col + 1)
+        for r in range(mr.min_row, mr.max_row + 1):
+            for c in range(mr.min_col, mr.max_col + 1):
+                if (r, c) != (mr.min_row, mr.min_col):
+                    covered.add((r, c))
+
+    hdr_row = None
+    for r in range(1, min(ws.max_row, 12) + 1):
+        if str(ws.cell(r, 1).value or "").strip() in ("שם קידוח", "תרכובת", "Compound"):
+            hdr_row = r
+            break
+
+    out = ['<div class="pv-wrap"><table class="pv-tbl">']
+    for r in range(1, ws.max_row + 1):
+        if all(ws.cell(r, c).value in (None, "") for c in range(1, ws.max_column + 1)):
+            continue
+        out.append("<tr>")
+        for c in range(1, ws.max_column + 1):
+            if (r, c) in covered:
+                continue
+            cell = ws.cell(r, c)
+            txt = _fmt_preview_cell(cell)
+            cls, style = [], []
+            if r == hdr_row:
+                cls.append("pv-hdr")
+            elif hdr_row is None or r < hdr_row:
+                cls.append("pv-title")
+            if c == 1:
+                cls.append("pv-c1")
+                cls.append("pv-lbl")
+            if isinstance(cell.value, (int, float)) or txt.startswith("<"):
+                cls.append("pv-num")
+            try:
+                f = cell.fill
+                if getattr(f, "fill_type", None) == "solid":
+                    fc = getattr(f, "fgColor", None)
+                    if fc is not None and getattr(fc, "type", None) == "rgb":
+                        hx = fc.rgb[2:] if len(fc.rgb) == 8 else fc.rgb
+                        if hx.upper() not in ("FFFFFF", "000000") and r != hdr_row:
+                            style.append(f"background:#{hx};color:#000")
+                if cell.font is not None and cell.font.bold and r != hdr_row:
+                    style.append("font-weight:700")
+            except Exception:
+                pass
+            rs, cs = spans.get((r, c), (1, 1))
+            attrs = ""
+            if rs > 1:
+                attrs += f' rowspan="{rs}"'
+            if cs > 1:
+                attrs += f' colspan="{cs}"'
+            out.append(f'<td class="{" ".join(cls)}" style="{";".join(style)}"{attrs}>'
+                       f"{_html.escape(txt)}</td>")
+        out.append("</tr>")
+    out.append("</table></div>")
+    return _PREVIEW_CSS + _PREVIEW_LEGEND + "".join(out)
 
 
 def _build_styled_pivot(recs: list[dict], tm, selected_thresholds: list[str]):
@@ -806,59 +902,7 @@ def _preview_dialog(records, tm, project_name, client_name, rep_date,
         with tab:
             ws = wb[sname]
 
-            for mr in list(ws.merged_cells.ranges):
-                top_val  = ws.cell(mr.min_row, mr.min_col).value
-                ws.unmerge_cells(str(mr))
-                for r in range(mr.min_row, mr.max_row + 1):
-                    for c in range(mr.min_col, mr.max_col + 1):
-                        ws.cell(r, c).value = top_val
-
-            all_rows = list(ws.iter_rows())
-            if not all_rows:
-                st.info("גיליון ריק")
-                continue
-
-            n_cols = max(len(row) for row in all_rows)
-            data_list, css_list = [], []
-            for row in all_rows:
-                row_vals, row_css = [], []
-                for cell in row:
-                    v = cell.value
-                    row_vals.append("" if v is None else
-                                    (v if isinstance(v, (int, float)) else str(v)))
-                    css_bg = ""
-                    try:
-                        f = cell.fill
-                        if getattr(f, 'fill_type', None) == "solid":
-                            fc = getattr(f, 'fgColor', None)
-                            if fc and getattr(fc, 'type', None) == 'rgb':
-                                rgb = fc.rgb
-                                hx = rgb[2:] if len(rgb) == 8 else rgb
-                                if hx.upper() not in ("FFFFFF", "000000", "00000000"):
-                                    css_bg = f"background-color: #{hx}; color: #000;"
-                    except Exception:
-                        pass
-                    row_css.append(css_bg)
-                pad = n_cols - len(row_vals)
-                row_vals += [""] * pad
-                row_css  += [""] * pad
-                data_list.append(row_vals)
-                css_list.append(row_css)
-
-            df = pd.DataFrame(data_list, columns=list(range(n_cols)))
-
-            n_dr, n_dc = len(df), len(df.columns)
-            padded = []
-            for ri in range(n_dr):
-                row = css_list[ri] if ri < len(css_list) else []
-                padded.append([row[ci] if ci < len(row) else "" for ci in range(n_dc)])
-            style_df = pd.DataFrame(padded, index=df.index, columns=df.columns)
-
-            styled = (df.style
-                      .apply(lambda _: style_df, axis=None)
-                      .hide(axis='columns')
-                      .hide(axis='index'))
-            st.dataframe(styled, use_container_width=True, height=480)
+            st.markdown(_sheet_to_html(ws), unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1290,9 +1334,12 @@ if page == "soil":
     samples  = sorted(set(r['sample_id'] for r in records))
     detected = [r for r in records if r.get('flag') not in ('ND', '<LOD') and r.get('value') is not None]
 
+    import re as _re_cat
+    _cat_html = _re_cat.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", cat_info)  # markdown ** is not parsed inside HTML
+
     st.markdown(f"""
     <div class="success-banner">
-      ✅ {cat_info} &nbsp;|&nbsp; Parser: <code>{type(parser).__name__}</code>
+      ✅ {_cat_html} &nbsp;|&nbsp; Parser: <code>{type(parser).__name__}</code>
       {"&nbsp;|&nbsp; " + " ".join(f'<b>{s["name"]}</b>: {s["records"]} רשומות' for s in file_summaries) if n_files > 1 else ""}
     </div>
     """, unsafe_allow_html=True)
