@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import re
 import pandas as pd
-from core.cas_lookup import fuzzy_name_to_cas
+from core.cas_lookup import fuzzy_name_to_cas, name_to_cas
 
 
 # ── Main file column mapping ──────────────────────────────────────────
@@ -851,6 +851,13 @@ class ThresholdManager:
         # Look up what name the threshold table uses for this CAS
         thresh_name = self._cas_to_thresh_name.get(str(cas).strip())
         if thresh_name and compound_name:
+            # The text comparison below can't tell that "בנזן" or "MTBE" name the
+            # table's "Benzene" / "Methyl tert-Butyl Ether (MTBE)". When our own
+            # name→CAS map confirms this name is this CAS, the identity is certain.
+            # A summed result ("meta- & para-xylene") is not one compound, so it
+            # keeps the name check against the single-isomer threshold.
+            if "&" not in compound_name and name_to_cas(compound_name) == str(cas).strip():
+                return (val_clean, 'exact')
             conf = self.name_match_confidence(compound_name, thresh_name)
             return (val_clean, conf)
 
