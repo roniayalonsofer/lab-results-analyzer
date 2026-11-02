@@ -28,6 +28,8 @@ Every record dict must contain: `compound`, `cas`, `value` (float|None), `flag` 
 
 Maps `(lab_key, category_key) → ParserClass`. Lab keys are lowercase strings (`"kte"`, `"alchem"`, `"aminolab"`, …). Category keys: `"soil"`, `"groundwater"`, `"soil_gas"`, `"pfas"`, `"pr"`, `"grain_size"`.
 
+The analysis page has no automatic option: the user must choose the lab (primary and each secondary file) and the category before anything is parsed. `auto_detect_category()` only picks the PDF layout parser inside the chosen category (`soil` → `soil_pdf`). `auto_detect_lab()` stays for the annual report's info caption and the tests.
+
 `auto_detect_lab()` and `auto_detect_category()` try filename hints first, then content-based inspection (sheet names, PDF text, row peeks). Content checks always run **before** the KTE filename fallback.
 
 ### Adding a new parser
@@ -46,6 +48,10 @@ Defined by convention (string keys): `SOIL_VOC`, `SOIL_SVOC`, `SOIL_TPH`, `SOIL_
 ### Threshold manager (`core/threshold_manager.py`)
 
 Loaded once at startup via `@st.cache_resource`. Key method: `get_threshold_with_name(cas, threshold_key, compound_name)` — tries CAS lookup first, falls back to compound name. VSL keys contain `"VSL"`; Tier-1 keys are everything else (`TIER1_*`, `GAS_*`, `GW`, `PFAS_TIER1_*`).
+
+### Ambiguous compounds (`core/compound_choices.py`)
+
+Thresholds are matched by CAS: a CAS with a row in the threshold table is never questioned, whatever the lab calls the compound, and a CAS the table doesn't have means no threshold. A compound with no CAS is asked about in the app (`_compound_picker`) when the table has similar names. Also asked: a summed result ("m+p-Xylene"), whose CAS names only one isomer, and a known compound name under a CAS the table lacks. No report is built until every question is answered. The answers go to Excel, Word and the preview together: `apply_compound_choices` sets the chosen CAS on the records and `ResolvedThresholds` wraps the threshold manager. The lab's compound name stays as printed on the certificate. A clear spelling reported without a CAS (e.g. MTBE) belongs in `CHEMICAL_MAP`, so it is never asked about (`name_matches_cas`).
 
 ### RTL / Hebrew
 

@@ -19,6 +19,7 @@ CHEMICAL_MAP: dict[str, str | None] = {
     "אתילבנזן":             "100-41-4",
     "xylene":               "1330-20-7",
     "xylenes":              "1330-20-7",
+    "total xylenes":        "1330-20-7",
     "קסילן":                "1330-20-7",
     "קסילנים":              "1330-20-7",
     "o-xylene":             "95-47-6",
@@ -27,6 +28,8 @@ CHEMICAL_MAP: dict[str, str | None] = {
     # MTBE / oxygenates
     "mtbe":                 "1634-04-4",
     "methyl tert-butyl ether": "1634-04-4",
+    "methyl-t-butyl ether": "1634-04-4",
+    "methyl tertiary butyl ether": "1634-04-4",
     "etbe":                 "637-92-3",
     "tame":                 "994-05-8",
     # Chlorinated solvents
@@ -214,6 +217,11 @@ CHEMICAL_MAP: dict[str, str | None] = {
     "pcb 138":                               "35065-28-2",
     "pcb 153":                               "35065-27-1",
     "pcb 180":                               "35065-29-3",
+    # Common short forms and Hebrew names
+    "נפתלן":                                 "91-20-3",
+    "1,2-dca":                               "107-06-2",
+    "1,2,4-tmb":                             "95-63-6",
+    "1,3,5-tmb":                             "108-67-8",
 }
 
 
@@ -225,6 +233,35 @@ def name_to_cas(chemical_name: str) -> str | None:
 def _cas_norm(s: str) -> str:
     """Normalize a compound name for fuzzy comparison: lowercase, strip punctuation/spaces."""
     return re.sub(r'[().,\-/\s]', '', s.lower())
+
+
+_NORM_CHEMICAL_MAP: dict[str, str | None] = {}
+for _name, _cas in CHEMICAL_MAP.items():
+    _NORM_CHEMICAL_MAP.setdefault(_cas_norm(_name), _cas)
+
+
+def is_summed_name(name: str) -> bool:
+    """True for a result that sums compounds ("m+p-Xylene", "Meta- & Para-Xylene")."""
+    return bool(re.search(r"[&+]|\bm\s*[,/]\s*p\b|\bmeta\b.*\bpara\b", name, re.IGNORECASE))
+
+
+def name_matches_cas(name: str, cas: str) -> bool:
+    """
+    True when our own name map confirms that *name* is this CAS.
+
+    Tolerates lab decorations: trailing asterisks, punctuation ("M.T.B.E") and
+    a name with its synonym in brackets ("MTBE (Methyl tert-butyl ether)").
+    A summed result is not one compound, so it is never confirmed.
+    """
+    raw = name.strip().rstrip("*").strip()
+    if not raw or not cas or is_summed_name(raw):
+        return False
+    parts = [raw, re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", raw)]
+    parts += re.findall(r"[\(\[]([^\)\]]+)[\)\]]", raw)
+    return any(
+        name_to_cas(p) == cas or _NORM_CHEMICAL_MAP.get(_cas_norm(p)) == cas
+        for p in parts if p.strip()
+    )
 
 
 def fuzzy_name_to_cas(name: str) -> str | None:

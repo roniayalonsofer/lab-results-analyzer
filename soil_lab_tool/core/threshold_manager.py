@@ -45,9 +45,10 @@ From soil_vsl_v7_full.xlsx  (Tier 1 RBTL sheets) — soil direct contact
 
 from __future__ import annotations
 
+import difflib
 import re
 import pandas as pd
-from core.cas_lookup import fuzzy_name_to_cas, name_to_cas
+from core.cas_lookup import fuzzy_name_to_cas, is_summed_name, name_matches_cas
 
 
 # ── Main file column mapping ──────────────────────────────────────────
@@ -550,17 +551,7 @@ class ThresholdManager:
             if _fuzzy_cas and _fuzzy_cas != cas:
                 val = self.get_threshold(_fuzzy_cas, threshold_key)
                 if val is not None:
-                    # Store fuzzy match info for output flagging
-                    from soil_lab_tool.core import cas_lookup as _cl
-                    _matched_name = next(
-                        (k for k, v in _cl.CHEMICAL_MAP.items() if v == _fuzzy_cas and not any('֐' <= c <= '׿' for c in k)),
-                        _fuzzy_cas
-                    )
-                    if not hasattr(self, '_fuzzy_warnings'):
-                        self._fuzzy_warnings = []
-                    self._fuzzy_warnings.append(
-                        f"* חוסר וודאות — ערך סף של {_matched_name} ({_fuzzy_cas}) שימש עבור {compound_name} ({cas})"
-                    )
+                    # A CAS guessed from the name: marked so the app asks the user
                     val = f"{val} *"
         if val is not None or not compound_name:
             return val
@@ -823,7 +814,36 @@ class ThresholdManager:
             if val is not None:
                 return (val, 'exact')
 
-        # Build name→cas reverse map from the loaded dataframes (cached)
+        names = self._thresh_names()
+
+        val = self.get_threshold_with_name(cas, threshold_key, compound_name)
+        if val is None:
+            return (None, 'none')
+
+        # Strip the " *" suffix if present (fuzzy warning marker)
+        val_clean = val
+        if isinstance(val, str) and val.endswith(' *'):
+            return (float(val[:-2]), 'uncertain')
+
+        # The CAS is the compound's identity: a table row for it settles the match
+        # whatever the lab calls the compound. A summed result ("m+p-Xylene") is
+        # not the single isomer its CAS names, so that one still needs an answer.
+        if str(cas).strip() and self.get_threshold(cas, threshold_key) is not None:
+            return (val_clean, 'uncertain' if is_summed_name(compound_name) else 'exact')
+
+        # Value came from the name, under a CAS the table has a row for
+        thresh_name = names.get(str(cas).strip())
+        if thresh_name and compound_name:
+            if name_matches_cas(compound_name, str(cas).strip()):
+                return (val_clean, 'exact')
+            conf = self.name_match_confidence(compound_name, thresh_name)
+            return (val_clean, conf)
+
+        # No CAS→name mapping found (was probably a name-based lookup) → exact
+        return (val_clean, 'exact')
+
+    def _thresh_names(self) -> dict[str, str]:
+        """CAS → compound name in the threshold tables (cached)."""
         if not hasattr(self, '_cas_to_thresh_name'):
             self._cas_to_thresh_name: dict[str, str] = {}
             for df in ([self._vsl_full] if self._vsl_full is not None else []) + [self._main]:
@@ -838,31 +858,43 @@ class ThresholdManager:
                         n = str(row[name_col]).strip()
                         if c and c != 'nan' and n and n != 'nan':
                             self._cas_to_thresh_name.setdefault(c, n)
+        return self._cas_to_thresh_name
 
-        val = self.get_threshold_with_name(cas, threshold_key, compound_name)
-        if val is None:
-            return (None, 'none')
+    def threshold_candidates(
+        self, compound_name: str, cas: str, threshold_keys: list[str], limit: int = 4
+    ) -> list[tuple[str, str]]:
+        """
+        Threshold-table compounds an ambiguous lab name may refer to.
 
-        # Strip the " *" suffix if present (fuzzy warning marker)
-        val_clean = val
-        if isinstance(val, str) and val.endswith(' *'):
-            return (float(val[:-2]), 'uncertain')
+        Returns up to *limit* (table_name, cas) pairs that have a value under at
+        least one of *threshold_keys*: the row of the compound's own CAS first,
+        then the rows with the most similar names.
+        """
+        names = self._thresh_names()
 
-        # Look up what name the threshold table uses for this CAS
-        thresh_name = self._cas_to_thresh_name.get(str(cas).strip())
-        if thresh_name and compound_name:
-            # The text comparison below can't tell that "בנזן" or "MTBE" name the
-            # table's "Benzene" / "Methyl tert-Butyl Ether (MTBE)". When our own
-            # name→CAS map confirms this name is this CAS, the identity is certain.
-            # A summed result ("meta- & para-xylene") is not one compound, so it
-            # keeps the name check against the single-isomer threshold.
-            if "&" not in compound_name and name_to_cas(compound_name) == str(cas).strip():
-                return (val_clean, 'exact')
-            conf = self.name_match_confidence(compound_name, thresh_name)
-            return (val_clean, conf)
+        target = self._norm_name(compound_name)
+        words = [w for w in target.split() if len(w) >= 5]
+        scored = []
+        for c, n in names.items():
+            norm = self._norm_name(n)
+            score = difflib.SequenceMatcher(None, target, norm).ratio()
+            if any(w in norm for w in words):
+                score += 0.5
+            if score >= 0.7:
+                scored.append((score, c))
+        scored.sort(key=lambda t: -t[0])
 
-        # No CAS→name mapping found (was probably a name-based lookup) → exact
-        return (val_clean, 'exact')
+        own = str(cas).strip()
+        ordered = [own, fuzzy_name_to_cas(compound_name)] + [c for _, c in scored]
+        result: list[tuple[str, str]] = []
+        for c in ordered:
+            if len(result) >= limit:
+                break
+            if not c or c not in names or any(c == have for _, have in result):
+                continue
+            if any(self.get_threshold(c, k) is not None for k in threshold_keys):
+                result.append((names[c], c))
+        return result
 
     def get_cas_by_name(self, compound_name: str) -> str | None:
         """Return the CAS number for a compound looked up by name.

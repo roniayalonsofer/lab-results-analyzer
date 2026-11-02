@@ -799,8 +799,10 @@ try:
     from core.word_output  import (LabReportWord, parse_als_file, build_word_report,
                                    load_threshold_file, get_tier1_col, tier1_label)
     from core.xrf_output   import build_xrf_simple_excel
-    from parsers import get_parser, auto_detect_category, auto_detect_lab
-    _tm_py    = os.path.join(TOOL_DIR, 'core', 'threshold_manager.py')
+    from core.compound_choices import (NO_THRESHOLD, ResolvedThresholds,
+                                       apply_compound_choices, find_ambiguous_compounds)
+    from parsers import get_parser, auto_detect_category
+    _tm_py   = os.path.join(TOOL_DIR, 'core', 'threshold_manager.py')
     _tm_mtime = os.path.getmtime(_tm_py)
     tm = load_threshold_manager(_tm_mtime)
 except Exception as e:
@@ -1038,6 +1040,35 @@ _PREV_LABELS = {
 }
 
 
+def _compound_picker(ambiguous: list[dict]) -> tuple[dict[str, str], int]:
+    """Ask which threshold-table compound each ambiguous lab name refers to.
+    Returns the answers so far (compound → CAS or NO_THRESHOLD) and how many are open."""
+    if not ambiguous:
+        return {}, 0
+
+    import hashlib
+    st.markdown("##### 🧪 זיהוי תרכובות")
+    st.caption("לתרכובות האלה אין התאמה ודאית לפי מספר CAS בטבלת ערכי הסף. "
+               "סמנו לכל תרכובת למה היא מתכוונת, והדוח ייבנה לפי הבחירה.")
+    choices: dict[str, str] = {}
+    for item in ambiguous:
+        name = item["compound"]
+        labels = {c: f"{n} ({c})" for n, c in item["candidates"]}
+        labels[NO_THRESHOLD] = "אף אחת — ללא ערך סף"
+        _key = hashlib.md5(name.encode("utf-8")).hexdigest()
+        answer = st.radio(
+            "**%s** — האם זו:" % name.replace("*", r"\*"),
+            list(labels),
+            index=None,
+            format_func=labels.get,
+            horizontal=True,
+            key=f"compound_choice_{_key}",
+        )
+        if answer is not None:
+            choices[name] = answer
+    return choices, len(ambiguous) - len(choices)
+
+
 @st.dialog("📊 תצוגה מקדימה", width="large")
 def _preview_dialog(records, tm, project_name, client_name, rep_date,
                     selected_thresholds, combine_tph_voc, combine_tph_mbtex, pid_map):
@@ -1194,26 +1225,6 @@ if page == "soil":
         project_name = st.text_input("שם האתר",  value="", label_visibility="collapsed",
                                       placeholder="שם האתר (לדוג׳: צומת שמשון)")
 
-        st.markdown('<div class="sidebar-label">🏭 מעבדה וקטגוריה</div>', unsafe_allow_html=True)
-        lab = st.selectbox(
-            "מעבדה",
-            ["🔍 זיהוי אוטומטי", "KTE", "מכון הנפט", "מכון האנרגיה", "בקטוכם",
-             "Alchem", "ALS", "Aminolab", "RJ Lee", "אלכם (XRF)"],
-            label_visibility="collapsed",
-        )
-        category_display = {
-            "🔍 זיהוי אוטומטי":           "auto",
-            "🪨 קרקע (soil)":             "soil",
-            "💧 מי תהום (groundwater)":   "groundwater",
-            "🧬 PFAS":                    "pfas",
-            "📊 PR format (KTE מתכות)":   "pr",
-            "💨 גז קרקע (soil_gas)":      "soil_gas",
-            "🪨 גרנולומטריה (grain_size)": "grain_size",
-        }
-        cat_label    = st.selectbox("קטגוריה", list(category_display.keys()),
-                                    label_visibility="collapsed")
-        category_raw = category_display[cat_label]
-
         st.markdown('<hr style="margin:1rem 0 0.5rem;">', unsafe_allow_html=True)
 
     # ══════════════════════════════════════════════════════════════════
@@ -1223,41 +1234,32 @@ if page == "soil":
     # ── UPLOAD ────────────────────────────────────────────────────
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
 
-    col_up, col_meta = st.columns([3, 1])
+    _LAB_OPTIONS = ["KTE", "מכון הנפט", "מכון האנרגיה", "בקטוכם",
+                    "Alchem", "ALS", "Aminolab", "RJ Lee", "אלכם (XRF)"]
+    category_display = {
+        "🪨 קרקע (soil)":             "soil",
+        "💧 מי תהום (groundwater)":   "groundwater",
+        "🧬 PFAS":                    "pfas",
+        "📊 PR format (KTE מתכות)":   "pr",
+        "💨 גז קרקע (soil_gas)":      "soil_gas",
+        "🪨 גרנולומטריה (grain_size)": "grain_size",
+    }
+    col_lab, col_cat = st.columns(2)
+    with col_lab:
+        lab = st.selectbox("🏭 מעבדה", _LAB_OPTIONS, index=None,
+                           placeholder="בחרו מעבדה (חובה)")
+    with col_cat:
+        cat_label = st.selectbox("📂 קטגוריה", list(category_display.keys()), index=None,
+                                 placeholder="בחרו קטגוריה (חובה)")
+    category_raw = category_display.get(cat_label)
 
-    with col_up:
-        uploaded_files = st.file_uploader(
-            "גרור קבצים לכאן או לחץ לבחירה",
-            type=["xlsx", "xls", "csv", "pdf"],
-            accept_multiple_files=True,
-            help="ניתן להעלות מספר קבצים מאותה מעבדה | XLSX / XLS / CSV / PDF",
-            label_visibility="visible",
-        )
-
-    with col_meta:
-        _display_lab = lab
-        if uploaded_files and lab == "🔍 זיהוי אוטומטי":
-            try:
-                _peek_file = next((f for f in uploaded_files
-                                   if not f.name.lower().endswith(".pdf")), uploaded_files[0])
-                _peek = _peek_file.getvalue()
-                _det  = auto_detect_lab(_peek_file.name, _peek)
-                _display_lab = _det or "KTE"
-            except Exception:
-                _display_lab = "?"
-        elif lab == "🔍 זיהוי אוטומטי":
-            _display_lab = "—"
-
-        cat_clean = cat_label.split(" ", 1)[-1] if " " in cat_label else cat_label
-        st.markdown(f"""
-        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;
-                    padding:0.9rem 1rem;margin-top:1.75rem;text-align:center;">
-          <div style="font-size:0.65rem;color:#94a3b8;font-weight:700;letter-spacing:0.8px;
-                      text-transform:uppercase;margin-bottom:4px;">מעבדה</div>
-          <div style="font-size:1.2rem;font-weight:800;color:#1e3a4f;">{_display_lab}</div>
-          <div style="font-size:0.7rem;color:#64748b;margin-top:4px;">{cat_clean}</div>
-        </div>
-        """, unsafe_allow_html=True)
+    uploaded_files = st.file_uploader(
+        "גרור קבצים לכאן או לחץ לבחירה",
+        type=["xlsx", "xls", "csv", "pdf"],
+        accept_multiple_files=True,
+        help="ניתן להעלות מספר קבצים מאותה מעבדה | XLSX / XLS / CSV / PDF",
+        label_visibility="visible",
+    )
 
     pid_upload_file = st.file_uploader(
         "העלאת ממצאי שדה (PID) — אופציונלי",
@@ -1325,31 +1327,34 @@ if page == "soil":
     )
     st.session_state["secondary_lab_files"] = secondary_lab_files
 
-    if secondary_lab_files:
-        for _sec_f in secondary_lab_files:
-            try:
-                _sec_peek = _sec_f.getvalue()
-                _sec_det_lab = auto_detect_lab(_sec_f.name, _sec_peek) or "?"
-                _sec_det_cat = auto_detect_category(_sec_f.name, _sec_peek, _sec_det_lab)
-                _sec_cat_clean = (_sec_det_cat or "").split(" ", 1)[-1] if _sec_det_cat and " " in _sec_det_cat else (_sec_det_cat or "")
-                st.markdown(f"""
-        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;
-                    padding:0.9rem 1rem;margin-top:0.5rem;text-align:center;">
-          <div style="font-size:0.65rem;color:#94a3b8;font-weight:700;letter-spacing:0.8px;
-                      text-transform:uppercase;margin-bottom:4px;">מעבדה משנית — {_sec_f.name}</div>
-          <div style="font-size:1.2rem;font-weight:800;color:#1e3a4f;">{_sec_det_lab}</div>
-          <div style="font-size:0.7rem;color:#64748b;margin-top:4px;">{_sec_cat_clean}</div>
-        </div>
-            """, unsafe_allow_html=True)
-            except Exception:
-                pass
+    _sec_labs = {
+        _sec_f.name: st.selectbox(
+            f"מעבדה משנית — {_sec_f.name}",
+            _LAB_OPTIONS,
+            index=None,
+            placeholder="בחרו מעבדה (חובה)",
+            key=f"sec_lab_{_sec_f.name}",
+        )
+        for _sec_f in secondary_lab_files or []
+    }
 
     st.markdown('</div>', unsafe_allow_html=True)
 
     if not uploaded_files:
         st.markdown("""
         <div class="info-banner">
-          ℹ️ העלה קובץ דוח מעבדה כדי להתחיל — המערכת תזהה אוטומטית את סוג הניתוח
+          ℹ️ בחר מעבדה וקטגוריה והעלה קובץ דוח מעבדה כדי להתחיל
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown(_FOOTER, unsafe_allow_html=True)
+        st.stop()
+
+    if not lab or not category_raw or not all(_sec_labs.values()):
+        _missing_lab = ("מעבדה וקטגוריה" if not lab or not category_raw
+                        else "מעבדה לכל קובץ של מעבדה משנית")
+        st.markdown(f"""
+        <div class="info-banner">
+          ⚠️ חובה לבחור {_missing_lab} כדי להמשיך
         </div>
         """, unsafe_allow_html=True)
         st.markdown(_FOOTER, unsafe_allow_html=True)
@@ -1360,35 +1365,20 @@ if page == "soil":
     fname     = " | ".join(f for f, _ in all_raw)
     raw_bytes = all_raw[0][1]
 
+    # A chosen category can have a separate parser for its PDF layout. The file
+    # decides only which layout it is, never the category itself.
+    _CATEGORY_LAYOUTS = {"soil": {"soil_pdf", "soil_tph_pdf"}, "soil_gas": {"soil_gas_pdf"}}
+
+    def _category_layout(_chosen, _name, _bytes, _lab):
+        _det = auto_detect_category(_name, _bytes, lab=_lab)
+        return _det if _det in _CATEGORY_LAYOUTS.get(_chosen, ()) else _chosen
+
     # PDFs are companion copies of the data files (see _parse_files below),
-    # so lab/category detection looks at the data files first. Otherwise a
-    # PDF listed first decides the lab and the xlsx is parsed by the wrong parser.
+    # so the layout comes from the data files first.
     _detect_raw = [(n, b) for n, b in all_raw if not n.lower().endswith(".pdf")] or all_raw
 
-    if lab == "🔍 זיהוי אוטומטי":
-        detected_lab = None
-        for _fn, _fb in _detect_raw:
-            _det = auto_detect_lab(_fn, _fb)
-            if _det and _det != "KTE":
-                detected_lab = _det
-                break
-        if not detected_lab:
-            detected_lab = auto_detect_lab(_detect_raw[0][0], _detect_raw[0][1]) or "KTE"
-        lab = detected_lab
-
-    if category_raw == 'auto':
-        category = None
-        for _fn, _fb in _detect_raw:
-            _cat = auto_detect_category(_fn, _fb, lab=lab)
-            if _cat and _cat != "soil":
-                category = _cat
-                break
-        if not category:
-            category = auto_detect_category(_detect_raw[0][0], _detect_raw[0][1], lab=lab) or "soil"
-        cat_info = f"זוהה אוטומטית: **{category}**"
-    else:
-        category = category_raw
-        cat_info  = f"קטגוריה: **{category}**"
+    category = _category_layout(category_raw, _detect_raw[0][0], _detect_raw[0][1], lab)
+    cat_info = f"קטגוריה: **{category_raw}**"
 
     try:
         try:
@@ -1742,6 +1732,7 @@ if page == "soil":
     excel_ok  = False
     word_buf  = io.BytesIO()
     word_ok   = False
+    report_tm = tm
 
     if _is_kte_gw:
         try:
@@ -1778,9 +1769,9 @@ if page == "soil":
                 try:
                     _sec_raw  = _sec_file.getvalue()
                     _sec_name = _sec_file.name
-                    # Auto-detect secondary lab type, then parse with same pipeline
-                    _sec_lab = auto_detect_lab(_sec_name, _sec_raw) or "🔍 זיהוי אוטומטי"
-                    _sec_cat = auto_detect_category(_sec_name, _sec_raw, _sec_lab) or category
+                    # Parse with the lab the user chose, same pipeline as the primary
+                    _sec_lab = _sec_labs[_sec_name]
+                    _sec_cat = _category_layout(category_raw, _sec_name, _sec_raw, _sec_lab)
                     try:
                         _sec_parser = get_parser(_sec_lab, _sec_cat)
                     except KeyError:
@@ -1849,9 +1840,22 @@ if page == "soil":
                         if _ov_loq_voc_sec and not r.get("loq"):
                             r["loq"] = _ov_loq_voc_sec
 
+            # ── Ambiguous compounds: no report until each one is answered ──
+            _choices, _open_choices = _compound_picker(
+                find_ambiguous_compounds(records + secondary_records, tm, selected_thresholds)
+            )
+            if _open_choices:
+                st.warning(f"⚠️ תרכובות שנותרו לסימון: {_open_choices}. הדוח ייבנה אחרי שכולן יסומנו.")
+                st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown(_FOOTER, unsafe_allow_html=True)
+                st.stop()
+            records           = apply_compound_choices(records, _choices)
+            secondary_records = apply_compound_choices(secondary_records, _choices)
+            report_tm         = ResolvedThresholds(tm, _choices)
+
             builder = LabReportExcel(
                 records             = records,
-                threshold_manager   = tm,
+                threshold_manager   = report_tm,
                 output_path         = excel_buf,
                 project_name        = project_name,
                 client              = client_name,
@@ -1868,7 +1872,7 @@ if page == "soil":
             try:
                 LabReportWord(
                     records             = records,
-                    threshold_manager   = tm,
+                    threshold_manager   = report_tm,
                     output_path         = word_buf,
                     project_name        = project_name,
                     client              = client_name,
@@ -1905,7 +1909,7 @@ if page == "soil":
             )
         with prev_col:
             if st.button("👁️ תצוגה מקדימה", use_container_width=True, key="xl_preview_btn"):
-                _preview_dialog(records, tm, project_name, client_name,
+                _preview_dialog(records, report_tm, project_name, client_name,
                                 date.today().strftime('%d.%m.%Y'),
                                 selected_thresholds, combine_tph_voc,
                                 combine_tph_mbtex, pid_map)
@@ -1929,12 +1933,7 @@ if page == "soil":
                 key       = "word_dl_btn",
             )
 
-        # ── Uncertain threshold notice + download link ─────────────────
-        st.info(
-            "ℹ️ תרכובות המסומנות בכוכבית ( **\\*** ) בדוח — שמן לא התאים בדיוק לשם בטבלת ערכי הסף. "
-            "ערך הסף הוצג כ-**'לא קיים'** עבורן, ובעמודת ההערות מופיע שם התרכובת הדומה שנמצאה בטבלה. "
-            "מומלץ לבדוק ידנית אם ערך הסף של התרכובת הדומה רלוונטי."
-        )
+        # ── Threshold tables download ──────────────────────────────────
         _thresh_files = [
             ("⬇️ ערכי סף TIER1 + VSL (קרקע)", "ערכי_סף_מעודכנים_גרסה_7_דצמבר_2024.xlsx", "thresh_dl_main"),
             ("⬇️ ערכי סף PFAS",              "ערכי_סף_PFAS_גרסה_3.xlsx",                "thresh_dl_pfas"),
@@ -1992,7 +1991,7 @@ if page == "home":
         '<div class="section-title">איך זה עובד</div>'
         '<div class="feat-grid">'
         '<div class="feat"><div class="feat-icon">📤</div><div class="feat-title">1. העלאת קבצים</div><div class="feat-desc">PDF, Excel או CSV ישירות מהמעבדה — כמה קבצים בבת אחת</div></div>'
-        '<div class="feat"><div class="feat-icon">⚙️</div><div class="feat-title">2. עיבוד אוטומטי</div><div class="feat-desc">זיהוי המעבדה, הקטגוריה, התרכובות וערכי הסף</div></div>'
+        '<div class="feat"><div class="feat-icon">⚙️</div><div class="feat-title">2. עיבוד אוטומטי</div><div class="feat-desc">התאמת התרכובות לערכי הסף לפי מספר CAS</div></div>'
         '<div class="feat"><div class="feat-icon">📥</div><div class="feat-title">3. הורדת דוח</div><div class="feat-desc">Excel ו-Word מעוצבים עם סימון חריגות בצבע</div></div>'
         '</div>',
         unsafe_allow_html=True,
@@ -2339,8 +2338,8 @@ elif page == "guide":
 
         '<div class="section-title">🚀 שלבי השימוש במערכת</div>'
         '<div class="feat-grid feat-grid-4">'
-        '<div class="feat"><div class="feat-icon">🏭</div><div class="feat-title">1. בחירת מעבדה</div>'
-        '<div class="feat-desc">מתוך הרשימה, או זיהוי אוטומטי</div></div>'
+        '<div class="feat"><div class="feat-icon">🏭</div><div class="feat-title">1. בחירת מעבדה וקטגוריה</div>'
+        '<div class="feat-desc">מתוך הרשימות מעל העלאת הקובץ (חובה)</div></div>'
         '<div class="feat"><div class="feat-icon">📤</div><div class="feat-title">2. העלאת קובץ</div>'
         '<div class="feat-desc">PDF, Excel (XLSX/XLS) או CSV</div></div>'
         '<div class="feat"><div class="feat-icon">🎯</div><div class="feat-title">3. בחירת ערכי סף</div>'
@@ -2412,13 +2411,14 @@ elif page == "guide":
         '<div class="faq">'
         '<details><summary>הופיעה ההודעה "לא נמצאו רשומות" — מה לעשות?</summary>'
         '<p>ודאו שהקובץ הוא תעודת המעבדה המקורית ושהמעבדה והקטגוריה שנבחרו מתאימות לו. '
-        'אם הזיהוי האוטומטי טעה, בחרו את המעבדה והקטגוריה ידנית בסרגל הצד ונסו שוב.</p></details>'
+        'אם לא, בחרו את המעבדה והקטגוריה הנכונות ונסו שוב.</p></details>'
         '<details><summary>מה ההבדל בין LOD ל-LOQ?</summary>'
         '<p>LOD הוא גבול הגילוי — מתחתיו אי אפשר לקבוע שהחומר קיים. LOQ הוא גבול הכימות — '
         'הערך הנמוך ביותר שאפשר לדווח עליו כמספר. ערך כמו <b dir="ltr">&lt;50</b> אומר שהתוצאה מתחת ל-LOQ.</p></details>'
-        '<details><summary>מה פירוש כוכבית ליד שם תרכובת?</summary>'
-        '<p>שם התרכובת בתעודה לא התאים בדיוק לשם בטבלת ערכי הסף. ערך הסף מוצג כ"לא קיים", '
-        'ובעמודת ההערות מופיע השם הדומה שנמצא. כדאי לבדוק ידנית אם הוא רלוונטי.</p></details>'
+        '<details><summary>למה המערכת שואלת "האם זו" על תרכובת?</summary>'
+        '<p>ההתאמה לערכי הסף נעשית לפי מספר CAS. כשאין לתרכובת CAS ויש בטבלה שמות דומים, או כשמדובר בסכום '
+        'של תרכובות (למשל m+p-Xylene), סמנו את התרכובת הנכונה, או "ללא ערך סף" אם אף אחת לא מתאימה. '
+        'הדוח נבנה רק אחרי שכל התרכובות סומנו.</p></details>'
         '<details><summary>אפשר להעלות כמה קבצים יחד?</summary>'
         '<p>כן, מאותה מעבדה. כשמעלים PDF לצד קובץ Excel של אותה תעודה, הנתונים נקראים מה-Excel וה-PDF משמש כעותק נלווה.</p></details>'
         '<details><summary>למה אין ערך סף לתרכובת מסוימת?</summary>'
