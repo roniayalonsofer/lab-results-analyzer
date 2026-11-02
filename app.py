@@ -725,7 +725,9 @@ div:has(.thresh-pill-marker) + div [data-testid="stCheckbox"] label svg {
 # LOAD THRESHOLD MANAGER
 # ══════════════════════════════════════════════════════════════════
 @st.cache_resource(show_spinner="טוען ערכי סף...")
-def load_threshold_manager(_mtime):
+def load_threshold_manager(code_mtime):
+    # code_mtime is part of the cache key (a name starting with "_" would not be),
+    # so an update of the code doesn't keep serving an object of the old class.
     from core.threshold_manager import ThresholdManager
     MAIN_THRESH  = os.path.join(THRESH_DIR, 'soil_vsl_tier1_v7_2024.xlsx')
     VSL_FULL     = os.path.join(THRESH_DIR, 'soil_vsl_v7_full.xlsx')

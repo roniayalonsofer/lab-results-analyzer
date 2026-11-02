@@ -184,6 +184,13 @@ def test_alchem_tph_table_keeps_total_limits_and_not_detected():
     assert found["Total TPH"] == ("גק-12_1", 50.0, "<LOQ", 15.0, 50.0)
 
 
+def test_threshold_cache_is_keyed_on_the_code_version():
+    # Streamlit leaves a parameter starting with "_" out of the cache key, so an
+    # update would keep serving a cached object of the old class.
+    source = open(os.path.join(os.path.dirname(__file__), "..", "app.py"), encoding="utf-8").read()
+    assert "def load_threshold_manager(code_mtime):" in source
+
+
 def test_word_shows_a_result_below_the_limit_as_below_it():
     from core.word_output import _fmt_value
     assert _fmt_value(50.0, "<LOQ", 15.0) == "<50"

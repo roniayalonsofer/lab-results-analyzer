@@ -97,6 +97,9 @@ def _read_pdf(raw: bytes) -> dict:
     pid_data: dict = {}
     columns = None
     with pdfplumber.open(io.BytesIO(raw)) as pdf:
+        if not any((page.extract_text() or "").strip() for page in pdf.pages):
+            raise ValueError("הקובץ סרוק כתמונה, ואי אפשר לקרוא ממנו קריאות PID. "
+                             "הדוח ייבנה בלי PID. כדי לכלול אותן, העלו טופס ב-Excel.")
         for page in pdf.pages:
             for rows in page.extract_tables():
                 found = _find_columns(rows)
