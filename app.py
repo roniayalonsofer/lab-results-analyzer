@@ -61,59 +61,6 @@ LAN_IP  = _local_ip()
 APP_URL = f"http://{LAN_IP}:8501"
 
 
-def _pid_norm(name: str) -> str:
-    """Normalize a borehole name for PID matching.
-
-    Delegates to _pid_key() in soil_lab_tool/core/excel_output.py — that's
-    the function used when *looking up* PID for a sample, while this one is
-    used when *building* the PID map from the field-log file. They must
-    always agree; previously they used different logic and every PID lookup
-    silently failed to match.
-    """
-    from core.excel_output import _pid_key
-    # Some field-log files use "Ķ" (K with cedilla) instead of plain "K" for
-    # the same borehole (a typing/autocorrect artifact) — normalize it so
-    # 'Ķ-31' and 'K-31' resolve to the same key.
-    s = name.replace('Ķ', 'K').replace('ķ', 'k')
-    return _pid_key(s)
-
-
-def _parse_pid_file(uploaded_file) -> dict:
-    """Parse a PID field-data file."""
-    df = pd.read_excel(uploaded_file, header=None)
-    df.iloc[:, 0] = df.iloc[:, 0].ffill()
-    pid_data: dict = {}
-    for bh_raw, grp in df.groupby(df.columns[0], sort=False):
-        bh = str(bh_raw).strip()
-        if not bh or bh.lower() in ("nan", "none"):
-            continue
-        key = _pid_norm(bh)
-        if not key:
-            continue
-        entries: list = []
-        for _, row in grp.iterrows():
-            try:
-                depth_to = float(row.iloc[2])
-            except (ValueError, TypeError, IndexError):
-                continue
-            pid_raw = row.iloc[7] if row.shape[0] > 7 else None
-            if pid_raw is None:
-                continue
-            if isinstance(pid_raw, float) and pd.isna(pid_raw):
-                continue
-            pid_str = str(pid_raw).strip().upper()
-            if pid_str in ("N/A", "NA", ""):
-                continue
-            try:
-                pid_val = float(pid_raw)
-            except (ValueError, TypeError):
-                continue
-            entries.append((depth_to, pid_val))
-        if entries:
-            pid_data[key] = entries
-    return pid_data
-
-
 # ══════════════════════════════════════════════════════════════════
 # CSS — Adama design system
 # ══════════════════════════════════════════════════════════════════
@@ -801,8 +748,9 @@ try:
     from core.xrf_output   import build_xrf_simple_excel
     from core.compound_choices import (NO_THRESHOLD, ResolvedThresholds,
                                        apply_compound_choices, find_ambiguous_compounds)
-    from parsers import get_parser, auto_detect_category
-    _tm_py   = os.path.join(TOOL_DIR, 'core', 'threshold_manager.py')
+    from core.field_forms import merge_field_data, parse_field_form
+    from parsers import category_layout, get_parser
+    _tm_py  = os.path.join(TOOL_DIR, 'core', 'threshold_manager.py')
     _tm_mtime = os.path.getmtime(_tm_py)
     tm = load_threshold_manager(_tm_mtime)
 except Exception as e:
@@ -1261,22 +1209,22 @@ if page == "soil":
         label_visibility="visible",
     )
 
-    pid_upload_file = st.file_uploader(
+    pid_upload_files = st.file_uploader(
         "העלאת ממצאי שדה (PID) — אופציונלי",
-        type=["xlsx"],
+        type=["xlsx", "xls", "pdf"],
+        accept_multiple_files=True,
         key="pid_upload",
-        help="עמודה 0 = שם קידוח (מולא רק בשורה הראשונה), עמודה 7 = PID [ppm]",
+        help="ניתן להעלות כמה טפסים, Excel או PDF. נדרשות עמודות קידוח, עד עומק ו-PID.",
     )
-    if pid_upload_file is not None:
+    _pm: dict = {}
+    for _pid_file in pid_upload_files or []:
         try:
-            _pm = _parse_pid_file(pid_upload_file)
-            st.session_state["pid_map"] = _pm
-            st.caption(f"✅ נתוני PID נטענו — {len(_pm)} קידוחים")
+            merge_field_data(_pm, parse_field_form(_pid_file.name, _pid_file.getvalue()))
         except Exception as _pid_err:
-            st.warning(f"⚠️ שגיאת קריאת קובץ PID: {_pid_err}")
-            st.session_state["pid_map"] = {}
-    else:
-        st.session_state["pid_map"] = {}
+            st.warning(f"⚠️ שגיאת קריאת טופס ממצאי שדה ({_pid_file.name}): {_pid_err}")
+    if _pm:
+        st.caption(f"✅ נתוני PID נטענו — {len(_pm)} קידוחים מתוך {len(pid_upload_files)} טפסים")
+    st.session_state["pid_map"] = _pm
 
     with st.expander("🔶 מילוי ידני של ערכי סף (LOQ, LOD, MRL, MDL) — אופציונלי", expanded=False):
         st.markdown("""
@@ -1365,19 +1313,11 @@ if page == "soil":
     fname     = " | ".join(f for f, _ in all_raw)
     raw_bytes = all_raw[0][1]
 
-    # A chosen category can have a separate parser for its PDF layout. The file
-    # decides only which layout it is, never the category itself.
-    _CATEGORY_LAYOUTS = {"soil": {"soil_pdf", "soil_tph_pdf"}, "soil_gas": {"soil_gas_pdf"}}
-
-    def _category_layout(_chosen, _name, _bytes, _lab):
-        _det = auto_detect_category(_name, _bytes, lab=_lab)
-        return _det if _det in _CATEGORY_LAYOUTS.get(_chosen, ()) else _chosen
-
     # PDFs are companion copies of the data files (see _parse_files below),
     # so the layout comes from the data files first.
     _detect_raw = [(n, b) for n, b in all_raw if not n.lower().endswith(".pdf")] or all_raw
 
-    category = _category_layout(category_raw, _detect_raw[0][0], _detect_raw[0][1], lab)
+    category = category_layout(category_raw, _detect_raw[0][0], _detect_raw[0][1], lab)
     cat_info = f"קטגוריה: **{category_raw}**"
 
     try:
@@ -1430,7 +1370,11 @@ if page == "soil":
                 all_records.extend(file_records)
                 file_summaries.append({"name": fname_i, "records": len(file_records), "ok": True})
             except Exception as e:
-                st.error(f"שגיאת פרסינג: {fname_i} — {e}")
+                if fname_i.lower().endswith(".pdf") and "Excel file format" in str(e):
+                    st.error(f"הקובץ {fname_i} הוא PDF, אבל {lab} / {category_raw} נקרא רק מ-Excel. "
+                             "בדקו את המעבדה והקטגוריה, או העלו את קובץ ה-Excel של התעודה.")
+                else:
+                    st.error(f"שגיאת פרסינג: {fname_i} — {e}")
                 file_summaries.append({"name": fname_i, "records": 0, "ok": False})
 
     records = all_records
@@ -1771,7 +1715,7 @@ if page == "soil":
                     _sec_name = _sec_file.name
                     # Parse with the lab the user chose, same pipeline as the primary
                     _sec_lab = _sec_labs[_sec_name]
-                    _sec_cat = _category_layout(category_raw, _sec_name, _sec_raw, _sec_lab)
+                    _sec_cat = category_layout(category_raw, _sec_name, _sec_raw, _sec_lab)
                     try:
                         _sec_parser = get_parser(_sec_lab, _sec_cat)
                     except KeyError:

@@ -53,6 +53,10 @@ Loaded once at startup via `@st.cache_resource`. Key method: `get_threshold_with
 
 Thresholds are matched by CAS: a CAS with a row in the threshold table is never questioned, whatever the lab calls the compound, and a CAS the table doesn't have means no threshold. A compound with no CAS is asked about in the app (`_compound_picker`) when the table has similar names. Also asked: a summed result ("m+p-Xylene"), whose CAS names only one isomer, and a known compound name under a CAS the table lacks. No report is built until every question is answered. The answers go to Excel, Word and the preview together: `apply_compound_choices` sets the chosen CAS on the records and `ResolvedThresholds` wraps the threshold manager. The lab's compound name stays as printed on the certificate. A clear spelling reported without a CAS (e.g. MTBE) belongs in `CHEMICAL_MAP`, so it is never asked about (`name_matches_cas`).
 
+### Field forms (`core/field_forms.py`)
+
+The PID uploader takes several forms, Excel or PDF, and merges them (a later form replaces the reading at the same depth). Columns are found by their header ("קידוח", "עד עומק", "PID"), with the known positions as a fallback for an Excel file with no header. PDF reading needs a ruled table with text: a scanned form is reported, not read.
+
 ### RTL / Hebrew
 
 PDF text from Hebrew PDFs arrives visually reversed (characters and token order). Use the `_fix_rtl()` helper in `parsers/soil/bactochem.py` as a reference for correct reversal logic.

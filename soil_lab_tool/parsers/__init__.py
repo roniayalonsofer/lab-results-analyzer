@@ -533,6 +533,23 @@ def list_parsers() -> list[dict]:
             for (l, c), cls in _REGISTRY.items()]
 
 
+# Separate parsers for a category's PDF layouts
+_CATEGORY_LAYOUTS = {"soil": {"soil_pdf", "soil_tph_pdf"}, "soil_gas": {"soil_gas_pdf"}}
+
+
+def category_layout(category: str, filename: str, file_bytes: bytes, lab: str) -> str:
+    """Parser category for a file under the category the user chose.
+
+    The file decides only which layout of that category it is, never the
+    category itself, and only a layout this lab has a parser for.
+    """
+    detected = auto_detect_category(filename, file_bytes, lab=lab)
+    if (detected in _CATEGORY_LAYOUTS.get(category, ())
+            and (lab.strip().lower(), detected) in _REGISTRY):
+        return detected
+    return category
+
+
 def auto_detect_category(filename: str, file_bytes: bytes | None = None, lab: str | None = None) -> str:
     """
     Guess analysis category from filename, and optionally peek at file content.
@@ -540,6 +557,7 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None, lab: st
     ALS/Alchem/KTE files are not mis-detected by filename patterns (e.g. "pr*").
     """
     n = filename.lower()
+    lab = lab.strip().lower() if lab else lab  # the app passes display names ("Alchem")
 
     # RJ Lee Method 1633 PFAS files — unambiguous, check before content sniffing
     if "1633" in n:

@@ -197,8 +197,9 @@ def _fmt_value(value, flag: str, lod) -> str:
     if flag == "<LOD":
         return f"<{_fmt_lod(lod)}" if isinstance(lod, (int, float)) else "ND"
     if flag == "<LOQ":
-        ref = lod if isinstance(lod, (int, float)) else value
-        return _fmt_lod(ref) if isinstance(ref, (int, float)) else "ND"
+        # The value holds the limit it is below, as in the Excel report ("<50")
+        ref = value if isinstance(value, (int, float)) else lod
+        return f"<{_fmt_lod(ref)}" if isinstance(ref, (int, float)) else "ND"
     if flag == "<":
         return f"<{round(value, 2)}" if isinstance(value, (int, float)) else f"<{value}"
     if isinstance(value, float):

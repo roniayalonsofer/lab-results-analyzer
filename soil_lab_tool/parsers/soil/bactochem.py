@@ -180,6 +180,20 @@ def _fix_rtl(text: str) -> str:
     return " ".join(t[::-1] if _HEBREW_RE.search(t) else t for t in tokens)
 
 
+def fix_rtl_name(text: str) -> str:
+    """
+    Correct an RTL-reversed name that mixes Hebrew with numbers, such as a sample
+    or borehole name: '1_12-קג' → 'גק-12_1', '(0.5) 1-ק' → 'ק-1 (0.5)'.
+
+    Unlike _fix_rtl, which reverses a whole token, numbers keep their digits.
+    """
+    if not _HEBREW_RE.search(text):
+        return text
+    runs = re.findall(r"[A-Za-z0-9.]+|\s+|.", text)
+    swap = {"(": ")", ")": "("}
+    return "".join(swap.get(r, r) for r in reversed(runs))
+
+
 def _analysis_type(section: str | None, unit: str) -> str:
     is_soil = "kg" in unit
     if section == "ICP_SOIL":

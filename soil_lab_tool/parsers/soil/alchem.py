@@ -35,6 +35,7 @@ import re
 import pandas as pd
 
 from parsers.base import BaseParser
+from parsers.soil.bactochem import fix_rtl_name
 from core.lab_value_parser import LabValueParser
 
 
@@ -720,9 +721,13 @@ class AlchemMultiSectionParser(BaseParser):
 
     def __init__(self):
         self._vp = LabValueParser()
+        # Columns of the last table with a header: its continuation pages have none
+        self._voc_layout: dict | None = None
+        self._metals_layout: dict | None = None
 
     # ------------------------------------------------------------------
     def parse(self, file_obj: io.BytesIO) -> list[dict]:
+        self._voc_layout = self._metals_layout = None
         file_obj.seek(0)
         magic = file_obj.read(4)
         file_obj.seek(0)
@@ -822,29 +827,36 @@ class AlchemMultiSectionParser(BaseParser):
                 header_row_idx = ri
                 break
         if header_row_idx is None:
-            return []
+            # A continuation page: same columns as the last header, element rows
+            layout = self._metals_layout
+            if not layout or not any(
+                len(row) == layout["n_cols"] and row[0]
+                and row[0].split(" - ")[0].split()[0] in _METAL_SYMBOL_CAS
+                for row in clean
+            ):
+                return []
+            sample_cols = layout["sample_cols"]
+            data_rows = clean
+        else:
+            name_row = clean[0]
+            hl = [c.lower() for c in clean[header_row_idx]]
 
-        name_row = clean[0]
-        hdr_row  = clean[header_row_idx]
-        hl = [c.lower() for c in hdr_row]
-
-        col_lod = next((i for i, x in enumerate(hl) if x.startswith("lod")), None)
-        col_loq = next((i for i, x in enumerate(hl) if x.startswith("loq")), None)
-
-        name_cells = [(i, v) for i, v in enumerate(name_row) if v.strip() and any(ch.isdigit() for ch in v)]
-        conc_cols_idx = [i for i, x in enumerate(hl) if "final conc" in x]
-        sample_cols: list[tuple[int, str, str]] = []
-        for pos, ci in enumerate(conc_cols_idx):
-            sid_raw = name_cells[pos][1] if pos < len(name_cells) else ""
-            borehole, depth = self._parse_sample_name(sid_raw)
-            sid = borehole or sid_raw or f"Sample-{ci}"
-            sample_cols.append((ci, sid, depth))
-        if not sample_cols:
-            return []
+            name_cells = [(i, v) for i, v in enumerate(name_row) if v.strip() and any(ch.isdigit() for ch in v)]
+            conc_cols_idx = [i for i, x in enumerate(hl) if "final conc" in x]
+            sample_cols: list[tuple[int, str, str]] = []
+            for pos, ci in enumerate(conc_cols_idx):
+                sid_raw = fix_rtl_name(name_cells[pos][1]) if pos < len(name_cells) else ""
+                borehole, depth = self._parse_sample_name(sid_raw)
+                sid = borehole or sid_raw or f"Sample-{ci}"
+                sample_cols.append((ci, sid, depth))
+            if not sample_cols:
+                return []
+            self._metals_layout = {"n_cols": len(hl), "sample_cols": sample_cols}
+            data_rows = clean[header_row_idx + 1:]
 
         records: list[dict] = []
         n_samples = len(sample_cols)
-        for row in clean[header_row_idx + 1:]:
+        for row in data_rows:
             if not row or not row[0]:
                 continue
             name = row[0].strip()
@@ -935,21 +947,23 @@ class AlchemMultiSectionParser(BaseParser):
             raw_name = row[col_name].strip() if row[col_name] else ""
             if not raw_name or raw_name.upper() in ("LOD", "LOQ", "SAMPLE NAME", "NAME", ""):
                 continue
+            raw_name = fix_rtl_name(raw_name)
             borehole, depth = self._parse_sample_name(raw_name)
             sid = borehole or raw_name
 
-            for cmp, ci, cas_val in [
-                ("DRO",       col_dro, "DRO"),
-                ("ORO",       col_oro, "ORO"),
-                ("Total TPH", col_tph, "C10-C40"),
+            for cmp, ci, cas_val, limit_key in [
+                ("DRO",       col_dro, "DRO",     "DRO"),
+                ("ORO",       col_oro, "ORO",     "ORO"),
+                ("Total TPH", col_tph, "C10-C40", "TPH"),
             ]:
                 if ci is None or ci >= len(row):
                     continue
                 raw_v = row[ci].strip() if row[ci] else ""
-                lq = loq.get(cmp)
+                lq = loq.get(limit_key)
+                ld = lod.get(limit_key)
                 rv = raw_v.upper()
                 if rv in ("N.D.", "ND", "N.D", "N/D"):
-                    value, flag = lq, "<LOQ"
+                    value, flag = (ld, "<LOD") if ld is not None else (lq, "<LOQ")
                 elif rv in ("<LOQ", "<MDL", "<MRL", "<DL"):
                     value, flag = lq, "<LOQ"
                 elif raw_v.startswith("<"):
@@ -974,7 +988,7 @@ class AlchemMultiSectionParser(BaseParser):
                     "value":         value,
                     "flag":          flag,
                     "unit":          "mg/kg",
-                    "lod":           lod.get(cmp),
+                    "lod":           ld,
                     "loq":           lq,
                     "analysis_type": "SOIL_TPH",
                 })
@@ -996,28 +1010,39 @@ class AlchemMultiSectionParser(BaseParser):
                 header_row_idx = ri
                 break
         if header_row_idx is None:
-            return []
+            # A continuation page: same columns as the last header, rows with a CAS
+            layout = self._voc_layout
+            if not layout or not any(
+                len(row) == layout["n_cols"] and re.fullmatch(r"\d+-\d\d-\d", row[layout["col_cas"]])
+                for row in clean
+            ):
+                return []
+            col_cas, col_mdl, col_mrl = layout["col_cas"], layout["col_mdl"], layout["col_mrl"]
+            sample_cols = layout["sample_cols"]
+            data_rows = clean
+        else:
+            name_row = clean[0]
+            hl = [c.lower() for c in clean[header_row_idx]]
 
-        name_row = clean[0]
-        hdr_row  = clean[header_row_idx]
-        hl = [c.lower() for c in hdr_row]
+            col_cas = next((i for i, x in enumerate(hl) if x == "cas"), 1)
+            col_mdl = next((i for i, x in enumerate(hl) if x.startswith("mdl") or x.startswith("lod")), None)
+            col_mrl = next((i for i, x in enumerate(hl) if x.startswith("mrl") or x.startswith("loq")), None)
 
-        col_cas = next((i for i, x in enumerate(hl) if x == "cas"), 1)
-        col_mdl = next((i for i, x in enumerate(hl) if x.startswith("mdl") or x.startswith("lod")), None)
-        col_mrl = next((i for i, x in enumerate(hl) if x.startswith("mrl") or x.startswith("loq")), None)
-
-        sample_cols: list[tuple[int, str, str]] = []
-        for i, x in enumerate(hl):
-            if "final conc" in x:
-                sid_raw = name_row[i] if i < len(name_row) else ""
-                borehole, depth = self._parse_sample_name(sid_raw) if sid_raw else ("", "")
-                sid = borehole or sid_raw or f"Sample-{i}"
-                sample_cols.append((i, sid, depth))
-        if not sample_cols:
-            return []
+            sample_cols: list[tuple[int, str, str]] = []
+            for i, x in enumerate(hl):
+                if "final conc" in x:
+                    sid_raw = fix_rtl_name(name_row[i]) if i < len(name_row) else ""
+                    borehole, depth = self._parse_sample_name(sid_raw) if sid_raw else ("", "")
+                    sid = borehole or sid_raw or f"Sample-{i}"
+                    sample_cols.append((i, sid, depth))
+            if not sample_cols:
+                return []
+            self._voc_layout = {"n_cols": len(hl), "col_cas": col_cas, "col_mdl": col_mdl,
+                                "col_mrl": col_mrl, "sample_cols": sample_cols}
+            data_rows = clean[header_row_idx + 1:]
 
         records: list[dict] = []
-        for row in clean[header_row_idx + 1:]:
+        for row in data_rows:
             if not row or not row[0]:
                 continue
             compound = row[0].strip()
