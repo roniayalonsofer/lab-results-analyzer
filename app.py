@@ -9,6 +9,9 @@ TOOL_DIR = os.path.join(ROOT, 'soil_lab_tool')
 if TOOL_DIR not in sys.path:
     sys.path.insert(0, TOOL_DIR)
 
+from code_reload import drop_stale_modules
+CODE_VERSION = drop_stale_modules(TOOL_DIR)
+
 THRESH_DIR = os.path.join(TOOL_DIR, 'thresholds')
 LAB_DIR    = os.path.join(ROOT, 'Laboratory_results')
 
@@ -753,9 +756,7 @@ try:
     from core.field_forms import merge_field_data, parse_field_form
     from core.file_limits import compound_limits, field_values
     from parsers import category_layout, get_parser
-    _tm_py  = os.path.join(TOOL_DIR, 'core', 'threshold_manager.py')
-    _tm_mtime = os.path.getmtime(_tm_py)
-    tm = load_threshold_manager(_tm_mtime)
+    tm = load_threshold_manager(CODE_VERSION)
 except Exception as e:
     st.error(f"שגיאת טעינת מודולים: {e}")
     st.stop()
