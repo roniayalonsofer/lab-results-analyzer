@@ -51,7 +51,11 @@ Loaded once at startup via `@st.cache_resource`. Key method: `get_threshold_with
 
 ### Ambiguous compounds (`core/compound_choices.py`)
 
-Thresholds are matched by CAS: a CAS with a row in the threshold table is never questioned, whatever the lab calls the compound, and a CAS the table doesn't have means no threshold. A compound with no CAS is asked about in the app (`_compound_picker`) when the table has similar names. Also asked: a summed result ("m+p-Xylene"), whose CAS names only one isomer, and a known compound name under a CAS the table lacks. No report is built until every question is answered. The answers go to Excel, Word and the preview together: `apply_compound_choices` sets the chosen CAS on the records and `ResolvedThresholds` wraps the threshold manager. The lab's compound name stays as printed on the certificate. A clear spelling reported without a CAS (e.g. MTBE) belongs in `CHEMICAL_MAP`, so it is never asked about (`name_matches_cas`).
+Thresholds are matched by CAS: a CAS with a row in the threshold table is never questioned, whatever the lab calls the compound, and a CAS the table doesn't have means no threshold. A compound with no CAS is asked about in the app (`_compound_picker`) when the table has similar names. Also asked: a known compound name under a CAS the table lacks. A summed result with a CAS ("m+p-Xylene", 108-38-3) takes that CAS's threshold, by the owner's decision. No report is built until every question is answered. The answers go to Excel, Word and the preview together: `apply_compound_choices` sets the chosen CAS on the records and `ResolvedThresholds` wraps the threshold manager. The lab's compound name stays as printed on the certificate. A clear spelling reported without a CAS (e.g. MTBE) belongs in `CHEMICAL_MAP`, so it is never asked about (`name_matches_cas`).
+
+### LOD / LOQ fields (`core/file_limits.py`)
+
+The limits section is drawn after the file is read: each field is filled when all its records share one value, and a table lists the LOD and LOQ of every compound. A field still showing the file's value is not a manual entry; only a value the user changed fills what the file lacks.
 
 ### Field forms (`core/field_forms.py`)
 

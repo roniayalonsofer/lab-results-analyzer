@@ -48,7 +48,7 @@ from __future__ import annotations
 import difflib
 import re
 import pandas as pd
-from core.cas_lookup import fuzzy_name_to_cas, is_summed_name, name_matches_cas
+from core.cas_lookup import fuzzy_name_to_cas, name_matches_cas
 
 
 # ── Main file column mapping ──────────────────────────────────────────
@@ -826,10 +826,9 @@ class ThresholdManager:
             return (float(val[:-2]), 'uncertain')
 
         # The CAS is the compound's identity: a table row for it settles the match
-        # whatever the lab calls the compound. A summed result ("m+p-Xylene") is
-        # not the single isomer its CAS names, so that one still needs an answer.
+        # whatever the lab calls the compound.
         if str(cas).strip() and self.get_threshold(cas, threshold_key) is not None:
-            return (val_clean, 'uncertain' if is_summed_name(compound_name) else 'exact')
+            return (val_clean, 'exact')
 
         # Value came from the name, under a CAS the table has a row for
         thresh_name = names.get(str(cas).strip())

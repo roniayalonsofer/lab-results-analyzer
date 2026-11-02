@@ -751,6 +751,7 @@ try:
     from core.compound_choices import (NO_THRESHOLD, ResolvedThresholds,
                                        apply_compound_choices, find_ambiguous_compounds)
     from core.field_forms import merge_field_data, parse_field_form
+    from core.file_limits import compound_limits, field_values
     from parsers import category_layout, get_parser
     _tm_py  = os.path.join(TOOL_DIR, 'core', 'threshold_manager.py')
     _tm_mtime = os.path.getmtime(_tm_py)
@@ -1228,45 +1229,52 @@ if page == "soil":
         st.caption(f"✅ נתוני PID נטענו — {len(_pm)} קידוחים מתוך {len(pid_upload_files)} טפסים")
     st.session_state["pid_map"] = _pm
 
-    with st.expander("🔶 מילוי ידני של ערכי סף (LOQ, LOD, MRL, MDL) — אופציונלי", expanded=False):
-        st.markdown("""
-        <div class="override-banner">
-          ⚠️ <b>אופציונלי</b> — למלא רק אם רוצים.<br>
-          הערכים ישמשו <b>רק</b> כשבקובץ המקורי חסר ערך סף מתאים.<br><br>
-          לדוגמה: בקובץ TPH של אל-כם יש ערך LOQ אך אין ערך LOD.<br>
-          ערך ה-LOD קיים רק בגרסת ה-PDF של אותו דוח.<br><br>
-          יש להשאיר 0 כדי לא לשנות נתונים שכבר קיימים בקובץ.
-        </div>
-        """, unsafe_allow_html=True)
-        def _render_override_columns(_key_suffix: str):
-            _ov_col_m, _ov_col_t, _ov_col_v = st.columns(3)
-            with _ov_col_m:
-                st.markdown("**מתכות**")
-                st.number_input("ברירת מחדל ל-LOD", min_value=0.0, value=0.0, step=0.01,
-                                 format="%.4f", key=f"ov_lod_metals{_key_suffix}")
-                st.number_input("ברירת מחדל ל-LOQ (MRL)", min_value=0.0, value=0.0, step=0.01,
-                                 format="%.4f", key=f"ov_loq_metals{_key_suffix}")
-            with _ov_col_t:
-                st.markdown("**TPH**")
-                st.number_input("LOD — DRO", min_value=0.0, value=0.0, step=0.1, key=f"ov_lod_dro{_key_suffix}")
-                st.number_input("LOQ — DRO", min_value=0.0, value=0.0, step=0.1, key=f"ov_loq_dro{_key_suffix}")
-                st.number_input("LOD — ORO", min_value=0.0, value=0.0, step=0.1, key=f"ov_lod_oro{_key_suffix}")
-                st.number_input("LOQ — ORO", min_value=0.0, value=0.0, step=0.1, key=f"ov_loq_oro{_key_suffix}")
-                st.number_input("LOD — TPH כולל", min_value=0.0, value=0.0, step=0.1, key=f"ov_lod_tph{_key_suffix}")
-                st.number_input("LOQ — TPH כולל", min_value=0.0, value=0.0, step=0.1, key=f"ov_loq_tph{_key_suffix}")
-            with _ov_col_v:
-                st.markdown("**VOC / SVOC**")
-                st.number_input("ברירת מחדל ל-LOD (MDL)", min_value=0.0, value=0.0, step=0.001,
-                                 format="%.4f", key=f"ov_lod_voc{_key_suffix}")
-                st.number_input("ברירת מחדל ל-LOQ (MRL)", min_value=0.0, value=0.0, step=0.001,
-                                 format="%.4f", key=f"ov_loq_voc{_key_suffix}")
+    # Drawn in this spot only once the file has been read, so it can show the file's values
+    _ov_box = st.container()
 
-        _ov_tab_primary, _ov_tab_secondary = st.tabs(["🧪 מעבדה ראשית", "🔬 מעבדה משנית"])
-        with _ov_tab_primary:
-            _render_override_columns("")
-        with _ov_tab_secondary:
-            st.caption("הערכים בטאב זה יחולו רק על רשומות שהועלו כ'קבצי מעבדה משנית / אימות' למטה.")
-            _render_override_columns("_sec")
+    def _render_overrides(_limit_rows: list[dict]):
+        with _ov_box, st.expander("🔶 ערכי LOD ו-LOQ — נקראים מהקובץ, מילוי ידני אופציונלי", expanded=False):
+            st.markdown("""
+            <div class="override-banner">
+              הערכים שבקובץ נקראים <b>אוטומטית</b>. שדה מתמלא כשלכל התרכובות שלו יש ערך אחד משותף.<br>
+              ערך ידני ישמש <b>רק</b> כשבקובץ המקורי חסר ערך מתאים.<br><br>
+              לדוגמה: בקובץ TPH של אל-כם יש ערך LOQ אך אין ערך LOD.<br>
+              ערך ה-LOD קיים רק בגרסת ה-PDF של אותו דוח.
+            </div>
+            """, unsafe_allow_html=True)
+            if _limit_rows:
+                st.caption(f"✅ נקראו מהקובץ ערכים של {len(_limit_rows)} תרכובות:")
+                st.dataframe(pd.DataFrame(_limit_rows), hide_index=True, height=240)
+
+            def _render_override_columns(_key_suffix: str):
+                _ov_col_m, _ov_col_t, _ov_col_v = st.columns(3)
+                with _ov_col_m:
+                    st.markdown("**מתכות**")
+                    st.number_input("ברירת מחדל ל-LOD", min_value=0.0, step=0.01,
+                                     format="%.4f", key=f"ov_lod_metals{_key_suffix}")
+                    st.number_input("ברירת מחדל ל-LOQ (MRL)", min_value=0.0, step=0.01,
+                                     format="%.4f", key=f"ov_loq_metals{_key_suffix}")
+                with _ov_col_t:
+                    st.markdown("**TPH**")
+                    st.number_input("LOD — DRO", min_value=0.0, step=0.1, key=f"ov_lod_dro{_key_suffix}")
+                    st.number_input("LOQ — DRO", min_value=0.0, step=0.1, key=f"ov_loq_dro{_key_suffix}")
+                    st.number_input("LOD — ORO", min_value=0.0, step=0.1, key=f"ov_lod_oro{_key_suffix}")
+                    st.number_input("LOQ — ORO", min_value=0.0, step=0.1, key=f"ov_loq_oro{_key_suffix}")
+                    st.number_input("LOD — TPH כולל", min_value=0.0, step=0.1, key=f"ov_lod_tph{_key_suffix}")
+                    st.number_input("LOQ — TPH כולל", min_value=0.0, step=0.1, key=f"ov_loq_tph{_key_suffix}")
+                with _ov_col_v:
+                    st.markdown("**VOC / SVOC**")
+                    st.number_input("ברירת מחדל ל-LOD (MDL)", min_value=0.0, step=0.001,
+                                     format="%.4f", key=f"ov_lod_voc{_key_suffix}")
+                    st.number_input("ברירת מחדל ל-LOQ (MRL)", min_value=0.0, step=0.001,
+                                     format="%.4f", key=f"ov_loq_voc{_key_suffix}")
+
+            _ov_tab_primary, _ov_tab_secondary = st.tabs(["🧪 מעבדה ראשית", "🔬 מעבדה משנית"])
+            with _ov_tab_primary:
+                _render_override_columns("")
+            with _ov_tab_secondary:
+                st.caption("הערכים בטאב זה יחולו רק על רשומות שהועלו כ'קבצי מעבדה משנית / אימות' למטה.")
+                _render_override_columns("_sec")
 
     secondary_lab_files = st.file_uploader(
         "🧪 קבצי מעבדה משנית / אימות (.xlsx, .xls, .pdf) — אופציונלי",
@@ -1291,6 +1299,7 @@ if page == "soil":
     st.markdown('</div>', unsafe_allow_html=True)
 
     if not uploaded_files:
+        _render_overrides([])
         st.markdown("""
         <div class="info-banner">
           ℹ️ בחר מעבדה וקטגוריה והעלה קובץ דוח מעבדה כדי להתחיל
@@ -1300,6 +1309,7 @@ if page == "soil":
         st.stop()
 
     if not lab or not category_raw or not all(_sec_labs.values()):
+        _render_overrides([])
         _missing_lab = ("מעבדה וקטגוריה" if not lab or not category_raw
                         else "מעבדה לכל קובץ של מעבדה משנית")
         st.markdown(f"""
@@ -1332,6 +1342,7 @@ if page == "soil":
             cat_info  = f"ברירת מחדל: **{fallback}**"
             parser   = get_parser(lab, fallback)
     except Exception as e:
+        _render_overrides([])
         st.error(f"שגיאת טעינת parser: {e}")
         st.exception(e)
         st.stop()
@@ -1381,24 +1392,41 @@ if page == "soil":
 
     records = all_records
 
+    # ── Fill the limits fields from a newly read file ──────────────
+    _ov_signature = (tuple((n, len(b)) for n, b in all_raw), lab, category_raw)
+    if st.session_state.get("ov_signature") != _ov_signature:
+        _ov_from_file = field_values(records)
+        for _ov_field in ("metals", "dro", "oro", "tph", "voc"):
+            for _ov_limit in ("lod", "loq"):
+                _ov_key = f"ov_{_ov_limit}_{_ov_field}"
+                st.session_state[_ov_key] = float(_ov_from_file.get(_ov_key, 0.0))
+        st.session_state["ov_from_file"] = _ov_from_file
+        st.session_state["ov_signature"] = _ov_signature
+    _render_overrides(compound_limits(records))
+
+    def _ov_manual(_key: str):
+        """A value the user entered; a field still showing the file's value is not one."""
+        _value = st.session_state.get(_key) or None
+        return None if _value == st.session_state.get("ov_from_file", {}).get(_key) else _value
+
     # ── Apply manual LOD/LOQ/MDL/MRL overrides for data missing from the
     # source file (e.g. Al-Chem's TPH xlsx sheet has LOQ but no LOD row —
     # that only exists in the PDF version of the same report) ──────────
-    _ov_lod_metals = st.session_state.get("ov_lod_metals") or None
-    _ov_loq_metals = st.session_state.get("ov_loq_metals") or None
-    _ov_lod_voc    = st.session_state.get("ov_lod_voc") or None
-    _ov_loq_voc    = st.session_state.get("ov_loq_voc") or None
+    _ov_lod_metals = _ov_manual("ov_lod_metals")
+    _ov_loq_metals = _ov_manual("ov_loq_metals")
+    _ov_lod_voc    = _ov_manual("ov_lod_voc")
+    _ov_loq_voc    = _ov_manual("ov_loq_voc")
     _ov_tph_lod = {
-        "DRO":       st.session_state.get("ov_lod_dro") or None,
-        "ORO":       st.session_state.get("ov_lod_oro") or None,
-        "TPH":       st.session_state.get("ov_lod_tph") or None,
-        "Total TPH": st.session_state.get("ov_lod_tph") or None,
+        "DRO":       _ov_manual("ov_lod_dro"),
+        "ORO":       _ov_manual("ov_lod_oro"),
+        "TPH":       _ov_manual("ov_lod_tph"),
+        "Total TPH": _ov_manual("ov_lod_tph"),
     }
     _ov_tph_loq = {
-        "DRO":       st.session_state.get("ov_loq_dro") or None,
-        "ORO":       st.session_state.get("ov_loq_oro") or None,
-        "TPH":       st.session_state.get("ov_loq_tph") or None,
-        "Total TPH": st.session_state.get("ov_loq_tph") or None,
+        "DRO":       _ov_manual("ov_loq_dro"),
+        "ORO":       _ov_manual("ov_loq_oro"),
+        "TPH":       _ov_manual("ov_loq_tph"),
+        "Total TPH": _ov_manual("ov_loq_tph"),
     }
     _has_overrides = any([_ov_lod_metals, _ov_loq_metals, _ov_lod_voc, _ov_loq_voc,
                           any(_ov_tph_lod.values()), any(_ov_tph_loq.values())])
@@ -2362,8 +2390,8 @@ elif page == "guide":
         '<p>LOD הוא גבול הגילוי — מתחתיו אי אפשר לקבוע שהחומר קיים. LOQ הוא גבול הכימות — '
         'הערך הנמוך ביותר שאפשר לדווח עליו כמספר. ערך כמו <b dir="ltr">&lt;50</b> אומר שהתוצאה מתחת ל-LOQ.</p></details>'
         '<details><summary>למה המערכת שואלת "האם זו" על תרכובת?</summary>'
-        '<p>ההתאמה לערכי הסף נעשית לפי מספר CAS. כשאין לתרכובת CAS ויש בטבלה שמות דומים, או כשמדובר בסכום '
-        'של תרכובות (למשל m+p-Xylene), סמנו את התרכובת הנכונה, או "ללא ערך סף" אם אף אחת לא מתאימה. '
+        '<p>ההתאמה לערכי הסף נעשית לפי מספר CAS. כשאין לתרכובת CAS ויש בטבלה שמות דומים, '
+        'סמנו את התרכובת הנכונה, או "ללא ערך סף" אם אף אחת לא מתאימה. '
         'הדוח נבנה רק אחרי שכל התרכובות סומנו.</p></details>'
         '<details><summary>אפשר להעלות כמה קבצים יחד?</summary>'
         '<p>כן, מאותה מעבדה. כשמעלים PDF לצד קובץ Excel של אותה תעודה, הנתונים נקראים מה-Excel וה-PDF משמש כעותק נלווה.</p></details>'

@@ -30,8 +30,8 @@ def find_ambiguous_compounds(records: list[dict], tm, threshold_keys: list[str])
 
     The CAS decides: with a CAS in the threshold table the match is settled, and a
     CAS the table doesn't have means no threshold. A compound with no CAS is asked
-    about when the table has similar names. Always asked: a summed result, and a
-    CAS the table lacks when the name is a compound we know under another CAS.
+    about when the table has similar names. Always asked: a CAS the table lacks
+    when the name is a compound we know under another CAS.
     """
     ambiguous: list[dict] = []
     if not threshold_keys:

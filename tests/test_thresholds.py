@@ -54,9 +54,9 @@ def test_mbtex_thresholds_are_exact(tm, name, cas, vsl, tier1):
 def test_cas_decides_whatever_the_lab_calls_the_compound(tm):
     assert tm.get_threshold_with_confidence(
         "71-43-2", "VSL_SOIL", "Some other spelling")[1] == "exact"
-    # A summed m+p result is not the single isomer the threshold is for.
+    # The same for a summed result: its CAS settles the threshold.
     assert tm.get_threshold_with_confidence(
-        "108-38-3", "VSL_SOIL", "Meta- & Para-Xylene")[1] == "uncertain"
+        "108-38-3", "VSL_SOIL", "Meta- & Para-Xylene")[1] == "exact"
 
 
 def _rec(name, cas):
@@ -128,14 +128,18 @@ def test_clear_names_are_not_ambiguous(tm, name, cas):
 
 
 @pytest.mark.parametrize("name", ["m+p-Xylene", "m,p-Xylene", "m/p-Xylene", "Meta- & Para-Xylene"])
-def test_summed_xylene_needs_an_answer(tm, name):
+def test_summed_xylene_with_a_cas_is_not_asked_about(tm, name):
     rec = dict(compound=name, cas="108-38-3", value=5.0, flag="", unit="mg/kg",
                sample_id="S1", analysis_type="SOIL_VOC")
+    assert find_ambiguous_compounds([rec], tm, ["VSL_SOIL"]) == []
+
+
+def test_summed_xylene_without_a_cas_is_asked_about(tm):
+    rec = dict(compound="m+p-Xylene", cas="", value=5.0, flag="", unit="mg/kg",
+               sample_id="S1", analysis_type="SOIL_VOC")
     found = find_ambiguous_compounds([rec], tm, ["VSL_SOIL"])
-    assert [f["compound"] for f in found] == [name]
-    cands = [c for _, c in found[0]["candidates"]]
-    assert cands[0] == "108-38-3"   # its own CAS row first
-    assert "1330-20-7" in cands     # total xylenes is offered
+    assert [f["compound"] for f in found] == ["m+p-Xylene"]
+    assert "1330-20-7" in [c for _, c in found[0]["candidates"]]  # total xylenes is offered
 
 
 def _build_mp_xylene_sheet(tm, tmp_path, choice):
