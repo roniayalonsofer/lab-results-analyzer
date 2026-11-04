@@ -7,6 +7,7 @@ Excel, Word and preview outputs all come out with one definite threshold.
 """
 
 from core.cas_lookup import fuzzy_name_to_cas, name_matches_cas
+from core.drinking_water import DRINKING_WATER
 
 # Answer meaning "none of the candidates": the compound has no threshold.
 NO_THRESHOLD = "__no_threshold__"
@@ -34,6 +35,8 @@ def find_ambiguous_compounds(records: list[dict], tm, threshold_keys: list[str])
     when the name is a compound we know under another CAS.
     """
     ambiguous: list[dict] = []
+    # The drinking water list matches names exactly, so it has nothing to ask about
+    threshold_keys = [k for k in threshold_keys if k != DRINKING_WATER]
     if not threshold_keys:
         return ambiguous
     seen: set[str] = set()

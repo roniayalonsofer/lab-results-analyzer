@@ -96,6 +96,8 @@ This skill must get better every session. Triggers and actions:
 
 ## Lessons learned (newest first)
 
+- **2026-11-04 — ALS water certificate: real .xlsx crashed, PDF gave 0 records.** The parser read only SpreadsheetML, and split sample names on spaces ("Site Name GW-1"). Rule: the Laboratory sample ID row gives the column count. Also: "Nonmetallic" contains "metal" (check inorganics first); pdfplumber drops the µ, leaving "g/L". Compare an xlsx and PDF of one job row by row.
+- **2026-11-04 — Drinking water regulations 2013 are a threshold column (`core/drinking_water.py`, mg/L, key `DRINKING_WATER`).** The older `GW` column has values of unclear unit and never coloured, so it is off by default. Never fuzzy-match to this list: "Atrazine-desethyl" isn't atrazine.
 - **2026-10-28 — Machon HaNeft xlsx → "no records".** Three independent causes, all fixed:
   (a) `auto_detect_lab` matched the sheet name `TPH` to Alchem before checking the Machon HaNeft certificate → Alchem parser returned 0. Rule: when adding a detector, put the *most specific* signature (certificate header + method codes) before sheet-name heuristics, and run detection over every available sample.
   (b) `app.py` decided lab/category from the *first* uploaded file; a companion PDF (detected as מכון האנרגיה) overrode the xlsx. Rule: PDFs are companions of data files, so detection uses non-PDF files first.

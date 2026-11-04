@@ -757,7 +757,8 @@ try:
                                     form_rows, match_sample, read_form, secrets_problem)
     from core.field_forms import merge_field_data, parse_field_form
     from core.file_limits import compound_limits, field_values
-    from parsers import category_layout, get_parser
+    from parsers import category_layout, get_parser, lab_mismatch
+    from core.drinking_water import DRINKING_WATER
     tm = load_threshold_manager(CODE_VERSION)
 except Exception as e:
     st.error(f"שגיאת טעינת מודולים: {e}")
@@ -821,6 +822,7 @@ _PREVIEW_LEGEND = (
     '<span class="pv-chip"><i style="background:#FFFF00"></i>מעל VSL</span>'
     '<span class="pv-chip"><i style="background:#ADD8E6"></i>מעל Tier 1 מגורים</span>'
     '<span class="pv-chip"><i style="background:#FFB6C1"></i>מעל Tier 1 תעשייה</span>'
+    '<span class="pv-chip"><i style="background:#FFC000"></i>מעל תקנות מי שתייה 2013</span>'
     '<span class="pv-chip"><i style="background:#D3D3D3"></i>לא זוהה, אך גבול הגילוי גבוה מערך הסף</span>'
     '<span class="pv-chip">&lt;X = מתחת לגבול הכימות</span>'
     '</div>'
@@ -990,7 +992,9 @@ def _steps(step: int):
 _PREV_LABELS = {
     "SOIL_VOC": "VOC", "SOIL_SVOC": "SVOC", "SOIL_TPH": "TPH",
     "SOIL_PFAS": "PFAS", "SOIL_METALS": "מתכות",
-    "GW_VOC": "מי תהום VOC", "SOIL_GAS_VOC": "גז קרקע", "GAS_VOC": "גז קרקע",
+    "GW_VOC": "מי תהום VOC", "GW_SVOC": "מי תהום SVOC", "GW_METALS": "מי תהום מתכות",
+    "GW_PFAS": "מי תהום PFAS", "GW_CHEM": "מי תהום כימיה",
+    "SOIL_GAS_VOC": "גז קרקע", "GAS_VOC": "גז קרקע",
 }
 
 
@@ -1486,7 +1490,12 @@ if page == "soil":
                     st.error(f"הקובץ {fname_i} הוא PDF, אבל {lab} / {category_raw} נקרא רק מ-Excel. "
                              "בדקו את המעבדה והקטגוריה, או העלו את קובץ ה-Excel של התעודה.")
                 else:
-                    st.error(f"שגיאת פרסינג: {fname_i} — {e}")
+                    _likely_lab = lab_mismatch(fname_i, raw_i, lab)
+                    if _likely_lab:
+                        st.error(f"הקובץ {fname_i} נראה כמו תעודה של {_likely_lab}, ונבחרה המעבדה {lab}. "
+                                 "בדקו את בחירת המעבדה והקטגוריה.")
+                    else:
+                        st.error(f"שגיאת פרסינג: {fname_i} — {e}")
                 file_summaries.append({"name": fname_i, "records": 0, "ok": False})
 
     records = all_records
@@ -1610,6 +1619,10 @@ if page == "soil":
         "SOIL_PFAS":    "PFAS",
         "SOIL_METALS":  "מתכות",
         "GW_VOC":       "מי תהום VOC",
+        "GW_SVOC":      "מי תהום SVOC",
+        "GW_METALS":    "מי תהום מתכות",
+        "GW_PFAS":      "מי תהום PFAS",
+        "GW_CHEM":      "מי תהום כימיה",
         "SOIL_GAS_VOC": "גז קרקע",
         "GAS_VOC":      "גז קרקע",
     }
@@ -1766,7 +1779,9 @@ if page == "soil":
     if has_gw:
         any_shown = True
         st.markdown("##### 💧 מי תהום")
-        use_gw = st.checkbox('ערך סף מי"ת (GW Standard)', value=True, key="gw_cb")
+        use_dw = st.checkbox("תקנות מי שתייה 2013 (ריכוז מרבי)", value=True, key="dw_cb")
+        if use_dw: selected_thresholds.append(DRINKING_WATER)
+        use_gw = st.checkbox('ערך סף מי"ת (GW Standard)', value=False, key="gw_cb")
         if use_gw: selected_thresholds.append("GW")
 
     if not any_shown:
@@ -2472,6 +2487,8 @@ elif page == "guide":
         '<td>חריגה מ-TIER 1 מגורים</td></tr>'
         '<tr><td><span class="legend-swatch" style="background:#FFB6C1;">ורוד</span></td>'
         '<td>חריגה מ-TIER 1 תעשייה</td></tr>'
+        '<tr><td><span class="legend-swatch" style="background:#FFC000;">כתום</span></td>'
+        '<td>חריגה מתקנות מי שתייה 2013</td></tr>'
         '<tr><td><span class="legend-swatch" style="background:#D3D3D3;">אפור</span></td>'
         '<td>לא זוהה, אך גבול הגילוי גבוה מערך הסף — אי אפשר לשלול חריגה</td></tr>'
         '<tr><td><strong>מודגש</strong></td>'

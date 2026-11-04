@@ -482,7 +482,7 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
                 return "alchem"
             if _is_alchem_soil_gas_numeric(xl.sheet_names, file_bytes):
                 return "alchem"
-            if any("Client SOIL" in s for s in xl.sheet_names):
+            if any("Client SOIL" in s or "Client WATER" in s for s in xl.sheet_names):
                 return "als"
             if is_machon_energy_excel(file_bytes):
                 return "מכון האנרגיה"
@@ -513,6 +513,14 @@ def auto_detect_lab(filename: str, file_bytes: bytes | None = None) -> str | Non
     if any(k in n for k in ("kte", "excel_generic")):
         return "kte"
 
+    return None
+
+
+def lab_mismatch(filename: str, file_bytes: bytes, lab: str) -> str | None:
+    """The lab a file looks like when it isn't the chosen one, to explain a failed parse."""
+    detected = auto_detect_lab(filename, file_bytes)
+    if detected and detected.strip().lower() != (lab or "").strip().lower():
+        return detected
     return None
 
 
@@ -589,7 +597,7 @@ def auto_detect_category(filename: str, file_bytes: bytes | None = None, lab: st
                     _cat_text += (_pg.extract_text() or "")
             _cat_lo = _cat_text.lower()
             if "als czech republic" in _cat_lo or "alsglobal.com" in _cat_lo:
-                if "sub-matrix: water" in _cat_lo:
+                if "sub-matrix: water" in _cat_lo or "sub-matrix: groundwater" in _cat_lo:
                     return "groundwater"
                 return "soil_pdf"
             if "sub-matrix: soil" in _cat_text and "S-SMVGMS03" in _cat_text:

@@ -13,6 +13,14 @@ Format: SpreadsheetML (.xls/.xlsx exported as Excel 2003 XML), sheet "Client WAT
 
   Units are µg/L; converted to mg/L for cross-lab comparability with
   Bactochem groundwater reports (which report BTEX/MTBE in mg/L).
+
+Also read:
+  - Real .xlsx export (EXCEL_GENERIC.xlsx): the same layout, with the label cells
+    of the sample rows in the LOR column. Sheets "Client WATER 1", "Client WATER 2"...
+  - ALS Italia "Analysis Report" PDF (ZP...): one sample per report, named in
+    "Sample Description : <project> - <sample>"; rows are
+    "<compound> <method> <start date> <LOQ> <result> <MU> <unit> ...".
+    Next to another file of the same upload it adds its results to that file's samples.
 """
 
 from __future__ import annotations
@@ -112,11 +120,113 @@ _FIELD_PARAM_NAMES = frozenset({
 })
 
 
+def _normalize_unit(unit: str) -> str:
+    """pdfplumber drops the µ of some ALS certificates, leaving "g/L"."""
+    return "µg/L" if unit.strip().lower() in ("g/l", "ug/l", "µg/l", "μg/l") else unit.strip()
+
+
+def _analysis_type(compound: str, method: str, unit: str, category: str) -> str:
+    """Which report sheet a result belongs to, by the certificate's own section."""
+    cat = category.lower()
+    if compound.upper() in _FIELD_PARAM_NAMES:
+        return "GW_FIELD_PARAMS"
+    if "perfluor" in cat or unit.lower() == "ng/l":
+        return "GW_PFAS"
+    # Before metals: the section is called "Nonmetallic Inorganic Parameters"
+    if "inorganic" in cat or "agregate" in cat or "aggregate" in cat or cat == "other":
+        return "GW_CHEM"
+    if "metal" in cat:
+        return "GW_METALS"
+    if any(k in cat for k in ("pesticide", "explosive", "pharmaceutical")):
+        return "GW_SVOC"
+    if "polycyclic" in cat and "VOC" not in method.upper():
+        return "GW_SVOC"
+    return "GW_VOC"
+
+
+def _record(compound: str, method: str, unit: str, lor: float | None, raw: str,
+            sample_id: str, sampling_date: str, category: str) -> dict:
+    """One result; µg/L becomes mg/L, the groundwater sheets' common unit."""
+    unit = _normalize_unit(unit) or "µg/L"
+    value, flag = _parse_value(raw, lor)
+    atype = _analysis_type(compound, method, unit, category)
+    if unit == "µg/L":
+        if value is not None:
+            value = round(value / 1000.0, 9)
+        if lor is not None:
+            lor = round(lor / 1000.0, 9)
+        unit = "mg/L"
+    return {
+        "compound":      compound,
+        "cas":           _GW_CAS_MAP.get(compound.lower().strip(), ""),
+        "value":         value,
+        "flag":          flag or "",
+        "unit":          unit,
+        "sample_id":     sample_id,
+        "lod":           None,
+        "loq":           lor,
+        "analysis_type": atype,
+        "sampling_date": sampling_date,
+        "category":      category,
+    }
+
+
+def _compound_key(name: str) -> str:
+    """1.4-Dioxane and 1,4-Dioxane are one compound."""
+    return re.sub(r"(?<=\d)\.(?=\d)", ",", name.strip().lower())
+
+
+def _result_rank(r: dict) -> tuple:
+    """Lower is better: a detection, then the lower limit, which says more."""
+    return (r["flag"] != "", r["loq"] if r["loq"] is not None else float("inf"))
+
+
+def _best_results(records: list[dict]) -> list[dict]:
+    """One result per compound in a sample and sheet, since a sheet has one cell for it.
+
+    The certificate can report a compound by two methods, or two labs can test it.
+    """
+    best: dict[tuple, dict] = {}
+    for r in records:
+        key = (r["sample_id"], r["analysis_type"], _compound_key(r["compound"]))
+        current = best.get(key)
+        if current is None:
+            best[key] = r
+        elif _result_rank(r) < _result_rank(current):
+            # The other report may lack the sampling date
+            best[key] = {**r, "sampling_date": r["sampling_date"] or current["sampling_date"]}
+    return list(best.values())
+
+
+def _is_italy_report(data: bytes) -> bool:
+    """ALS Italia "Analysis Report" PDF, as opposed to the Czech "Certificate of Analysis"."""
+    import pdfplumber
+    try:
+        with pdfplumber.open(io.BytesIO(data)) as pdf:
+            first = (pdf.pages[0].extract_text() or "") if pdf.pages else ""
+    except Exception:
+        return False
+    return first.lstrip().startswith("Analysis Report") and "Sample Description" in first
+
+
+# Lines that end a block of results in the Czech certificate
+_PDF_BLOCK_END = ("Sub-Matrix:", "Issue Date", "When sampling date", "Key:", "Brief Method",
+                  "The end of", "right solutions", "Analytical Methods")
+
+_PDF_SECTION_RE = re.compile(
+    r"(Compounds|Parameters|Pesticides|Hydrocarbons|Cations|Explosives|BTEX|\(PAHs\)|Other)"
+    r"( - .*| Continued)?( - FTIR)?$")
+
+_ITALY_ROW_RE = re.compile(
+    r"^(?P<compound>.+?)\s+(?P<method>[A-Z]-\S+)\s+\d{2}/\d{2}/\d{4}\s+"
+    r"(?P<loq>[\d.]+)\s+(?P<result><?[\d.]+)\s+\S+\s+(?P<unit>\S+/\S+)")
+
+
 class ALSGroundwaterParser(BaseParser):
     """ALS laboratory groundwater Certificate of Analysis — 'Client WATER' sheet."""
 
     LAB_NAME = "ALS"
-    ANALYSIS_TYPES = ["GW_VOC", "GW_FIELD_PARAMS"]
+    ANALYSIS_TYPES = ["GW_VOC", "GW_SVOC", "GW_METALS", "GW_PFAS", "GW_CHEM", "GW_FIELD_PARAMS"]
 
     def _parse_pdf(self, data: bytes) -> list[dict]:
         """
@@ -142,6 +252,7 @@ class ALSGroundwaterParser(BaseParser):
 
         lines = full_text.split("\n")
         records: list[dict] = []
+        current_category = ""  # A section continues on the next page
 
         i = 0
         n = len(lines)
@@ -150,13 +261,12 @@ class ALSGroundwaterParser(BaseParser):
             if line.startswith("Sub-Matrix:") and "Client sample ID" in line:
                 # Extract sample IDs after "Client sample ID"
                 after = line.split("Client sample ID", 1)[1].strip()
-                raw_tokens = after.split()
-                # Merge "(EB)" style suffix tokens into the preceding sample ID
-                # BEFORE filtering "----", so column count stays correct.
-                merged_tokens = self._merge_eb_tokens(raw_tokens)
+                lab_ids = next((lines[x].strip().split("Laboratory sample ID", 1)[1].split()
+                                for x in range(i + 1, min(i + 4, n))
+                                if "Laboratory sample ID" in lines[x]), [])
                 # Keep "----" as an explicit placeholder so n_samples matches
                 # the actual number of result columns in the data rows.
-                sample_ids = merged_tokens
+                sample_ids = self._split_sample_ids(after, lab_ids)
 
                 sampling_dates: list[str] = []
                 hdr_idx = None
@@ -172,63 +282,46 @@ class ALSGroundwaterParser(BaseParser):
                         break
                     j += 1
 
-                if hdr_idx is None or not any(s != "----" for s in sample_ids):
+                if hdr_idx is None or not any(sid != "----" for sid in sample_ids):
                     i += 1
                     continue
 
                 n_samples = len(sample_ids)
-                current_category = ""
                 k = hdr_idx + 1
+                last_row_size = 0
                 while k < n:
                     kl = lines[k].strip()
                     if not kl:
                         k += 1
                         continue
-                    if kl.startswith("Sub-Matrix:") or kl.startswith("Issue Date") or \
-                       kl.startswith("When sampling date") or kl.startswith("Key:") or \
-                       kl.startswith("Brief Method") or kl.startswith("The end of"):
+                    if kl.startswith(_PDF_BLOCK_END):
                         break
 
                     parsed = self._parse_pdf_data_line(kl, n_samples)
                     if parsed is None:
-                        # Might be a bare category header (e.g. "BTEX", "Physical Parameters")
-                        if not re.search(r'\d', kl) and len(kl) < 60 and "----" not in kl:
-                            current_category = kl
+                        if kl.startswith("Parameter "):
+                            pass
+                        # A section header (e.g. "BTEX", "Pesticides - Continued")
+                        elif _PDF_SECTION_RE.search(kl) and "----" not in kl:
+                            current_category = kl.split(" - Continued")[0].strip()
+                        # A long name wraps below its results: "... sulfon" / "ic acid (PFEESA)"
+                        elif "----" not in kl:
+                            for r in records[-last_row_size:] if last_row_size else []:
+                                joint = "" if r["compound"].endswith("-") else " "
+                                r["compound"] = f'{r["compound"]}{joint}{kl}'
                         k += 1
                         continue
 
                     compound, method, lor_val, unit_val, results = parsed
-                    cmp_lower = compound.lower().strip()
-                    cas = _GW_CAS_MAP.get(cmp_lower, "")
-                    atype = "GW_FIELD_PARAMS" if compound.upper() in _FIELD_PARAM_NAMES else "GW_VOC"
-
+                    last_row_size = 0
                     for si, sid in enumerate(sample_ids):
                         if si >= len(results) or sid == "----":
                             continue
-                        raw_val = results[si]
-                        val, flag = _parse_value(raw_val, lor_val)
-
-                        conv_val, conv_loq, out_unit = val, lor_val, unit_val
-                        if "µg/l" in unit_val.lower() or "ug/l" in unit_val.lower():
-                            if val is not None:
-                                conv_val = round(val / 1000.0, 6)
-                            if lor_val is not None:
-                                conv_loq = round(lor_val / 1000.0, 6)
-                            out_unit = "mg/L"
-
-                        records.append({
-                            "compound":      compound,
-                            "cas":           cas,
-                            "value":         conv_val,
-                            "flag":          flag or "",
-                            "unit":          out_unit,
-                            "sample_id":     sid,
-                            "lod":           None,
-                            "loq":           conv_loq,
-                            "analysis_type": atype,
-                            "sampling_date": sampling_dates[si] if si < len(sampling_dates) else "",
-                            "category":      current_category,
-                        })
+                        records.append(_record(
+                            compound, method, unit_val, lor_val, results[si], sid,
+                            sampling_dates[si] if si < len(sampling_dates) else "",
+                            current_category))
+                        last_row_size += 1
                     k += 1
                 i = k
                 continue
@@ -245,6 +338,24 @@ class ALSGroundwaterParser(BaseParser):
                 out[-1] = f"{out[-1]} {t}"
             else:
                 out.append(t)
+        return out
+
+    @classmethod
+    def _split_sample_ids(cls, text: str, lab_ids: list[str]) -> list[str]:
+        """Sample names per result column. A name may contain spaces, so the
+        Laboratory sample ID row, which never does, gives the number of columns."""
+        tokens = cls._merge_eb_tokens(text.split())
+        n_cols = len(lab_ids)
+        if not n_cols or len(tokens) == n_cols:
+            return tokens
+        real = [c for c, lab_id in enumerate(lab_ids) if lab_id != "----"]
+        out = ["----"] * n_cols
+        if len(real) == 1:
+            out[real[0]] = " ".join(t for t in tokens if t != "----")
+        else:
+            # Several names with spaces can't be told apart: the lab's ID is unambiguous
+            for c in real:
+                out[c] = lab_ids[c]
         return out
 
     @staticmethod
@@ -292,24 +403,76 @@ class ALSGroundwaterParser(BaseParser):
             lor_val = None
         return compound, method, lor_val, unit_val, result_tokens
 
-    def parse(self, file_obj) -> list[dict]:
+    def _parse_italy_pdf(self, data: bytes) -> list[dict]:
+        """ALS Italia "Analysis Report": the sample's name is the part after the project."""
+        import pdfplumber
+
+        with pdfplumber.open(io.BytesIO(data)) as pdf:
+            lines = [ln.strip() for p in pdf.pages
+                     for ln in (p.extract_text() or "").split("\n")]
+
+        sample_id = ""
+        for ln in lines:
+            m = re.match(r"Sample Description\s*:\s*(.+?)(?:\s+Client:)?$", ln)
+            if m:
+                sample_id = m.group(1).rsplit(" - ", 1)[-1].strip()
+                break
+
+        records: list[dict] = []
+        category = ""
+        for ln in lines:
+            m = _ITALY_ROW_RE.match(ln)
+            if m:
+                records.append(_record(m["compound"], m["method"], m["unit"], float(m["loq"]),
+                                       m["result"], sample_id, "", category))
+            elif ln.endswith(("Compounds", "Parameters", "Pesticides", "Metals")):
+                category = ln
+        return records
+
+    def _parse_sheets(self, sheets: dict[str, pd.DataFrame]) -> list[dict]:
+        """Every "Client WATER" sheet: a large job spreads its samples over several."""
+        names = ([n for n in sheets if "client water" in n.lower()]
+                 or [n for n in sheets if "water" in n.lower()][:1])
+        records: list[dict] = []
+        for name in names:
+            records.extend(self._parse_water_sheet(sheets[name]))
+        return records
+
+    def parse(self, file_obj, pdf_bytes: list[bytes] | None = None) -> list[dict]:
         data = file_obj.read() if hasattr(file_obj, "read") else file_obj
         if isinstance(data, str):
             data = data.encode("utf-8")
 
-        # PDF Certificate of Analysis — route to dedicated PDF extractor
+        other_pdfs = [b for b in (pdf_bytes or []) if b != data]
+        italy_reports = [b for b in other_pdfs if _is_italy_report(b)]
+
         if data[:4] == b"%PDF":
-            return self._parse_pdf(data)
+            if _is_italy_report(data):
+                # A certificate in the same upload collects the Italian results (below),
+                # so the same sample doesn't become two columns.
+                if len(italy_reports) < len(other_pdfs):
+                    return []
+                records = self._parse_italy_pdf(data)
+            else:
+                records = self._parse_pdf(data)
+        elif data[:2] == b"PK":
+            sheets = pd.read_excel(io.BytesIO(data), sheet_name=None, header=None, dtype=str)
+            records = self._parse_sheets({n: df.fillna("") for n, df in sheets.items()})
+        else:
+            records = self._parse_sheets(_parse_spreadsheetml(data))
 
-        sheets = _parse_spreadsheetml(data)
-        sheet_name = next(
-            (n for n in sheets if "client water" in n.lower()),
-            next((n for n in sheets if "water" in n.lower()), None)
-        )
-        if sheet_name is None:
-            return []
+        # A Czech certificate next to the data file is a copy of it, but an Italian
+        # report holds results found nowhere else.
+        for report in italy_reports:
+            records.extend(self._parse_italy_pdf(report))
+        records = _best_results(records)
+        # The chemistry sheet is in mg/L; its alkalinity rows are in mmol/L
+        for r in records:
+            if r["analysis_type"] == "GW_CHEM" and r["unit"] != "mg/L":
+                r["compound"] = f'{r["compound"]} [{r["unit"]}]'
+        return records
 
-        df = sheets[sheet_name]
+    def _parse_water_sheet(self, df: pd.DataFrame) -> list[dict]:
         n_rows = len(df)
         records: list[dict] = []
 
@@ -378,39 +541,10 @@ class ALSGroundwaterParser(BaseParser):
             except (ValueError, TypeError):
                 lor_val = None
 
-            cmp_lower = compound.lower().strip()
-            cas = _GW_CAS_MAP.get(cmp_lower, "")
-
-            atype = "GW_FIELD_PARAMS" if compound.upper() in _FIELD_PARAM_NAMES else "GW_VOC"
-
             for ci, sid in sample_cols.items():
                 if ci >= len(row):
                     continue
-                raw_val = row[ci]
-                val, flag = _parse_value(raw_val, lor_val)
-
-                conv_val = val
-                conv_loq = lor_val
-                out_unit = unit_val or "µg/L"
-                if "µg/l" in out_unit.lower() or "ug/l" in out_unit.lower():
-                    if val is not None:
-                        conv_val = round(val / 1000.0, 6)
-                    if lor_val is not None:
-                        conv_loq = round(lor_val / 1000.0, 6)
-                    out_unit = "mg/L"
-
-                records.append({
-                    "compound":      compound,
-                    "cas":           cas,
-                    "value":         conv_val,
-                    "flag":          flag or "",
-                    "unit":          out_unit,
-                    "sample_id":     sid,
-                    "lod":           None,
-                    "loq":           conv_loq,
-                    "analysis_type": atype,
-                    "sampling_date": sampling_dates.get(ci, ""),
-                    "category":      current_category,
-                })
+                records.append(_record(compound, method_val, unit_val, lor_val, row[ci], sid,
+                                       sampling_dates.get(ci, ""), current_category))
 
         return records

@@ -49,6 +49,7 @@ import difflib
 import re
 import pandas as pd
 from core.cas_lookup import fuzzy_name_to_cas, name_matches_cas
+from core.drinking_water import DRINKING_WATER, drinking_water_limit
 
 
 # ── Main file column mapping ──────────────────────────────────────────
@@ -69,6 +70,7 @@ THRESHOLD_LABELS: dict[str, str] = {
     "TIER1_INDOOR_IND":  "TIER1 גז פנים-תעשייה",
     "TIER1_OUTDOOR_IND": "TIER1 גז חוץ-תעשייה",
     "GW":                'ערך סף מי"ת',
+    DRINKING_WATER:      "תקנות מי שתייה 2013 [mg/L]",
     "PFAS_VSL":              "PFAS VSL",
     "PFAS_TIER1_RES":        "PFAS TIER1 מגורים",
     "PFAS_TIER1_IND":        "PFAS TIER1 תעשייה",
@@ -183,9 +185,10 @@ ANALYSIS_THRESHOLDS: dict[str, list[str]] = {
                     "PFAS_TIER1_RES", "PFAS_TIER1_IND",
                     "PFAS_TIER1_RES_VERY_HIGH", "PFAS_TIER1_RES_0_6", "PFAS_TIER1_RES_6PLUS", "PFAS_TIER1_RES_NO_GW",
                     "PFAS_TIER1_IND_VERY_HIGH", "PFAS_TIER1_IND_0_6", "PFAS_TIER1_IND_6PLUS", "PFAS_TIER1_IND_NO_GW"],
-    "GW_VOC":           ["GW"],
-    "GW_SVOC":          ["GW"],
-    "GW_METALS":        ["GW"],
+    "GW_VOC":           ["GW", DRINKING_WATER],
+    "GW_SVOC":          ["GW", DRINKING_WATER],
+    "GW_METALS":        ["GW", DRINKING_WATER],
+    "GW_CHEM":          [DRINKING_WATER],
     "GW_PFAS":          [],
     "LOWFLOW":          [],
     "SOIL_GRAIN_SIZE":  [],
@@ -464,6 +467,9 @@ class ThresholdManager:
         ):
             return 350.0
 
+        if threshold_key == DRINKING_WATER:
+            return drinking_water_limit(cas)
+
         if threshold_key == "GW" and cas in _GW_METALS_STANDARDS:
             return _GW_METALS_STANDARDS[cas]
 
@@ -522,6 +528,9 @@ class ThresholdManager:
         Like get_threshold but falls back to compound name lookup when CAS fails.
         The compound name column in the threshold file is 'chimical' (or similar).
         """
+        if threshold_key == DRINKING_WATER:
+            return drinking_water_limit(cas, compound_name)
+
         # Explicit pseudo-CAS overrides (DRO=350, ORO=None) take priority.
         cas_upper = str(cas).strip().upper() if cas else ""
         if cas_upper in _CAS_VSL_OVERRIDES:
@@ -803,6 +812,10 @@ class ThresholdManager:
         - 'uncertain' : CAS or name matched but compound identity may differ.
         - 'none'      : no threshold found.
         """
+        if threshold_key == DRINKING_WATER:
+            val = drinking_water_limit(cas, compound_name)
+            return (val, 'exact' if val is not None else 'none')
+
         # TPH fractions (DRO/ORO/combined Total TPH) use synthetic CAS
         # identifiers we assign ourselves ('C10-C40' for the calculated
         # Total TPH sum) rather than a real lab-reported compound name, so a

@@ -55,6 +55,7 @@ from openpyxl.cell.text import InlineFont
 
 from core.threshold_manager import ThresholdManager, ANALYSIS_THRESHOLDS, THRESHOLD_LABELS
 from core.cas_lookup import name_to_cas as _name_to_cas, fuzzy_name_to_cas as _fuzzy_name_to_cas
+from core.drinking_water import DRINKING_WATER
 
 
 def _is_ind_key(k: str) -> bool:
@@ -79,6 +80,7 @@ def _is_vsl_key(k: str) -> bool:
 YELLOW  = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")  # VSL
 PINK    = PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")  # Tier 1 Industrial
 L_BLUE  = PatternFill(start_color="ADD8E6", end_color="ADD8E6", fill_type="solid")  # Tier 1 Residential
+ORANGE  = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")  # Drinking water
 GRAY    = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
 WHITE   = PatternFill(fill_type=None)
 BLUE_H  = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
@@ -142,6 +144,13 @@ def _num_fmt_data(val) -> str:
     if isinstance(val, float) and val % 1 == 0:
         return '#,##0'
     return '#,##0.###'
+
+
+def _less_than_format(val) -> str:
+    """Number format showing <X in full: a small mg/L limit would round to "<0.0"."""
+    text = f"{val:.9f}".rstrip("0") if isinstance(val, (int, float)) else ""
+    decimals = len(text.split(".")[1]) if "." in text else 0
+    return '"<"0.' + "0" + "#" * max(2, decimals - 1)
 
 
 def _num_fmt_thresh(val) -> str:
@@ -502,6 +511,7 @@ _THRESHOLD_SOURCES: dict[str, str] = {
     "TIER1_IND_SOIL_LOW":    "Tier 1 RBTL Industrial/Commercial, Rev.7, 12/24",
     "VSL_SOIL":              "Soil VSL, Rev. 7, 12/24",
     "GW":                    "Groundwater Standard, Rev.7, 12/24",
+    DRINKING_WATER:          "Public Health Regulations (Drinking Water), 2013",
     "PFAS_VSL":              "PFAS VSL, Rev.7, 12/24",
     "PFAS_TIER1_RES":        "PFAS Tier 1 Residential, Rev.7, 12/24",
     "PFAS_TIER1_IND":        "PFAS Tier 1 Industrial/Commercial, Rev.7, 12/24",
@@ -543,6 +553,7 @@ SHEET_CONFIG: dict[str, dict] = {
     "GW_SVOC":         {"name": "מי תהום SVOC",     "unit": "µg/L", "lod_loq_mode": "both"},
     "GW_METALS":       {"name": "מי תהום מתכות",   "unit": "µg/L", "lod_loq_mode": "both"},
     "GW_PFAS":         {"name": "מי תהום PFAS",         "unit": "ng/L"},
+    "GW_CHEM":         {"name": "מי תהום כימיה",        "unit": "mg/L", "lod_loq_mode": "both"},
     "GW_MICROBIOLOGY": {"name": "מיקרוביולוגיה מי תהום", "unit": "CFU/mL"},
     "LOWFLOW":         {"name": "pH",               "unit": ""},
     "GW_FIELD_PARAMS": {"name": "פרמטרי שדה",       "unit": ""},
@@ -983,11 +994,13 @@ class LabReportExcel:
         # Decide orientation: portrait when n_compounds >= n_samples.
         portrait = len(compounds) >= len(samples)
 
+        # The label follows the records: a sheet's default unit isn't what every lab reports
+        _units = {r.get("unit") for r in records if r.get("unit")}
         header_info = {
             "project": self.project,
             "date":    self.rep_date,
             "client":  self.client,
-            "unit":    cfg["unit"],
+            "unit":    _units.pop() if len(_units) == 1 else cfg["unit"],
         }
 
         self._current_sheet_records = records
@@ -1665,13 +1678,14 @@ class LabReportExcel:
                     si = ci - N_FIXED - 1
                     display, num_v, flag, lod = sample_vals[si]
                     if flag == "<LOQ" and isinstance(val, (int, float)):
-                        c.number_format = '"<"0.0##'
+                        c.number_format = _less_than_format(val)
                     # If threshold is uncertain, skip exceedance colouring entirely
                     if cmp not in uncertain_compounds and flag != "dash":
                         vsl_lim      = self._vsl_limit(t_vals)
                         tier1_ind    = self._tier1_ind_limit(t_vals)
                         tier1_res    = self._tier1_res_limit(t_vals)
                         any_lim      = self._strictest(t_vals)
+                        dw_lim       = t_vals.get(DRINKING_WATER)
                         if any_lim is not None:
                             _nd_at_loq = flag == "ND"
                             # GREY first: ND is a non-detection regardless of stored value
@@ -1701,6 +1715,9 @@ class LabReportExcel:
                                     c.font = Font(**FHE, bold=True)
                                 elif vsl_lim is not None and num_v > vsl_lim:
                                     c.fill = YELLOW    # exceeds VSL only
+                                    c.font = Font(**FHE, bold=True)
+                                elif dw_lim is not None and num_v > dw_lim:
+                                    c.fill = ORANGE    # exceeds the drinking water maximum
                                     c.font = Font(**FHE, bold=True)
 
             # ── Uncertain threshold: asterisk in compound name + note ──
@@ -2098,7 +2115,7 @@ class LabReportExcel:
                     comp_idx               = ci - cmp_col_start
                     _, flag_nf, _          = row_meta[comp_idx]
                     if flag_nf == "<LOQ":
-                        c.number_format = '"<"0.0##'
+                        c.number_format = _less_than_format(val)
                     else:
                         c.number_format = _num_fmt_data(val)
                 c.alignment = CENTER
@@ -2117,6 +2134,7 @@ class LabReportExcel:
                         tier1_ind = self._tier1_ind_limit(t_vals)
                         tier1_res = self._tier1_res_limit(t_vals)
                         any_lim   = self._strictest(t_vals)
+                        dw_lim    = t_vals.get(DRINKING_WATER)
                         if any_lim is not None:
                             _loq_cmp = loq_map.get(cmp_name)
                             _nd_at_loq = flag_cell == "ND"
@@ -2147,6 +2165,9 @@ class LabReportExcel:
                                     c.font = Font(**FHE, bold=True)
                                 elif vsl_lim is not None and num_v > vsl_lim:
                                     c.fill = YELLOW
+                                    c.font = Font(**FHE, bold=True)
+                                elif dw_lim is not None and num_v > dw_lim:
+                                    c.fill = ORANGE
                                     c.font = Font(**FHE, bold=True)
             data_row += 1
 
@@ -2316,6 +2337,8 @@ class LabReportExcel:
             items.append(("חריגה מ-Tier 1 מגורים",  L_BLUE))
         if has_vsl:
             items.append(("חריגה מערך VSL",          YELLOW))
+        if DRINKING_WATER in keys:
+            items.append(("חריגה מתקנות מי שתייה 2013", ORANGE))
         if include_gray:
             items.append(("ערכים החורגים מערך סף הגילוי מודגשים", None))
         for i, (label, fill) in enumerate(items):
