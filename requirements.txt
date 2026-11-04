@@ -3,6 +3,7 @@ pandas
 streamlit
 python-docx
 pdfplumber
+anthropic
 pymupdf
 xlrd
 xlwt

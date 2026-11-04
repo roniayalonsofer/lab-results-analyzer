@@ -99,7 +99,8 @@ def _read_pdf(raw: bytes) -> dict:
     with pdfplumber.open(io.BytesIO(raw)) as pdf:
         if not any((page.extract_text() or "").strip() for page in pdf.pages):
             raise ValueError("הקובץ סרוק כתמונה, ואי אפשר לקרוא ממנו קריאות PID. "
-                             "הדוח ייבנה בלי PID. כדי לכלול אותן, העלו טופס ב-Excel.")
+                             "בגז קרקע אפשר להקליד את ה-PID בשדה שמופיע אחרי קריאת התעודה. "
+                             "בקרקע צריך טופס ב-Excel.")
         for page in pdf.pages:
             for rows in page.extract_tables():
                 found = _find_columns(rows)

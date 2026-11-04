@@ -956,6 +956,7 @@ class LabReportExcel:
                     "canister": r.get("canister_num", ""),
                     "date":     r.get("sampling_date", ""),
                     "pid":      r.get("pid_reading", ""),
+                    "form":     r.get("form_values") or {},
                 }
 
         # Auto-downgrade lod_loq_mode: when every compound has lod = None (e.g. ALS
@@ -1400,14 +1401,23 @@ class LabReportExcel:
                 ("תאריך ביצוע הדיגום", [sample_meta.get(s, {}).get("date",     "") for s in samples]),
                 ("מספר קניסטר",        [sample_meta.get(s, {}).get("canister", "") for s in samples]),
             ]
-            if pid_map:
-                _gas_pids = [_pid_lookup(pid_map, s) for s in samples]
+            # A reading on the sample itself comes first, then the field forms (0 is valid)
+            _own_pids = [sample_meta.get(s, {}).get("pid", "") for s in samples]
+            if pid_map or any(p not in ("", None) for p in _own_pids):
+                _gas_pids = [p if p not in ("", None) else _pid_lookup(pid_map, s)
+                             for s, p in zip(samples, _own_pids)]
                 meta_rows.append(('קריאת PID [ppm]', _gas_pids))
+            # Fields the user chose from the field form, one row each
+            _form_fields = list(dict.fromkeys(
+                f for s in samples for f in sample_meta.get(s, {}).get("form", {})))
+            for _field in _form_fields:
+                meta_rows.append((_field, [sample_meta.get(s, {}).get("form", {}).get(_field, "")
+                                           for s in samples]))
             for ri, (label, vals) in enumerate(meta_rows, 1):
                 # Merge label across all fixed columns (A → last fixed col)
                 ws.merge_cells(start_row=ri, start_column=1,
                                end_row=ri,   end_column=N_FIXED)
-                if "PID" in label:
+                if label == "קריאת PID [ppm]":
                     # Rich text: Hebrew parts → David 9 bold; "PID" → Times New Roman 8 bold
                     he_if = InlineFont(rFont="David", sz=9, b=True)
                     en_if = InlineFont(rFont="Times New Roman", sz=8, b=True)
@@ -1428,7 +1438,7 @@ class LabReportExcel:
                 for ci in range(2, N_FIXED + 1):
                     ws.cell(row=ri, column=ci).border = THIN
                 # Sample value cells
-                is_date_row = "תאריך" in label
+                is_date_row = label == "תאריך ביצוע הדיגום"
                 for ci, v in enumerate(vals, N_FIXED + 1):
                     cell = ws.cell(row=ri, column=ci)
                     cell.border    = THIN

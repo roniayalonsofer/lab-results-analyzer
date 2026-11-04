@@ -191,6 +191,33 @@ def test_threshold_cache_is_keyed_on_the_code_version():
     assert "def load_threshold_manager(code_mtime):" in source
 
 
+@pytest.mark.parametrize("own_pid,form,expected", [
+    (393.0, None, 393),                                  # typed in the app
+    (0.0, None, 0),                                      # zero is a reading
+    (393.0, {_pid_key("SG-7"): [(0.0, 5.0)]}, 393),      # typed wins over a form
+    ("", None, None),                                    # nothing: no PID row
+])
+def test_soil_gas_report_shows_the_sample_pid(tmp_path, own_pid, form, expected):
+    from core.excel_output import LabReportExcel
+    from core.threshold_manager import ThresholdManager
+    th = os.path.join(os.path.dirname(__file__), "..", "soil_lab_tool", "thresholds")
+    tm = ThresholdManager(os.path.join(th, "soil_vsl_tier1_v7_2024.xlsx"),
+                          vsl_full_path=os.path.join(th, "soil_vsl_v7_full.xlsx"))
+    rec = dict(compound="Benzene", cas="71-43-2", value=120.0, flag="", unit="µg/m³", sample_id="SG-7",
+               analysis_type="SOIL_GAS_VOC", canister_num="11919", lod=10.0, loq=50.0, pid_reading=own_pid)
+    out = str(tmp_path / "gas.xlsx")
+    LabReportExcel(records=[rec], threshold_manager=tm, output_path=out, project_name="", client="",
+                   report_date="", selected_thresholds=["GAS_INDOOR_RES"], combine_tph_voc=False,
+                   combine_tph_mbtex=False, pid_map=form).build()
+    ws = openpyxl.load_workbook(out, rich_text=True).worksheets[0]
+    rows = {str(r[0].value): [c.value for c in r[1:] if c.value is not None] for r in ws.iter_rows(max_row=5)}
+    pid_rows = [v for k, v in rows.items() if "PID" in k]
+    if expected is None:
+        assert pid_rows == []
+    else:
+        assert pid_rows == [[expected]]
+
+
 def test_word_shows_a_result_below_the_limit_as_below_it():
     from core.word_output import _fmt_value
     assert _fmt_value(50.0, "<LOQ", 15.0) == "<50"

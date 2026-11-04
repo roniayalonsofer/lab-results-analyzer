@@ -753,6 +753,8 @@ try:
     from core.xrf_output   import build_xrf_simple_excel
     from core.compound_choices import (NO_THRESHOLD, ResolvedThresholds,
                                        apply_compound_choices, find_ambiguous_compounds)
+    from core.field_form_ai import (FormReadError, apply_form_values, field_options,
+                                    form_rows, match_sample, read_form)
     from core.field_forms import merge_field_data, parse_field_form
     from core.file_limits import compound_limits, field_values
     from parsers import category_layout, get_parser
@@ -992,6 +994,94 @@ _PREV_LABELS = {
 }
 
 
+def _anthropic_key() -> str | None:
+    """The API key from the app's secrets or the environment."""
+    try:
+        return st.secrets["ANTHROPIC_API_KEY"]
+    except Exception:
+        return os.environ.get("ANTHROPIC_API_KEY")
+
+
+def _form_reader(forms: list, records: list[dict]) -> None:
+    """Read scanned field forms with AI; the user checks the values and chooses what goes in the report."""
+    if not forms:
+        return
+
+    import hashlib
+    st.markdown("##### 📝 טפסי ממצאי שדה")
+    gas_records = [r for r in records if r.get("analysis_type") == "SOIL_GAS_VOC"]
+    if not gas_records:
+        st.info("קריאת טפסים סרוקים זמינה כרגע רק לגז קרקע: "
+                + ", ".join(f.name for f in forms))
+        return
+    api_key = _anthropic_key()
+    if not api_key:
+        st.warning("⚠️ לא ניתן לקרוא טופס סרוק: לא הוגדר מפתח ANTHROPIC_API_KEY.")
+        return
+
+    readings = st.session_state.setdefault("form_readings", {})
+    samples = list(dict.fromkeys(r["sample_id"] for r in gas_records))
+    by_sample: dict[str, dict[str, str]] = {}
+    for form in forms:
+        raw = form.getvalue()
+        form_id = hashlib.sha256(raw).hexdigest()[:16]
+        st.markdown(f"**{form.name}**")
+        if form_id not in readings:
+            st.caption("הטופס יישלח לשירות AI חיצוני (Claude) לקריאת כתב היד.")
+            if not st.button("📖 קרא את הטופס", key=f"read_form_{form_id}"):
+                continue
+            import anthropic
+            try:
+                with st.spinner("קורא את הטופס..."):
+                    readings[form_id] = read_form(anthropic.Anthropic(api_key=api_key), raw)
+            except FormReadError as e:
+                st.error(f"⚠️ {e}")
+                continue
+
+        reading = readings[form_id]
+        rows = form_rows(reading)
+        options = field_options(reading)
+        if not rows or not options:
+            st.warning("⚠️ לא נמצאו בטופס נתונים לדגימות.")
+            continue
+
+        chosen = st.multiselect("מה להכניס לטבלה הסופית?", options,
+                                placeholder="בחרו נתונים מהטופס", key=f"form_fields_{form_id}")
+        table = pd.DataFrame([{
+            "דגימה בטופס": row["sample"],
+            "קניסטר": row["canister"],
+            "דגימה בדוח": match_sample(row, gas_records),
+            **{f: row["values"].get(f, "") for f in chosen},
+            "לבדיקה": ", ".join(f for f in row["unsure"] if f in chosen),
+        } for row in rows])
+        st.warning("⚠️ הערכים נקראו מכתב יד. בחרו קודם את כל הנתונים, ואז בדקו אותם מול הסריקה "
+                   "ותקנו בטבלה לפני הורדת הדוח. שינוי הבחירה מוחק תיקונים.")
+        edited = st.data_editor(
+            table, hide_index=True, key=f"form_table_{form_id}_{len(chosen)}",
+            disabled=["דגימה בטופס", "קניסטר", "לבדיקה"],
+            column_config={"דגימה בדוח": st.column_config.SelectboxColumn(
+                "דגימה בדוח", options=samples, help="הדגימה בתעודת המעבדה")},
+        )
+        for row in edited.to_dict("records"):
+            if row["דגימה בדוח"] and chosen:
+                by_sample.setdefault(row["דגימה בדוח"], {}).update({f: str(row[f]) for f in chosen})
+        unmatched = [str(r["דגימה בטופס"]) for r in edited.to_dict("records") if not r["דגימה בדוח"]]
+        if unmatched and chosen:
+            st.warning("⚠️ לא שויכו לדגימה בדוח, ולכן לא ייכנסו אליו: " + ", ".join(unmatched))
+
+        with st.expander("🔍 הסריקה לבדיקה"):
+            import fitz
+            doc = fitz.open(stream=raw, filetype="pdf")
+            used = sorted({v["page"] for s in reading["samples"] for v in s["values"]
+                           if v["field"] in chosen and 1 <= v["page"] <= len(doc)})
+            page_no = st.selectbox("עמוד", range(1, len(doc) + 1), key=f"form_page_{form_id}",
+                                   index=(used[0] - 1) if used else 0)
+            st.image(doc[page_no - 1].get_pixmap(dpi=130).tobytes("png"))
+            doc.close()
+
+    apply_form_values(records, by_sample)
+
+
 def _compound_picker(ambiguous: list[dict]) -> tuple[dict[str, str], int]:
     """Ask which threshold-table compound each ambiguous lab name refers to.
     Returns the answers so far (compound → CAS or NO_THRESHOLD) and how many are open."""
@@ -1221,11 +1311,15 @@ if page == "soil":
         help="ניתן להעלות כמה טפסים, Excel או PDF. נדרשות עמודות קידוח, עד עומק ו-PID.",
     )
     _pm: dict = {}
+    _ai_forms: list = []  # PDFs with no readable table, for the AI reader below
     for _pid_file in pid_upload_files or []:
         try:
             merge_field_data(_pm, parse_field_form(_pid_file.name, _pid_file.getvalue()))
         except Exception as _pid_err:
-            st.warning(f"⚠️ שגיאת קריאת טופס ממצאי שדה ({_pid_file.name}): {_pid_err}")
+            if _pid_file.name.lower().endswith(".pdf"):
+                _ai_forms.append(_pid_file)
+            else:
+                st.warning(f"⚠️ שגיאת קריאת טופס ממצאי שדה ({_pid_file.name}): {_pid_err}")
     if _pm:
         st.caption(f"✅ נתוני PID נטענו — {len(_pm)} קידוחים מתוך {len(pid_upload_files)} טפסים")
     st.session_state["pid_map"] = _pm
@@ -1404,6 +1498,7 @@ if page == "soil":
         st.session_state["ov_from_file"] = _ov_from_file
         st.session_state["ov_signature"] = _ov_signature
     _render_overrides(compound_limits(records))
+    _form_reader(_ai_forms, records)
 
     def _ov_manual(_key: str):
         """A value the user entered; a field still showing the file's value is not one."""
@@ -1641,6 +1736,22 @@ if page == "soil":
     if has_soil_gas:
         any_shown = True
         st.markdown("##### 💨 גז קרקע VOC")
+        _gas_samples = list(dict.fromkeys(r["sample_id"] for r in records
+                                          if r.get("analysis_type") == "SOIL_GAS_VOC"))
+        _pid_cols = st.columns(min(len(_gas_samples), 4))
+        for _i, _sid in enumerate(_gas_samples):
+            with _pid_cols[_i % len(_pid_cols)]:
+                _pid_text = st.text_input(f"PID [ppm] — {_sid}", placeholder="לדוג׳: 393",
+                                          key=f"sg_pid_{hash(_ov_signature)}_{_sid}").strip()
+            if _pid_text:
+                try:
+                    _pid_value = float(_pid_text.replace(",", "."))
+                except ValueError:
+                    st.warning(f"⚠️ ערך ה-PID של {_sid} אינו מספר: {_pid_text}")
+                    continue
+                for r in records:
+                    if r.get("analysis_type") == "SOIL_GAS_VOC" and r["sample_id"] == _sid:
+                        r["pid_reading"] = _pid_value
         st.markdown('<div style="font-size:0.8rem;color:#6b7280;">ניתן לבחור Soil Vapor, Ambient Air, או את שניהם יחד — כל הערכים מקורם ב-TIER 1</div>', unsafe_allow_html=True)
         sg_col_r, sg_col_i = st.columns(2)
         with sg_col_r:
