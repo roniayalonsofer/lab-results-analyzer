@@ -31,7 +31,9 @@ import xml.etree.ElementTree as _ET
 
 import pandas as pd
 
+from core.drinking_water import drinking_water_cas
 from parsers.base import BaseParser
+from parsers.groundwater.als_cas import ALS_CAS
 
 _SML_NS = "urn:schemas-microsoft-com:office:spreadsheet"
 
@@ -118,6 +120,25 @@ _FIELD_PARAM_NAMES = frozenset({
     "ELECTRICAL CONDUCTIVITY @ 25°C", "PH VALUE", "REDOX POTENTIAL",
     "DISSOLVED OXYGEN", "OXYGEN SATURATION",
 })
+
+
+def _name_key(name: str) -> str:
+    """A name without spacing and punctuation: a wrapped PDF line can split a word."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+_ALS_NAMES = {_name_key(name): name for name in ALS_CAS}
+
+
+def _with_cas(record: dict) -> dict:
+    """The table's CAS first: it corrects a number the lab's name would otherwise be matched to."""
+    name = _ALS_NAMES.get(_name_key(record["compound"]))
+    if name:
+        record["compound"] = name
+        record["cas"] = ALS_CAS[name]
+    elif not record["cas"] and not record["compound"].startswith("Sum"):
+        record["cas"] = drinking_water_cas(record["compound"])
+    return record
 
 
 def _normalize_unit(unit: str) -> str:
@@ -468,6 +489,7 @@ class ALSGroundwaterParser(BaseParser):
         records = _best_results(records)
         # The chemistry sheet is in mg/L; its alkalinity rows are in mmol/L
         for r in records:
+            _with_cas(r)
             if r["analysis_type"] == "GW_CHEM" and r["unit"] != "mg/L":
                 r["compound"] = f'{r["compound"]} [{r["unit"]}]'
         return records

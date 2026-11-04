@@ -96,6 +96,7 @@ This skill must get better every session. Triggers and actions:
 
 ## Lessons learned (newest first)
 
+- **2026-11-04 — A report with 297 of 515 CAS numbers empty, some wrong.** ALS prints no CAS, and the report builder's name matching filled only what the threshold tables know, sometimes with a similar compound's number (4:2 FTS got 6:2 FTS's). `parsers/groundwater/als_cas.py` holds reviewed numbers. Rule: a name the lab prints gets a checked number or none; audit a new lab's CAS column against PubChem by name.
 - **2026-11-04 — ALS water certificate: real .xlsx crashed, PDF gave 0 records.** The parser read only SpreadsheetML, and split sample names on spaces ("Site Name GW-1"). Rule: the Laboratory sample ID row gives the column count. Also: "Nonmetallic" contains "metal" (check inorganics first); pdfplumber drops the µ, leaving "g/L". Compare an xlsx and PDF of one job row by row.
 - **2026-11-04 — Drinking water regulations 2013 are a threshold column (`core/drinking_water.py`, mg/L, key `DRINKING_WATER`).** The older `GW` column has values of unclear unit and never coloured, so it is off by default. Never fuzzy-match to this list: "Atrazine-desethyl" isn't atrazine.
 - **2026-10-28 — Machon HaNeft xlsx → "no records".** Three independent causes, all fixed:

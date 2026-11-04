@@ -74,7 +74,8 @@ _LIMITS: list[tuple[str, float, tuple[str, ...]]] = [
     ("57-74-9", 1 * _UG,        ("Chlordane", "alpha-Chlordane", "gamma-Chlordane",
                                  "cis-Chlordane", "trans-Chlordane", "Oxychlordane")),
     ("2921-88-2", 30 * _UG,     ("Chlorpyrifos",)),
-    ("58-89-9", 1 * _UG,        ("Lindane", "gamma-HCH", "gamma-Hexachlorocyclohexane")),
+    ("58-89-9", 1 * _UG,        ("Lindane", "gamma-HCH", "gamma-Hexachlorocyclohexane",
+                                 "Hexachlorocyclohexane Gamma")),
     ("51218-45-2", 10 * _UG,    ("Metolachlor", "Metolachlor (isomers)")),
     ("94-74-6", 2 * _UG,        ("MCPA",)),
     ("122-34-9", 2 * _UG,       ("Simazine",)),
@@ -130,6 +131,7 @@ def _norm(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name)
 
 
+_CAS_BY_NAME = {_norm(n): cas for cas, _, names in _LIMITS for n in names}
 _BY_NAME = {_norm(n): round(limit, 9) for _, limit, names in _LIMITS for n in names}
 _BY_CAS = {cas: round(limit, 9) for cas, limit, _ in _LIMITS if cas}
 
@@ -144,3 +146,8 @@ def drinking_water_limit(cas: str = "", compound_name: str = "") -> float | None
         if by_name is not None:
             return by_name
     return _BY_CAS.get(str(cas or "").strip())
+
+
+def drinking_water_cas(compound_name: str) -> str:
+    """The CAS of a compound the regulations list, or "" when they don't list it."""
+    return _CAS_BY_NAME.get(_norm(compound_name), "")

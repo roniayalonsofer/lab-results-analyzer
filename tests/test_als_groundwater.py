@@ -16,7 +16,8 @@ from core.drinking_water import DRINKING_WATER, drinking_water_limit  # noqa: E4
 from core.excel_output import LabReportExcel  # noqa: E402
 from core.threshold_manager import ThresholdManager  # noqa: E402
 from parsers import auto_detect_category, auto_detect_lab, lab_mismatch  # noqa: E402
-from parsers.groundwater.als_gw import ALSGroundwaterParser, _best_results, _record  # noqa: E402
+from parsers.groundwater.als_gw import (ALSGroundwaterParser, _best_results, _record,  # noqa: E402
+                                        _with_cas)
 
 XLSX = "PR00C0000_0_EXCEL_GENERIC.xlsx"
 
@@ -182,3 +183,37 @@ def test_report_compares_and_colours_against_the_regulations(records, tm, tmp_pa
     assert edb[3].value == pytest.approx(0.00005)
     assert edb[4].font.bold
     assert edb[4].number_format == '"<"0.0###'
+
+
+@pytest.mark.parametrize("name,cas", [
+    ("4:2 Fluorotelomer sulfonic acid (4:2 FTS)", "757124-72-4"),  # was 6:2 FTS's number
+    ("Perfluorododecane sulfonic acid (PFDoDS)", "79780-39-5"),    # was PFDS's number
+    ("1.2.3.4-Tetrachlorobenzene", "634-66-2"),                    # was a trichlorobenzene's
+    ("Titanium", "7440-32-6"),                                     # was titanium tetrachloride's
+    ("Perfluoro(2-ethoxyethane)sulfon ic acid (PFEESA)", "113507-82-7"),  # as a wrapped PDF line
+    ("Chloride", "16887-00-6"),
+    ("Total Cyanide", "57-12-5"),
+])
+def test_cas_numbers_of_the_als_package(name, cas):
+    r = _with_cas(_record(name, "W-X", "mg/L", 1.0, "<1.0", "A", "", "Other"))
+    assert r["cas"] == cas
+
+
+def test_wrapped_pdf_name_gets_the_certificates_spelling():
+    r = _with_cas(_record("Perfluoro(2-ethoxyethane)sulfon ic acid (PFEESA)", "W-X", "ng/L", 10.0,
+                          "<10.0", "A", "", "Perfluorinated Compounds"))
+    assert r["compound"] == "Perfluoro(2-ethoxyethane)sulfonic acid (PFEESA)"
+
+
+@pytest.mark.parametrize("name", ["Sum of xylenes", "Nitrate as N", "Phosphorus (as P2O5)",
+                                  "Isoproturon-desmethyl", "Total Petroleum Hydrocarbons"])
+def test_no_cas_is_better_than_a_wrong_one(name):
+    assert _with_cas(_record(name, "W-X", "mg/L", 1.0, "<1.0", "A", "", "Other"))["cas"] == ""
+
+
+def test_lindane_under_the_labs_name():
+    assert drinking_water_limit("", "Hexachlorocyclohexane Gamma") == pytest.approx(0.001)
+
+
+def test_alpha_hch_isnt_lindane():
+    assert drinking_water_limit("319-84-6", "Hexachlorocyclohexane Alpha") is None
