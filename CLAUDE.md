@@ -69,9 +69,9 @@ The limits section is drawn after the file is read: each field is filled when al
 
 The PID uploader takes several forms, Excel or PDF, and merges them (a later form replaces the reading at the same depth). Columns are found by their header ("קידוח", "עד עומק", "PID"), with the known positions as a fallback for an Excel file with no header. PDF reading needs a ruled table with text: a scanned form is reported, not read. A `pid_reading` on a record (from a soil gas file) is preferred over the field forms.
 
-### Scanned field forms (`core/field_form_ai.py`)
+### Scanned field forms (`core/form_fields.py`)
 
-A PDF form with no readable table goes to Claude, only on the user's click, using `ANTHROPIC_API_KEY` from the app's secrets or the environment. The reading is a draft: `_form_reader` lists every field found, the user chooses what goes in the report and corrects the values against the scan, and each form sample is tied to a report sample by canister number, then by name. Chosen values reach the soil gas sheet as extra header rows (`form_values`). Other sample types can be read, but have no place in the report yet.
+Field forms are handwritten scans the app can't read. The owner decided against a paid AI reading service, so nothing leaves the app: for a PDF form with no readable table, `_form_entry` shows the scan (the custody page first), the user chooses fields from a list and types the values per sample. Chosen values reach the soil gas sheet as extra header rows (`form_values`). Other sample types have no place in the report yet, and need a real form of each type first.
 
 ### RTL / Hebrew
 
