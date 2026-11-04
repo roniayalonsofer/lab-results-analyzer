@@ -63,7 +63,7 @@ The limits section is drawn after the file is read: each field is filled when al
 
 ### Field forms (`core/field_forms.py`)
 
-The PID uploader takes several forms, Excel or PDF, and merges them (a later form replaces the reading at the same depth). Columns are found by their header ("קידוח", "עד עומק", "PID"), with the known positions as a fallback for an Excel file with no header. PDF reading needs a ruled table with text: a scanned form is reported, not read. Al-Chem's soil gas chain-of-custody form is a handwritten scan, so soil gas samples have a PID field in the app: it sets the record's `pid_reading`, which the report prefers over the field forms.
+The PID uploader takes several forms, Excel or PDF, and merges them (a later form replaces the reading at the same depth). Columns are found by their header ("קידוח", "עד עומק", "PID"), with the known positions as a fallback for an Excel file with no header. PDF reading needs a ruled table with text: a scanned form is reported, not read. A `pid_reading` on a record (from a soil gas file) is preferred over the field forms.
 
 ### Scanned field forms (`core/field_form_ai.py`)
 

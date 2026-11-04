@@ -33,6 +33,7 @@ import io
 import re
 
 from parsers.base import BaseParser
+from parsers.soil.bactochem import fix_rtl_name
 from core.lab_value_parser import LabValueParser
 
 _CAS_RE = _re = re.compile(r'^\d{1,7}-\d{2}-\d$')
@@ -71,7 +72,8 @@ class AlchemSoilGasPDFParser(BaseParser):
                             analysis_times = cells[1:]
                             continue
                         if first.startswith("Analysis Location"):
-                            sample_ids = cells[1:]
+                            # Hebrew names arrive reversed: "1-קג" is "גק-1"
+                            sample_ids = [fix_rtl_name(c) for c in cells[1:]]
                             continue
                         if first in ("Name", "Compound Name", "Analyte", "CAS"):
                             continue  # column-header row (or its wrapped continuation)

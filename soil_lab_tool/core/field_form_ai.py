@@ -78,6 +78,28 @@ class FormReadError(Exception):
     """Reading failed; the message is in Hebrew, for the user."""
 
 
+KEY_NAME = "ANTHROPIC_API_KEY"
+
+
+def find_api_key(secrets: dict) -> str | None:
+    """The key from the app's secrets, also when it was put under a [section]."""
+    for name, value in secrets.items():
+        if isinstance(value, dict):
+            found = find_api_key(value)
+            if found:
+                return found
+        elif str(name).strip().upper() == KEY_NAME and str(value).strip():
+            return str(value).strip()
+    return None
+
+
+def secrets_problem(secrets: dict) -> str:
+    """What's wrong with the secrets, for the user. Names only, never a value."""
+    if not secrets:
+        return "ה-Secrets של האפליקציה ריקים."
+    return f"שמות שנמצאו ב-Secrets: {', '.join(str(n) for n in secrets)}."
+
+
 def read_form(client, raw_pdf: bytes) -> dict:
     """Send one PDF form to Claude and return the parsed reading."""
     import anthropic

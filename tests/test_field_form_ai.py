@@ -4,6 +4,7 @@ Values follow the layout of a real soil gas custody page.
 Run:  py -3 -m pytest tests -q
 """
 import inspect
+import io
 import json
 import os
 import sys
@@ -13,9 +14,11 @@ import openpyxl
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "soil_lab_tool"))
+sys.path.insert(0, os.path.dirname(__file__))
 
 from core.field_form_ai import (  # noqa: E402
-    MODEL, FormReadError, apply_form_values, field_options, form_rows, match_sample, read_form,
+    MODEL, FormReadError, apply_form_values, field_options, find_api_key, form_rows, match_sample,
+    read_form, secrets_problem,
 )
 
 READING = {
@@ -82,6 +85,43 @@ def test_the_call_uses_parameters_the_sdk_accepts():
     params = inspect.signature(client.beta.messages.stream).parameters
     for name in ("model", "max_tokens", "betas", "fallbacks", "output_config", "system", "messages"):
         assert name in params
+
+
+@pytest.mark.parametrize("secrets", [
+    {"ANTHROPIC_API_KEY": "abc"},
+    {" anthropic_api_key ": " abc "},
+    {"general": {"ANTHROPIC_API_KEY": "abc"}},
+])
+def test_the_key_is_found_where_it_may_have_been_put(secrets):
+    assert find_api_key(secrets) == "abc"
+
+
+def test_a_missing_key_message_names_what_exists_but_no_values():
+    assert find_api_key({"OTHER": "secret-value"}) is None
+    message = secrets_problem({"OTHER": "secret-value"})
+    assert "OTHER" in message and "secret-value" not in message
+    assert secrets_problem({}) != message
+
+
+def test_soil_gas_pdf_sample_names_are_not_reversed():
+    from parsers.soil_gas.alchem_pdf import AlchemSoilGasPDFParser
+    from test_field_forms import _pdf
+    raw = _pdf(grid=[["Canister Number:", "", "8610"], ["Analysis Location:", "", "SG-1"],
+                     ["Benzene", "71-43-2", "120", "10", "50"]])
+    # The test PDF font can't hold Hebrew, so the parser's table is faked
+    import pdfplumber
+    table = [["Canister Number:", "", "8610", "", ""], ["Analysis Time:", "", "10:52", "", ""],
+             ["Analysis Location:", "", "1-קג", "", ""], ["Benzene", "71-43-2", "120", "10", "50"]]
+    with pdfplumber.open(io.BytesIO(raw)) as real:
+        page_class = type(real.pages[0])
+    original = page_class.extract_tables
+    page_class.extract_tables = lambda self, *a, **k: [table]
+    try:
+        records = AlchemSoilGasPDFParser().parse(io.BytesIO(raw))
+    finally:
+        page_class.extract_tables = original
+    assert records[0]["sample_id"] == "גק-1"
+    assert records[0]["canister_num"] == "8610"
 
 
 def test_options_list_every_field_once():

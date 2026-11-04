@@ -753,8 +753,8 @@ try:
     from core.xrf_output   import build_xrf_simple_excel
     from core.compound_choices import (NO_THRESHOLD, ResolvedThresholds,
                                        apply_compound_choices, find_ambiguous_compounds)
-    from core.field_form_ai import (FormReadError, apply_form_values, field_options,
-                                    form_rows, match_sample, read_form)
+    from core.field_form_ai import (FormReadError, apply_form_values, field_options, find_api_key,
+                                    form_rows, match_sample, read_form, secrets_problem)
     from core.field_forms import merge_field_data, parse_field_form
     from core.file_limits import compound_limits, field_values
     from parsers import category_layout, get_parser
@@ -994,12 +994,16 @@ _PREV_LABELS = {
 }
 
 
-def _anthropic_key() -> str | None:
-    """The API key from the app's secrets or the environment."""
+def _anthropic_key() -> tuple[str | None, str]:
+    """The API key from the app's secrets or the environment, and what to tell the
+    user if it's missing. The message names what was found, never a value."""
     try:
-        return st.secrets["ANTHROPIC_API_KEY"]
+        secrets = st.secrets.to_dict()
     except Exception:
-        return os.environ.get("ANTHROPIC_API_KEY")
+        secrets, problem = {}, "לא נמצאו Secrets, או שהטקסט שבהם לא תקין."
+    else:
+        problem = secrets_problem(secrets)
+    return find_api_key(secrets) or os.environ.get("ANTHROPIC_API_KEY"), problem
 
 
 def _form_reader(forms: list, records: list[dict]) -> None:
@@ -1014,9 +1018,9 @@ def _form_reader(forms: list, records: list[dict]) -> None:
         st.info("קריאת טפסים סרוקים זמינה כרגע רק לגז קרקע: "
                 + ", ".join(f.name for f in forms))
         return
-    api_key = _anthropic_key()
+    api_key, key_problem = _anthropic_key()
     if not api_key:
-        st.warning("⚠️ לא ניתן לקרוא טופס סרוק: לא הוגדר מפתח ANTHROPIC_API_KEY.")
+        st.warning(f"⚠️ לא ניתן לקרוא טופס סרוק: לא נמצא מפתח ANTHROPIC_API_KEY. {key_problem}")
         return
 
     readings = st.session_state.setdefault("form_readings", {})
@@ -1736,37 +1740,21 @@ if page == "soil":
     if has_soil_gas:
         any_shown = True
         st.markdown("##### 💨 גז קרקע VOC")
-        _gas_samples = list(dict.fromkeys(r["sample_id"] for r in records
-                                          if r.get("analysis_type") == "SOIL_GAS_VOC"))
-        _pid_cols = st.columns(min(len(_gas_samples), 4))
-        for _i, _sid in enumerate(_gas_samples):
-            with _pid_cols[_i % len(_pid_cols)]:
-                _pid_text = st.text_input(f"PID [ppm] — {_sid}", placeholder="לדוג׳: 393",
-                                          key=f"sg_pid_{hash(_ov_signature)}_{_sid}").strip()
-            if _pid_text:
-                try:
-                    _pid_value = float(_pid_text.replace(",", "."))
-                except ValueError:
-                    st.warning(f"⚠️ ערך ה-PID של {_sid} אינו מספר: {_pid_text}")
-                    continue
-                for r in records:
-                    if r.get("analysis_type") == "SOIL_GAS_VOC" and r["sample_id"] == _sid:
-                        r["pid_reading"] = _pid_value
-        st.markdown('<div style="font-size:0.8rem;color:#6b7280;">ניתן לבחור Soil Vapor, Ambient Air, או את שניהם יחד — כל הערכים מקורם ב-TIER 1</div>', unsafe_allow_html=True)
+        st.markdown('<div style="font-size:0.8rem;color:#6b7280;">לדגימת גז קרקע משווים ל-Soil Vapor. Ambient Air הוא ערך למדידה באוויר עצמו. כל הערכים מקורם ב-TIER 1</div>', unsafe_allow_html=True)
         sg_col_r, sg_col_i = st.columns(2)
         with sg_col_r:
             st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 מגורים</div>', unsafe_allow_html=True)
             st.markdown('<div style="font-size:0.75rem;color:#6b7280;">Soil Vapor — הגנה על אוויר פנים/חוץ מבני</div>', unsafe_allow_html=True)
             sg_res_in  = st.checkbox("Indoor — פנים",  value=True,  key="sg_res_in")
             sg_res_out = st.checkbox("Outdoor — חוץ",  value=False, key="sg_res_out")
-            st.markdown('<div style="font-size:0.75rem;color:#6b7280;">Ambient Air — אוויר תוך מבני</div>', unsafe_allow_html=True)
+            st.markdown('<div style="font-size:0.75rem;color:#6b7280;">Ambient Air — מדידה באוויר עצמו</div>', unsafe_allow_html=True)
             sg_res_ambient = st.checkbox("Ambient Air", value=False, key="sg_res_ambient")
         with sg_col_i:
             st.markdown('<div style="font-size:0.8rem;font-weight:600;color:#374151;">Tier 1 תעשייה</div>', unsafe_allow_html=True)
             st.markdown('<div style="font-size:0.75rem;color:#6b7280;">Soil Vapor — הגנה על אוויר פנים/חוץ מבני</div>', unsafe_allow_html=True)
             sg_ind_in  = st.checkbox("Indoor — פנים",  value=False, key="sg_ind_in")
             sg_ind_out = st.checkbox("Outdoor — חוץ",  value=False, key="sg_ind_out")
-            st.markdown('<div style="font-size:0.75rem;color:#6b7280;">Ambient Air — אוויר תוך מבני</div>', unsafe_allow_html=True)
+            st.markdown('<div style="font-size:0.75rem;color:#6b7280;">Ambient Air — מדידה באוויר עצמו</div>', unsafe_allow_html=True)
             sg_ind_ambient = st.checkbox("Ambient Air", value=False, key="sg_ind_ambient")
         if sg_res_in:      selected_thresholds.append("GAS_INDOOR_RES")
         if sg_res_out:     selected_thresholds.append("GAS_OUTDOOR_RES")
