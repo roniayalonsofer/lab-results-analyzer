@@ -320,3 +320,105 @@ def test_fmt_like_never_drops_measured_digits():
     assert upd._fmt_like("1,382.00", 1295.0) == "1,295.00"
     assert upd._fmt_conc(0.00421) == "0.00421" and upd._fmt_conc(7.11) == "7.11"
     assert upd._fmt_conc(0.0002) == "0.0002" and upd._fmt_conc(2700) == "2700"
+    assert upd._fmt_conc(1.443) == "1.443" and upd._fmt_conc(95.0) == "95"
+
+
+def test_xylene_total_from_its_parts_when_the_certificate_has_no_sum():
+    wb = openpyxl.load_workbook(io.BytesIO(_als_xlsx()))
+    ws = wb.active
+    ws.append(["BTEX"])
+    ws.append(["meta- & para-Xylene", "W-VOCGMS01", "µg/L", "0.20", "1240", "<0.20"])
+    ws.append(["ortho-Xylene", "W-VOCGMS01", "µg/L", "0.10", "203", "<0.10"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    rnd = gri.parse_als_round(buf.getvalue())
+    assert rnd["samples"]["HK-2"]["results"]["קסילן"] == pytest.approx(1.443)
+    assert rnd["samples"]["HK-7"]["results"]["קסילן"] is None
+    assert rnd["samples"]["HK-7"]["limits"]["קסילן"] == pytest.approx(0.0003)
+
+
+# ── sorting the round's files ───────────────────────────────────────────────
+
+def _als_xlsx(samples=("HK-2", "HK-7"), date="01/10/2026") -> bytes:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Client WATER 1"
+    ws["A2"] = "CLIENT"
+    ws["A4"], ws["B4"] = "Work Order:", "PR00C0000"
+    ws["D8"] = "Client Sample ID"
+    ws["D9"] = "Laboratory Sample ID"
+    ws["D10"] = "Client Sampling Date"
+    for i, s in enumerate(samples):
+        ws.cell(row=8, column=5 + i, value=s)
+        ws.cell(row=9, column=5 + i, value=f"PR00C000000{i + 1}")
+        ws.cell(row=10, column=5 + i, value=date)
+    ws["A11"] = "RESULTS OF ANALYSIS"
+    for ci, h in enumerate(["Parameter", "Method", "Unit", "LOR"], 1):
+        ws.cell(row=13, column=ci, value=h)
+    rows = [("BTEX",),
+            ("Benzene", "W-VOCGMS01", "µg/L", "0.20") + ("<0.20", "4.21")[:len(samples)],
+            ("Non-Halogenated Volatile Organic Compounds",),
+            ("Methyl tert-Butyl Ether (MTBE)", "W-VOCGMS01", "µg/L", "0.20") + ("115", "<0.20")[:len(samples)]]
+    for ri, row in enumerate(rows, 15):
+        for ci, v in enumerate(row, 1):
+            ws.cell(row=ri, column=ci, value=v)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _empty_xlsx() -> bytes:
+    buf = io.BytesIO()
+    openpyxl.Workbook().save(buf)
+    return buf.getvalue()
+
+
+def test_round_files_are_sorted_without_choosing_a_lab():
+    from soil_lab_tool.core.gw_round_files import sort_round_files
+    res = sort_round_files([
+        ("נספח.XLSX", _als_xlsx()),
+        ("טופס ביצוע עבודה.xlsx", _field_form()),
+        ("mann kendall.xls", _mk_xls()),
+        ("משהו אחר.xlsx", _empty_xlsx()),
+    ])
+    assert len(res["rounds"]) == 1
+    r = res["rounds"][0]
+    assert (r.lab, r.date_str, r.wells) == ("als", "01.10.26", ["HK-2", "HK-7"])
+    assert r.samples["HK-2"]["results"]["MTBE"] == pytest.approx(0.115)
+    assert r.samples["HK-2"]["results"]["בנזן"] is None
+    assert r.field_form[0] == "טופס ביצוע עבודה.xlsx"
+    assert res["mk"][0] == "mann kendall.xls"
+    assert [n for n, _ in res["ignored"]] == ["משהו אחר.xlsx"]
+
+
+def test_lone_sample_named_after_the_site_takes_the_form_well():
+    from soil_lab_tool.core.gw_round_files import sort_round_files
+    form = openpyxl.load_workbook(io.BytesIO(_field_form()))
+    ws = form.active
+    # keep only the first well (header, round row, חק 2 block)
+    ws.delete_rows(7, ws.max_row)
+    buf = io.BytesIO()
+    form.save(buf)
+    res = sort_round_files([("a.xlsx", _als_xlsx(samples=("Hof Station",))),
+                            ("form.xlsx", buf.getvalue())])
+    r = res["rounds"][0]
+    assert r.wells == ["חק-2"]
+    assert res["notes"]
+
+
+def test_word_update_from_a_sorted_round_with_mk_over_two_rounds():
+    from soil_lab_tool.core.gw_round_files import sort_round_files
+    res = sort_round_files([("n.XLSX", _als_xlsx()), ("f.xlsx", _field_form())])
+    r = res["rounds"][0]
+    rep = {}
+    out, _ = upd.run_update_bytes(_report(), None, None, lab_type=r.lab,
+                                  field_form_bytes=r.field_form[1], report=rep,
+                                  parsed_round={"sampling_date": r.date_str, "samples": r.samples})
+    assert rep["has_targets"] and rep["exceedances"] == []
+    earlier = (datetime(2026, 8, 1), {"HK-7": {"results": {"בנזן": 0.5}}})
+    out, paste = upd.apply_mann_kendall(out, _mk_xls(), [earlier, (r.date, r.samples)], report=rep)
+    assert rep["mk_charts"] == ["בנזן"]
+    rows = openpyxl.load_workbook(io.BytesIO(paste)).active
+    values = [[c for c in row if c is not None] for row in rows.iter_rows(values_only=True)]
+    assert [6, "01/08/2026", "", 0.5] in values or [6, "01/08/2026", 0.5] in values
+    assert any(v[:2] == [7, "01/10/2026"] for v in values if len(v) >= 2)

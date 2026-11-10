@@ -145,6 +145,17 @@ everything else in those tables (older rows) is left untouched.
   the app hands back the rows to paste into the .xls. Values below 0.01 or
   non-detects are entered as 0.01 (the site's convention). The sheet for a
   compound is the one whose events reach the latest date.
+- **No lab choice in the app:** the periodic tab takes all of a round's
+  files at once; `core/gw_round_files.sort_round_files` identifies each file
+  by READING it (lab parser must return samples — `auto_detect_lab` misses
+  some ALS appendices), groups them into rounds by date, prefers an ALS
+  xlsx over its PDF copy, attaches the field form by date, and picks up a
+  MK workbook. The app then runs `run_update_bytes(..., parsed_round=...)`
+  per round, oldest first, and `apply_mann_kendall` once with all rounds.
+- ALS without a "Sum of xylenes" row: xylene = m+p + o.
+- The annual report engine (`core/annual_gw_report.py`) only knows "מת-"
+  wells and the last round per well; it takes a MK file through
+  `apply_mann_kendall`, but needs a real annual sample before more work.
 - Per-well result tables on the site map ("חק-4 / date / תרכובת | ריכוז יעד |
   ריכוז") are updated by `_update_well_cards`, bold over the card's own target.
 

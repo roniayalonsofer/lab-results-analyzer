@@ -199,6 +199,11 @@ _ALS_TO_PARAM = {
     "sum of xylenes": "קסילן",
     "methyl tert-butyl ether (mtbe)": "MTBE",
     "mtbe": "MTBE",
+    # parts of the xylene total, used when the certificate has no sum row
+    "meta- & para-xylene": "_mp_xylene",
+    "m+p-xylene": "_mp_xylene",
+    "ortho-xylene": "_o_xylene",
+    "o-xylene": "_o_xylene",
 }
 
 _TO_MG_L = {"mg/l": 1.0, "µg/l": 0.001, "μg/l": 0.001, "ug/l": 0.001, "g/l": 0.001}
@@ -242,6 +247,19 @@ def parse_als_round(file_bytes: bytes, filename: str = "") -> dict:
                 s["limits"][param] = round(float(lim) * factor, 10)
         elif val is not None:
             s["results"][param] = round(float(val) * factor, 10)
+    for s in samples.values():
+        res, lim = s["results"], s["limits"]
+        parts = ("_mp_xylene", "_o_xylene")
+        if "קסילן" not in res and all(p in res for p in parts):
+            found = [res[p] for p in parts if res[p] is not None]
+            if found:
+                res["קסילן"] = round(sum(found), 10)  # a non-detect part counts as 0
+            else:
+                res["קסילן"] = None
+                lim["קסילן"] = round(sum(lim.get(p, 0) for p in parts), 10)
+        for p in parts:
+            res.pop(p, None)
+            lim.pop(p, None)
     if not samples:
         raise ValueError("לא נמצאו תוצאות BTEX/MTBE בקובץ של ALS.")
     sampling_date = sorted(dates)[-1] if dates else None

@@ -240,9 +240,11 @@ def add_round(sheet: MKSheet, when: datetime, values: dict) -> bool:
             return True
     if sheet.next_free_row is None:
         return False
+    row = sheet.next_free_row
     sheet.events.append((when, values))
-    sheet.event_rows.append(sheet.next_free_row)
-    sheet.next_free_row = None
+    sheet.event_rows.append(row)
+    nxt = row + 1
+    sheet.next_free_row = nxt if nxt < sheet.first_event_row + sheet.event_slots else None
     return True
 
 
@@ -329,47 +331,51 @@ def format_cf(cf: float | None) -> str:
 
 # ── rows to paste into the .xls ─────────────────────────────────────────────
 
-def paste_rows_xlsx(sheets: list, when: datetime) -> bytes:
+def paste_rows_xlsx(added: list, when: datetime = None) -> bytes:
     """
-    A small workbook listing, per toolkit sheet, the row to type into the
-    owner's .xls for this round (event number, Excel date, one value per
-    well in the sheet's own column order).
+    A small workbook listing the rows to type into the owner's .xls: for
+    each (sheet, round date) the sheet's row number, event number, date and
+    one value per well in the sheet's own column order. `added` may also be
+    a list of sheets, with `when` the round date (one round).
     """
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
 
+    if added and isinstance(added[0], MKSheet):
+        added = [(sh, when) for sh in added]
     wb = Workbook()
     ws = wb.active
     ws.title = "שורות להדבקה"
     ws.sheet_view.rightToLeft = True
     bold = Font(bold=True)
     fill = PatternFill("solid", fgColor="FFF2CC")
-    ws.append([f"שורות חדשות לקובץ Mann-Kendall — סבב {when:%d.%m.%Y}"])
+    dates = sorted({d for _, d in added})
+    ws.append(["שורות חדשות לקובץ Mann-Kendall — דיגום " + ", ".join(f"{d:%d.%m.%Y}" for d in dates)])
     ws["A1"].font = Font(bold=True, size=12)
-    ws.append(["בכל גיליון: להדביק את הערכים בשורה שמספרה מופיע כאן (עמודה B עד הבאר האחרונה), ולשמור. "
+    ws.append(["בכל גיליון: להקליד את הערכים בשורה שמספרה מופיע כאן, ולשמור. "
                "הנוסחאות והגרפים בקובץ יתעדכנו לבד."])
     ws.append([])
-    for sh in sheets:
-        idx = next((i for i, (d, _) in enumerate(sh.events) if d.date() == when.date()), None)
+    for sh, d in added:
+        idx = next((i for i, (ed, _) in enumerate(sh.events) if ed.date() == d.date()), None)
         if idx is None:
             continue
-        d, vals = sh.events[idx]
+        ev_date, vals = sh.events[idx]
         row0 = sh.event_rows[idx]
-        excel_row = row0 + 1  # 1-based row as Excel shows it
         event_no = row0 - sh.first_event_row + 1
-        ws.append([f"גיליון: {sh.name}", f"שורה {excel_row}"])
+        ws.append([f"גיליון: {sh.name}", f"שורה {row0 + 1}"])
         ws.cell(ws.max_row, 1).font = bold
         ws.append(["Sampling Event", "Sampling Date"] + sh.wells)
         for c in range(1, len(sh.wells) + 3):
             ws.cell(ws.max_row, c).font = bold
-        row = [event_no, d.strftime("%d/%m/%Y")] + [vals.get(w) if vals.get(w) is not None else "" for w in sh.wells]
+        row = [event_no, ev_date.strftime("%d/%m/%Y")] + [
+            vals.get(w) if vals.get(w) is not None else "" for w in sh.wells]
         ws.append(row)
         for c in range(1, len(row) + 1):
             ws.cell(ws.max_row, c).fill = fill
             ws.cell(ws.max_row, c).alignment = Alignment(horizontal="center")
         ws.append([])
     ws.column_dimensions["A"].width = 26
-    for col in "BCDEFGH":
+    for col in "BCDEFGHIJ":
         ws.column_dimensions[col].width = 14
     buf = io.BytesIO()
     wb.save(buf)

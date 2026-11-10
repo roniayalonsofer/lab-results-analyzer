@@ -2091,135 +2091,115 @@ elif page == "groundwater":
 
     # ── TAB 1: Periodic update (existing functionality) ──────────────────────
     with gw_tab1:
-        gw_lab_type = st.radio(
-            "🧪 מעבדה",
-            ["בקטוכם", "אמינולאב", "ALS"],
-            horizontal=True,
-            key="gw_lab_type",
-        )
-        lab_type_code = {"בקטוכם": "bactochem", "אמינולאב": "aminolab", "ALS": "als"}[gw_lab_type]
+        from soil_lab_tool.core.gw_round_files import LAB_NAMES, sort_round_files
+        from soil_lab_tool.gw_report_updater import apply_mann_kendall
 
-        col1, col2 = st.columns(2)
-        with col1:
-            word_file = st.file_uploader("📄 דוח Word קודם (.docx)", type=["docx"], key="gw_word")
-            st.caption("⚠️ לפני העלאה: פתח את הדוח ב-Word ← Review ← Accept All Changes ← שמור. ללא זאת העדכון עלול להיכשל.")
-            if lab_type_code == "bactochem":
-                lab_files = st.file_uploader(
-                    "🧪 תוצאות מעבדה — בקטוכם (.pdf, ניתן להעלות כמה דיגומים בבת אחת)",
-                    type=["pdf"], accept_multiple_files=True, key="gw_lab_bactochem_multi",
-                )
-                st.caption("💡 אפשר להעלות כמה קבצי PDF של דיגומים שונים יחד — הם ימוינו לפי תאריך הדיגום ויוחלו בזה אחר זה על אותו דוח.")
-            elif lab_type_code == "aminolab":
-                lab_files = st.file_uploader(
-                    "🧪 תעודות מעבדה — אמינולאב (.pdf, קובץ אחד לכל באר)",
-                    type=["pdf"], accept_multiple_files=True, key="gw_lab_multi",
+        st.markdown("#### 1 · הדוח הקודם")
+        word_file = st.file_uploader("דוח Word מהסבב הקודם (.docx)", type=["docx"], key="gw_word")
+        st.caption("⚠️ לפני העלאה: לפתוח את הדוח ב-Word ← Review ← Accept All Changes ← לשמור.")
+
+        st.markdown("#### 2 · קבצי הדיגום")
+        round_files = st.file_uploader(
+            "כל הקבצים של הדיגום (PDF / Excel)",
+            type=["pdf", "xlsx", "xls"], accept_multiple_files=True, key="gw_round_files",
+        )
+        st.caption("💡 אפשר לגרור את כל תיקיית תוצאות המעבדה: תעודות של ALS, בקטוכם או אמינולאב, "
+                   "טופס ביצוע העבודה של ידע מים, וגם קובץ Mann-Kendall. כל קובץ מזוהה לבד. "
+                   "כמה דיגומים יחד יוחלו לפי הסדר מהישן לחדש.")
+
+        st.markdown("#### 3 · Mann-Kendall (רשות)")
+        mk_file = st.file_uploader(
+            "קובץ Mann-Kendall (.xls)", type=["xls"], key="gw_mk",
+            help="הקובץ רק נקרא ולא משתנה. הגרפים בדוח מוחלפים בעמודי MK מעודכנים, "
+                 "ותקבלו קובץ קטן עם השורות להדבקה בקובץ ה-MK.",
+        )
+        with st.expander("✍️ פרטי עמוד השער (רשות)"):
+            gw_author_name = st.text_input("מחבר הדוח", key="gw_author_name")
+            gw_submission_date = st.text_input("תאריך הגשה", key="gw_submission_date",
+                                               placeholder="לדוגמה: 08/07/2026")
+
+        _files = list(round_files or [])
+        _gw_sig = tuple((f.name, f.size) for f in [word_file, mk_file, *_files] if f)
+
+        sorted_files = None
+        if _files:
+            _sort_sig = tuple((f.name, f.size) for f in _files)
+            cached = st.session_state.get("gw_sorted")
+            if cached and cached[0] == _sort_sig:
+                sorted_files = cached[1]
+            else:
+                with st.spinner("מזהה את הקבצים..."):
+                    sorted_files = sort_round_files([(f.name, f.getvalue()) for f in _files])
+                st.session_state["gw_sorted"] = (_sort_sig, sorted_files)
+
+        mk_input = mk_file.getvalue() if mk_file else None
+        mk_name = mk_file.name if mk_file else None
+        if sorted_files and not mk_input and sorted_files["mk"]:
+            mk_name, mk_input = sorted_files["mk"]
+
+        if sorted_files:
+            rows = []
+            for r in sorted_files["rounds"]:
+                rows.append(
+                    f"<tr><td dir='ltr'>{r.date_str}</td><td>{LAB_NAMES.get(r.lab, r.lab)}</td>"
+                    f"<td dir='ltr'>{', '.join(r.wells)}</td>"
+                    f"<td>{'✅' if r.field_form else '—'}</td></tr>")
+            if rows:
+                st.markdown(
+                    "<div class='card'><div class='card-header'>🔎 מה זוהה</div>"
+                    "<table style='width:100%;direction:rtl;text-align:right'>"
+                    "<tr><th>תאריך דיגום</th><th>מעבדה</th><th>דגימות</th><th>טופס שדה</th></tr>"
+                    + "".join(rows) + "</table>"
+                    + (f"<div style='margin-top:.5rem'>📈 Mann-Kendall: {mk_name}</div>" if mk_input else "")
+                    + "</div>",
+                    unsafe_allow_html=True,
                 )
             else:
-                _als_file = st.file_uploader(
-                    "🧪 תעודת ALS (דוח ביצוע .pdf או נספח .xlsx)",
-                    type=["pdf", "xlsx", "xls"], key="gw_lab_als",
-                )
-                lab_files = [_als_file] if _als_file else []
-        with col2:
-            field_file = st.file_uploader(
-                "📋 טופס ביצוע עבודה של ידע מים (.xlsx, אופציונלי)", type=["xlsx"], key="gw_field_form",
-                help="ממנו נלקחים ממצאי השדה (הקריאה האחרונה בכל באר), המפלסים, שם הדוגם, כמות המים והספיקה.",
-            )
-            mk_file = st.file_uploader(
-                "📈 קובץ Mann-Kendall (.xls, אופציונלי)", type=["xls"], key="gw_mk",
-                help="הקובץ רק נקרא ולא משתנה. הגרפים בדוח מוחלפים בעמודי MK מעודכנים, "
-                     "ותקבלו קובץ קטן עם השורות להדבקה בקובץ ה-MK.",
-            )
-            gw_author_name = st.text_input(
-                "✍️ מחבר הדוח (אופציונלי)", key="gw_author_name",
-                help="אם תמלאו — יוזן אוטומטית בעמוד השער של הדוח.",
-            )
-            gw_submission_date = st.text_input(
-                "📆 תאריך הגשה (אופציונלי)", key="gw_submission_date",
-                placeholder="לדוגמה: 08/07/2026",
-                help="אם תמלאו — יוזן אוטומטית בעמוד השער של הדוח.",
-            )
+                st.error("לא נמצאה תעודת מעבדה בין הקבצים שהועלו.")
+            for n in sorted_files["notes"]:
+                st.info("ℹ️ " + n)
+            if sorted_files["ignored"]:
+                with st.expander(f"קבצים שלא נקראו ({len(sorted_files['ignored'])})"):
+                    for name, why in sorted_files["ignored"]:
+                        st.markdown(f"- **{name}** — {why}")
 
-        _gw_sig = (lab_type_code,) + tuple(
-            (f.name, f.size) for f in [word_file, field_file, mk_file, *lab_files] if f)
-        if word_file and lab_files:
+        rounds = sorted_files["rounds"] if sorted_files else []
+        if word_file and rounds:
             if st.button("⚡ עדכן דוח", type="primary", use_container_width=True, key="gw_update_btn"):
-                with st.spinner("מעבד... ⏳"):
-                    result = {"word": None, "paste": None, "done": [], "notes": [], "error": None}
-                    field_bytes = field_file.getvalue() if field_file else None
-                    mk_bytes = mk_file.getvalue() if mk_file else None
-                    try:
-                        if lab_type_code == "bactochem":
-                            import tempfile as _tempfile
-                            from pathlib import Path as _Path
-                            from datetime import datetime as _datetime
-
-                            # Read each round's PDF once and parse its sampling
-                            # date so the rounds can be applied in chronological
-                            # order (oldest → newest), each one updating the
-                            # Word doc produced by the previous round.
-                            rounds = []
-                            for f in lab_files:
-                                pdf_bytes = f.getvalue()
-                                with _tempfile.TemporaryDirectory() as _tmp:
-                                    _p = _Path(_tmp) / "lab.pdf"
-                                    _p.write_bytes(pdf_bytes)
-                                    _date = parse_bactochem_pdf(str(_p)).get("sampling_date")
-                                rounds.append({"name": f.name, "bytes": pdf_bytes, "date": _date})
-
-                            def _sort_key(r):
-                                try:
-                                    return _datetime.strptime(r["date"], "%d.%m.%y")
-                                except Exception:
-                                    return _datetime.max
-                            rounds.sort(key=_sort_key)
-                            if len(rounds) > 1 and (field_bytes or mk_bytes):
-                                result["notes"].append(
-                                    "טופס השדה וקובץ ה-MK הוחלו רק על הדיגום האחרון "
-                                    f"({rounds[-1]['date'] or rounds[-1]['name']}).")
-
-                            current_word = word_file.getvalue()
-                            for i, r in enumerate(rounds):
-                                last = i == len(rounds) - 1
-                                rep = {}
-                                try:
-                                    current_word, paste = run_update_bytes(
-                                        current_word, r["bytes"], mk_bytes if last else None,
-                                        lab_type="bactochem",
-                                        author_name=gw_author_name,
-                                        submission_date=gw_submission_date,
-                                        field_form_bytes=field_bytes if last else None,
-                                        report=rep,
-                                    )
-                                except Exception as round_err:
-                                    msg = f"העיבוד נעצר בקובץ '{r['name']}' (תאריך דיגום: {r['date'] or 'לא זוהה'}): {round_err}"
-                                    if result["done"]:
-                                        msg += ("\n\nהדיגומים שלפניו כן עודכנו — אפשר להוריד את הדוח החלקי, "
-                                                "לתקן את הקובץ הבעייתי, ולהעלות אותו שוב בנפרד יחד עם הדוח שהורדת.")
-                                    result["error"] = msg
-                                    break
-                                result["word"] = current_word
-                                result["paste"] = paste or result["paste"]
-                                result["done"].append(r["date"] or r["name"])
-                                result["notes"].extend(rep.get("notes", []))
-                                result["mk_charts"] = rep.get("mk_charts")
-                        else:
-                            rep = {}
-                            lab_input = ([f.getvalue() for f in lab_files] if lab_type_code == "aminolab"
-                                         else lab_files[0].getvalue())
-                            result["word"], result["paste"] = run_update_bytes(
-                                word_file.getvalue(), lab_input, mk_bytes,
-                                lab_type=lab_type_code,
-                                author_name=gw_author_name,
-                                submission_date=gw_submission_date,
-                                field_form_bytes=field_bytes,
+                with st.spinner("מעדכן את הדוח... ⏳"):
+                    result = {"word": None, "paste": None, "rounds": [], "notes": [], "error": None}
+                    current = word_file.getvalue()
+                    for r in rounds:
+                        rep = {}
+                        try:
+                            current, _ = run_update_bytes(
+                                current, None, None, lab_type=r.lab,
+                                author_name=gw_author_name, submission_date=gw_submission_date,
+                                field_form_bytes=r.field_form[1] if r.field_form else None,
+                                parsed_round={"sampling_date": r.date_str, "samples": r.samples},
                                 report=rep,
                             )
-                            result["done"].append(rep.get("sampling_date", ""))
-                            result["notes"].extend(rep.get("notes", []))
+                        except Exception as round_err:
+                            msg = f"העדכון נעצר בדיגום {r.date_str}: {round_err}"
+                            if result["rounds"]:
+                                msg += ("\n\nהדיגומים שלפניו כן עודכנו — אפשר להוריד את הדוח החלקי, "
+                                        "לתקן, ולהעלות שוב רק את הדיגום הזה עם הדוח שהורדת.")
+                            result["error"] = msg
+                            break
+                        result["word"] = current
+                        result["rounds"].append({"date": r.date_str, "exceed": rep.get("exceedances", []),
+                                                 "has_targets": rep.get("has_targets", False)})
+                        result["notes"].extend(rep.get("notes", []))
+                    if result["word"] and mk_input:
+                        try:
+                            done = [r for r in rounds if any(x["date"] == r.date_str for x in result["rounds"])]
+                            rep = {}
+                            result["word"], result["paste"] = apply_mann_kendall(
+                                result["word"], mk_input, [(r.date, r.samples) for r in done], report=rep)
                             result["mk_charts"] = rep.get("mk_charts")
-                    except Exception as e:
-                        result["error"] = f"שגיאה בעיבוד: {e}"
+                            result["notes"].extend(rep.get("notes", []))
+                        except Exception as mk_err:
+                            result["notes"].append(f"קובץ ה-Mann-Kendall לא נקרא: {mk_err}")
                     result["sig"] = _gw_sig
                     st.session_state["gw_periodic_result"] = result
 
@@ -2228,12 +2208,18 @@ elif page == "groundwater":
             result = st.session_state.get("gw_periodic_result")
             if result and result.get("sig") == _gw_sig:
                 if result.get("word"):
-                    st.success("✅ הדוח עודכן: דיגום " + ", ".join(d for d in result["done"] if d))
+                    lines = []
+                    for x in result["rounds"]:
+                        if x["exceed"]:
+                            ex = "; ".join(f"{w} {p} {v:g} (יעד {t:g})" for w, p, v, t in x["exceed"])
+                            lines.append(f"דיגום {x['date']}: חריגות מערכי היעד — {ex}")
+                        elif x["has_targets"]:
+                            lines.append(f"דיגום {x['date']}: אין חריגות מערכי היעד")
+                        else:
+                            lines.append(f"דיגום {x['date']}: עודכן")
+                    st.success("✅ הדוח עודכן. השינויים מסומנים בצהוב.\n\n" + "\n\n".join(lines))
                     if result.get("mk_charts"):
-                        _names = {"בנזן": "בנזן", "MTBE": "MTBE", "טולואן": "טולואן",
-                                  "אתיל בנזן": "אתיל בנזן", "קסילן": "קסילן"}
-                        st.info("📈 עמודי Mann-Kendall הוחלפו בדוח: "
-                                + ", ".join(_names.get(c, c) for c in result["mk_charts"]))
+                        st.info("📈 עמודי Mann-Kendall הוחלפו בדוח: " + ", ".join(result["mk_charts"]))
                     st.download_button(
                         "⬇️ הורד דוח Word מעודכן",
                         data=result["word"],
@@ -2251,24 +2237,14 @@ elif page == "groundwater":
                             use_container_width=True,
                             key="gw_dl_mk_rows",
                         )
-                        st.caption("קובץ ה-MK שלך לא שונה. בקובץ שהורדת מופיע לכל גיליון מספר השורה "
-                                   "והערכים להדבקה; הנוסחאות והגרפים בקובץ יתעדכנו לבד.")
+                        st.caption("קובץ ה-MK שלך לא שונה. בקובץ שהורדת מופיעים לכל גיליון מספר השורה "
+                                   "והערכים להקלדה; הנוסחאות והגרפים בקובץ יתעדכנו לבד.")
                 for n in result.get("notes", []):
                     st.warning("⚠️ " + n)
                 if result.get("error"):
                     st.error(result["error"])
-        else:
+        elif not word_file and not _files:
             st.session_state.pop("gw_periodic_result", None)
-            st.markdown(
-                '<div class="card"><div class="card-header">📋 שלבי השימוש</div>'
-                '<div class="steps">'
-                '<div class="step"><div class="step-num">1</div><div class="step-title">דוח Word קודם</div><div class="step-desc">הדוח מהסבב הקודם (.docx)</div></div>'
-                '<div class="step"><div class="step-num">2</div><div class="step-title">תוצאות מעבדה</div><div class="step-desc">בקטוכם, אמינולאב או ALS מהדיגום החדש</div></div>'
-                '<div class="step"><div class="step-num">3</div><div class="step-title">טופס שדה ו-MK</div><div class="step-desc">אופציונלי: טופס ביצוע עבודה של ידע מים וקובץ Mann-Kendall</div></div>'
-                '<div class="step"><div class="step-num">4</div><div class="step-title">הורד</div><div class="step-desc">דוח Word מעודכן עם כל השינויים מסומנים בצהוב</div></div>'
-                '</div></div>',
-                unsafe_allow_html=True,
-            )
 
     # ── TAB 2: Annual report ─────────────────────────────────────────────────
     with gw_tab2:
@@ -2308,11 +2284,15 @@ elif page == "groundwater":
                 help="הדוח התקופתי האחרון שיצא (למשל אוגוסט 2025). מכיל את ההיסטוריה המצטברת.",
             )
             ann_lab_files = st.file_uploader(
-                "🧪 תעודות מעבדה של השנה (.pdf/.xlsx)",
-                type=["pdf", "xlsx"],
+                "🧪 תעודות מעבדה של השנה (.pdf / .xlsx / .xls)",
+                type=["pdf", "xlsx", "xls"],
                 accept_multiple_files=True,
                 key="ann_lab_files",
                 help="כל תעודות המעבדה של הדיגומים שבוצעו השנה ולא כלולים בדוח התקופתי שהועלה. תומך בבקטוכם ואמינולאב.",
+            )
+            ann_mk = st.file_uploader(
+                "📈 קובץ Mann-Kendall (.xls, אופציונלי)", type=["xls"], key="ann_mk",
+                help="הקובץ רק נקרא ולא משתנה. עמודי ה-MK בדוח יוחלפו בעמודים שכוללים את כל הדיגומים של השנה.",
             )
 
         # Show detected labs for uploaded files
@@ -2370,6 +2350,22 @@ elif page == "groundwater":
                             template_bytes= word_bytes,
                         )
 
+                        ann_paste, ann_charts = None, None
+                        if ann_mk and lab_files_data:
+                            from soil_lab_tool.core.gw_round_files import sort_round_files
+                            from soil_lab_tool.gw_report_updater import apply_mann_kendall
+                            _cut = gw_data._parse_date(ann_cutoff) if ann_cutoff else None
+                            _rounds = [r for r in sort_round_files(lab_files_data)["rounds"]
+                                       if not _cut or r.date > _cut]
+                            if _rounds:
+                                _rep = {}
+                                out_bytes, ann_paste = apply_mann_kendall(
+                                    out_bytes, ann_mk.getvalue(),
+                                    [(r.date, r.samples) for r in _rounds], report=_rep)
+                                ann_charts = _rep.get("mk_charts")
+                                for _n in _rep.get("notes", []):
+                                    st.warning("⚠️ " + _n)
+
                         n_events = len(gw_data.events)
                         n_bh     = len(gw_data.boreholes)
                         st.success(
@@ -2384,6 +2380,17 @@ elif page == "groundwater":
                             use_container_width=True,
                             key="ann_dl_btn",
                         )
+                        if ann_charts:
+                            st.info("📈 עמודי Mann-Kendall הוחלפו בדוח: " + ", ".join(ann_charts))
+                        if ann_paste:
+                            st.download_button(
+                                "⬇️ הורד שורות להדבקה בקובץ Mann-Kendall",
+                                data=ann_paste,
+                                file_name=f"שורות_להדבקה_Mann_Kendall_{ann_year}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True,
+                                key="ann_dl_mk_rows",
+                            )
 
                     except Exception as _e:
                         import traceback

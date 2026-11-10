@@ -1466,7 +1466,8 @@ def _fmt_conc(val) -> str:
         # three significant figures, as the lab prints them
         digits = -int(f"{abs(val):e}".split("e")[1]) + 2
         return f"{val:.{max(digits, 0)}f}".rstrip("0").rstrip(".")
-    return f"{val:.3g}" if abs(val) < 100 else f"{val:.0f}"
+    # 1 to 1000: the digits as reported (7.11, 1.443), never more than four decimals
+    return f"{round(val, 4):.4f}".rstrip("0").rstrip(".")
 
 
 def _fmt_like(old_text: str, val) -> str:
@@ -1875,11 +1876,11 @@ def _put_picture(doc: Document, inline, png_bytes: bytes):
             e.set('cy', str(cy))
 
 
-def _update_mann_kendall(doc: Document, mk_xls_bytes: bytes, new_dt: datetime,
-                         samples: dict) -> tuple:
+def _update_mann_kendall(doc: Document, mk_xls_bytes: bytes, rounds: list) -> tuple:
     """
-    Add the round to the toolkit sheets in memory, draw each sheet the
-    report shows, and put the pictures in place of the old ones.
+    Add the rounds [(datetime, samples), ...] to the toolkit sheets in
+    memory, draw each sheet the report shows, and put the pictures in place
+    of the old ones.
     Returns (paste_rows_xlsx_bytes, [params whose picture was replaced], [notes]).
     """
     from soil_lab_tool.core import gw_mann_kendall as mk
@@ -1887,29 +1888,58 @@ def _update_mann_kendall(doc: Document, mk_xls_bytes: bytes, new_dt: datetime,
     wb = mk.read_mk_workbook(mk_xls_bytes)
     sheets = mk.report_sheets(wb)
     slots = _chart_slots(doc)
-    by_num = {_well_num(w): s for w, s in samples.items()}
-    notes, updated, touched = [], [], []
+    rounds = sorted(rounds, key=lambda r: r[0])
+    last_dt = rounds[-1][0]
+    notes, updated, added = [], [], []
     for param, sh in sheets.items():
-        values = {}
-        for w in sh.wells:
-            s = by_num.get(_well_num(w))
-            if s is None or s.get("floating_layer"):
-                values[w] = None  # not sampled this round
+        changed = False
+        for when, samples in rounds:
+            by_num = {_well_num(w): s for w, s in samples.items()}
+            values = {}
+            for w in sh.wells:
+                s = by_num.get(_well_num(w))
+                if s is None or s.get("floating_layer"):
+                    values[w] = None  # not sampled this round
+                    continue
+                res = s.get("results", {})
+                values[w] = mk.mk_value(res.get(param), measured=param in res)
+            if all(v is None for v in values.values()):
                 continue
-            res = s.get("results", {})
-            values[w] = mk.mk_value(res.get(param), measured=param in res)
-        if all(v is None for v in values.values()):
-            continue
-        if not mk.add_round(sh, new_dt, values):
-            notes.append(f"בגיליון {sh.name} בקובץ Mann-Kendall אין שורה פנויה לסבב חדש.")
-            continue
-        touched.append(sh)
-        if param in slots:
+            if not mk.add_round(sh, when, values):
+                notes.append(f"בגיליון {sh.name} בקובץ Mann-Kendall אין שורה פנויה לדיגום {when:%d.%m.%y}.")
+                continue
+            changed = True
+            added.append((sh, when))
+        if changed and param in slots:
             stats = mk.sheet_stats(sh, wb.kendall_dist)
-            _put_picture(doc, slots[param], mk.render_sheet_png(sh, stats, new_dt))
+            _put_picture(doc, slots[param], mk.render_sheet_png(sh, stats, last_dt))
             updated.append(param)
-    paste = mk.paste_rows_xlsx(touched, new_dt) if touched else None
+    paste = mk.paste_rows_xlsx(added) if added else None
     return paste, updated, notes
+
+
+def apply_mann_kendall(word_bytes: bytes, mk_xls_bytes: bytes, rounds: list, report: dict = None) -> tuple:
+    """
+    Replace the Mann-Kendall pages of an (already updated) report with the
+    toolkit pages including all `rounds` [(datetime, samples), ...].
+    Returns (word_bytes, paste_rows_xlsx_bytes | None).
+    """
+    if report is None:
+        report = {}
+    report.setdefault("notes", [])
+    doc = Document(BytesIO(word_bytes))
+    paste, charts, notes = _update_mann_kendall(doc, mk_xls_bytes, rounds)
+    report["mk_charts"] = charts
+    report["notes"].extend(notes)
+    if charts:
+        _remove_mk_reminders(doc)
+    else:
+        report["notes"].append(
+            "לא נמצאו בדוח גרפים עם כיתוב 'גרף מספר' לבנזן/MTBE/טולואן, ולכן הגרפים לא הוחלפו.")
+        _add_mk_reminder(doc)
+    out = BytesIO()
+    doc.save(out)
+    return out.getvalue(), paste
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1926,6 +1956,7 @@ def run_update_bytes(
     submission_date: str = None,     # optional: fills the cover-page "תאריך הגשה" field
     field_form_bytes: bytes = None,  # optional: Yeda field form (.xlsx)
     report: dict = None,             # optional: filled with what was done, for the app
+    parsed_round: dict = None,       # optional: {"sampling_date", "samples"} already read
 ) -> tuple:
     """
     Apply one sampling round to the report and return
@@ -1945,7 +1976,10 @@ def run_update_bytes(
         tmp = Path(tmp)
 
         # ── Parse lab results ──────────────────────────────────────
-        if lab_type == "als":
+        if parsed_round is not None:
+            samples = copy.deepcopy(parsed_round["samples"])
+            new_date = parsed_round["sampling_date"]
+        elif lab_type == "als":
             from soil_lab_tool.core.gw_round_inputs import parse_als_round
             lab = parse_als_round(lab_pdf_bytes)
             samples, new_date = lab["samples"], lab["sampling_date"]
@@ -2084,6 +2118,7 @@ def run_update_bytes(
 
         _update_title_month_year(doc, new_dt)
         _update_cover_page_date(doc, new_dt)
+        targets = {}
         if layout == "B":
             _update_narrative_layout_b(doc, full_date_str, combined_results)
         else:
@@ -2099,7 +2134,7 @@ def run_update_bytes(
         # ── Mann-Kendall ──────────────────────────────────────────
         paste_bytes = None
         if mk_xls_bytes:
-            paste_bytes, charts, mk_notes = _update_mann_kendall(doc, mk_xls_bytes, new_dt, samples)
+            paste_bytes, charts, mk_notes = _update_mann_kendall(doc, mk_xls_bytes, [(new_dt, samples)])
             report["mk_charts"] = charts
             report["notes"].extend(mk_notes)
             _remove_mk_reminders(doc)
@@ -2112,6 +2147,13 @@ def run_update_bytes(
 
         report["sampling_date"] = new_date
         report["wells"] = wells_order
+        report["exceedances"] = [
+            (w, p, samples[w]["results"][p], targets[p])
+            for w in wells_order for p in COL_PARAMS
+            if samples[w].get("results", {}).get(p) is not None and p in targets
+            and samples[w]["results"][p] > targets[p]
+        ]
+        report["has_targets"] = bool(targets)
         out = BytesIO()
         doc.save(out)
         return out.getvalue(), paste_bytes
