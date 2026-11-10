@@ -1,13 +1,16 @@
 """
 Groundwater Report Updater
 ==========================
-Merges Bactochem PDF lab results into an existing Word monitoring report,
-updates the historical data table, regenerates trend charts, and updates
-the Mann-Kendall XLS file.
+Merges one sampling round (lab results + field form) into an existing Word
+monitoring report: the field tables, the history tables, the per-well
+result tables, the narrative, and the Mann-Kendall pages.
 
 Public API:
-    run_update_bytes(word_bytes, lab_pdf_bytes, mk_xls_bytes, field_pdf_bytes=None)
-        -> (updated_word_bytes, updated_mk_xls_bytes)
+    run_update_bytes(word_bytes, lab_pdf_bytes, mk_xls_bytes=None, ...)
+        -> (updated_word_bytes, mk_paste_rows_xlsx_bytes | None)
+
+The Mann-Kendall .xls is only read, never written (it holds formulas and
+charts); see core/gw_mann_kendall.py.
 """
 
 import copy
@@ -17,13 +20,6 @@ from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 
-import numpy as np
-import xlrd
-import xlwt
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 import pdfplumber
 from docx import Document
 from docx.oxml.ns import qn
@@ -406,198 +402,6 @@ def parse_bactochem_pdf(pdf_path: str) -> dict:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# MANN-KENDALL
-# ──────────────────────────────────────────────────────────────────────────────
-
-def _xl_date(xl_num):
-    if not xl_num:
-        return None
-    try:
-        return datetime.fromordinal(datetime(1899, 12, 30).toordinal() + int(xl_num))
-    except Exception:
-        return None
-
-
-def _read_mann_kendall(xls_path: str) -> dict:
-    wb = xlrd.open_workbook(xls_path)
-    result = {}
-    for sh_name in wb.sheet_names():
-        if sh_name == "Kendall_Dist":
-            continue
-        ws = wb.sheet_by_name(sh_name)
-        well_row = ws.row_values(13)
-        wells = [str(w).strip() for w in well_row[3:] if str(w).strip()]
-        events = []
-        for r in range(14, ws.nrows):
-            row = ws.row_values(r)
-            if not row[1] or not row[2]:
-                break
-            dt = _xl_date(row[2])
-            if dt is None:
-                break
-            values = {
-                well: (float(row[3 + wi]) if row[3 + wi] != "" else None)
-                for wi, well in enumerate(wells)
-            }
-            events.append((dt, values))
-        result[sh_name] = {"wells": wells, "events": events}
-    return result
-
-
-def _update_mann_kendall(mk_data: dict, new_dt: datetime, new_values: dict) -> dict:
-    for heb, sh in {"בנזן": "בנזן", "MTBE": "MTBE"}.items():
-        if sh not in mk_data:
-            continue
-        sheet = mk_data[sh]
-        well_vals = new_values.get(heb, {})
-        sheet["events"].append((new_dt, {w: well_vals.get(w) for w in sheet["wells"]}))
-    return mk_data
-
-
-def _mk_s(values):
-    clean = [v for v in values if v is not None]
-    n = len(clean)
-    if n < 4:
-        return 0, n
-    s = sum(
-        1 if clean[j] > clean[i] else (-1 if clean[j] < clean[i] else 0)
-        for i in range(n - 1)
-        for j in range(i + 1, n)
-    )
-    return s, n
-
-
-def _mk_conf(s, n):
-    if n < 4:
-        return 0.5
-    var_s = n * (n - 1) * (2 * n + 5) / 18
-    if var_s == 0:
-        return 0.5
-    z = (s - 1) / np.sqrt(var_s) if s > 0 else (s + 1) / np.sqrt(var_s) if s < 0 else 0
-    try:
-        from scipy.special import erfc
-        return float(0.5 * erfc(-z / np.sqrt(2)))
-    except ImportError:
-        return 0.5
-
-
-def _mk_trend(s, conf, cov):
-    if conf >= 0.95:
-        return "Increasing" if s > 0 else "Decreasing"
-    if conf >= 0.90:
-        return "Probably Increasing" if s > 0 else "Probably Decreasing"
-    if s > 0:
-        return "No Trend"
-    return "Stable" if cov < 1.0 else "No Trend"
-
-
-def _write_mann_kendall(mk_data: dict, orig_xls: str, out_path: str):
-    orig_wb = xlrd.open_workbook(orig_xls, formatting_info=True)
-    new_wb = xlwt.Workbook()
-    for sh_name in orig_wb.sheet_names():
-        orig_ws = orig_wb.sheet_by_name(sh_name)
-        new_ws = new_wb.add_sheet(sh_name, cell_overwrite_ok=True)
-        for r in range(orig_ws.nrows):
-            for c in range(orig_ws.ncols):
-                new_ws.write(r, c, orig_ws.cell_value(r, c))
-        if sh_name == "Kendall_Dist" or sh_name not in mk_data:
-            continue
-        sheet = mk_data[sh_name]
-        wells, events = sheet["wells"], sheet["events"]
-        for ei, (dt, vals) in enumerate(events):
-            row = 14 + ei
-            new_ws.write(row, 1, ei + 1)
-            new_ws.write(row, 2, (dt - datetime(1899, 12, 30)).days)
-            for wi, w in enumerate(wells):
-                v = vals.get(w)
-                new_ws.write(row, 3 + wi, v if v is not None else "")
-        # Update statistics rows 54-57
-        for wi, w in enumerate(wells):
-            col = 3 + wi
-            all_v = [e[1].get(w) for e in events]
-            numeric = [v for v in all_v if v is not None]
-            cov = (np.std(numeric) / np.mean(numeric)
-                   if numeric and np.mean(numeric) != 0 else 0)
-            s, n = _mk_s(all_v)
-            conf = _mk_conf(s, n)
-            new_ws.write(54, col, round(cov, 4))
-            new_ws.write(55, col, s)
-            new_ws.write(56, col, round(conf, 4))
-            new_ws.write(57, col, _mk_trend(s, conf, cov))
-        new_ws.write(3, 2, (datetime.today() - datetime(1899, 12, 30)).days)
-    new_wb.save(out_path)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# CHART GENERATION
-# ──────────────────────────────────────────────────────────────────────────────
-
-PARAM_INFO = {
-    "בנזן":      ("Benzene / בנזן",           "mg/L", 0.005),
-    "MTBE":      ("MTBE",                      "mg/L", 0.04),
-    "טולואן":    ("Toluene / טולואן",          "mg/L", 0.70),
-    "אתיל בנזן": ("Ethyl Benzene / אתיל בנזן", "mg/L", 0.30),
-    "קסילן":     ("Xylene / קסילן",            "mg/L", 0.50),
-}
-_COLORS = [
-    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
-    "#9467bd", "#8c564b", "#e377c2", "#bcbd22",
-]
-
-
-def _generate_charts(mk_data: dict, out_dir: Path) -> dict:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    paths = {}
-    plt.rcParams.update({"font.family": "DejaVu Sans", "axes.unicode_minus": False})
-
-    for sh_name, sheet in mk_data.items():
-        wells, events = sheet["wells"], sheet["events"]
-        if not events:
-            continue
-        label, unit, thresh = PARAM_INFO.get(sh_name, (sh_name, "mg/L", None))
-        dates = [e[0] for e in events]
-
-        fig, ax = plt.subplots(figsize=(10, 5))
-        plotted = False
-        for wi, well in enumerate(wells):
-            vals = [e[1].get(well) for e in events]
-            pairs = [(d, v) for d, v in zip(dates, vals) if v is not None]
-            if not pairs:
-                continue
-            xs, ys = zip(*pairs)
-            ax.plot(xs, ys, marker="o", label=well,
-                    color=_COLORS[wi % len(_COLORS)], linewidth=1.5, markersize=5)
-            plotted = True
-
-        if not plotted:
-            plt.close(fig)
-            continue
-
-        if thresh:
-            ax.axhline(thresh, color="red", linestyle="--", linewidth=1.2,
-                       label=f"Target ({thresh} {unit})")
-
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%y"))
-        ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-        fig.autofmt_xdate()
-        ax.set_xlabel("תאריך", fontsize=10)
-        ax.set_ylabel(unit, fontsize=10)
-        ax.set_title(label, fontsize=12, fontweight="bold")
-        ax.legend(loc="upper right", fontsize=8, ncol=2)
-        ax.grid(True, alpha=0.3)
-        ax.text(0.01, 0.01,
-                "ריכוזים קטנים מ-0.01 מג/ל מוצגים בתחתית הגרף",
-                transform=ax.transAxes, fontsize=7, color="gray", va="bottom")
-        plt.tight_layout()
-        p = out_dir / f"chart_{sh_name}.png"
-        plt.savefig(p, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        paths[sh_name] = str(p)
-
-    return paths
-
-
-# ──────────────────────────────────────────────────────────────────────────────
 # WORD DOCUMENT UPDATER
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -909,12 +713,15 @@ def _update_field_table(doc: Document, field_data: dict, wells: list):
             _set_cell(row_cells[-1], txt, highlight=True)
         return
 
+    # Column headers may spell the well differently from the history tables
+    # ("חק 2" vs "חק-2"), so match them by well number.
     header = tbl.rows[0]
-    well_col = {
-        c.text.strip(): ci
-        for ci, c in enumerate(header.cells)
-        if c.text.strip() in wells
-    }
+    num_to_well = {_well_num(w): w for w in wells}
+    well_col = {}
+    for ci, c in enumerate(header.cells):
+        w = num_to_well.get(_well_num(c.text)) if ci > 0 else None
+        if w and w not in well_col:
+            well_col[w] = ci
     # Look up each row by its actual label (column 0), the same way the
     # single-well branch above already does — NOT by a fixed row index.
     # Different documents order these rows differently (e.g. some list
@@ -934,7 +741,7 @@ def _update_field_table(doc: Document, field_data: dict, wells: list):
         for well, ci in well_col.items():
             val = field_data.get(well, {}).get("field", {}).get(field)
             if val is not None:
-                txt = _fmt_field_val(val)
+                txt = _fmt_like(row.cells[ci].text, val)
                 _set_cell(row.cells[ci], txt, highlight=True)
 
 
@@ -1105,14 +912,16 @@ def _update_historical_field_table_layout_a(doc: Document, new_date: str,
         else:
             new_row = _insert_row_after(tbl, last, last)
         cells = new_row.cells
+        prev = tbl.rows[last].cells
         if len(cells) > 1:
             _set_cell(cells[1], new_date, highlight=True)
         for ci, key in col_field.items():
             if ci >= len(cells):
                 continue
             val = field.get(key)
-            if val is not None:
-                _set_cell(cells[ci], _fmt_field_val(val), highlight=True)
+            # "-" for a reading the round doesn't have, never the old value
+            _set_cell(cells[ci], _fmt_like(prev[ci].text if ci < len(prev) else "", val),
+                      highlight=True)
 
 
 def _detect_layout(doc: Document) -> str:
@@ -1213,80 +1022,6 @@ def _update_chem_table_layout_b(doc: Document, new_date: str, water_level, resul
             exceeds = thresh is not None and val > thresh
         color = RGBColor(0xC0, 0x00, 0x00) if exceeds else None
         _set_cell(cells[ci], txt, bold=exceeds, color=color, highlight=True)
-
-
-def _update_mk_layout_b(mk_xls_bytes: bytes, new_dt: datetime, results: dict) -> bytes:
-    """
-    Layout B Mann-Kendall: add one row per sheet (MTBE, BENZEN/BENZENE).
-    Sheet format: col B = event#, col C = xl-date-float, col D = concentration.
-    """
-    import tempfile as _tmp
-    import xlrd, xlwt
-    from xlutils.copy import copy as xl_copy
-
-    SHEET_TO_PARAM = {
-        "MTBE": "MTBE", "mtbe": "MTBE",
-        "BENZEN": "בנזן", "benzen": "בנזן", "BENZENE": "בנזן", "benzene": "בנזן",
-        "TOLUENE": "טולואן", "toluene": "טולואן",
-        "XYLENE": "קסילן", "xylene": "קסילן",
-        "ETHYLBENZENE": "אתיל בנזן",
-    }
-
-    with _tmp.NamedTemporaryFile(suffix=".xls", delete=False) as f:
-        f.write(mk_xls_bytes)
-        tmp_in = f.name
-
-    import xlwt, xlrd
-    rb = xlrd.open_workbook(tmp_in, formatting_info=True)
-    wb = xl_copy(rb)
-    date_mode = rb.datemode
-
-    import datetime as _dt
-    xl_date = (_dt.datetime(new_dt.year, new_dt.month, new_dt.day)
-               - _dt.datetime(1899, 12, 30)).days
-
-    date_style = xlwt.XFStyle()
-    date_style.num_format_str = 'M/D/YY'
-    yellow_style = xlwt.XFStyle()
-    yellow_style.pattern = xlwt.Pattern()
-    yellow_style.pattern.pattern = xlwt.Pattern.SOLID_PATTERN
-    yellow_style.pattern.pattern_fore_colour = 13  # yellow
-
-    for si in range(rb.nsheets):
-        rs = rb.sheet_by_index(si)
-        ws = wb.get_sheet(si)
-        sname = rs.name.strip().upper()
-        param_heb = SHEET_TO_PARAM.get(sname) or SHEET_TO_PARAM.get(rs.name.strip())
-        if param_heb is None:
-            continue
-
-        # Find last data row (col B = event#, numeric)
-        last_r = 13
-        for r in range(14, rs.nrows):
-            b = rs.cell(r, 1).value
-            if b and isinstance(b, float):
-                last_r = r
-            elif b == '':
-                break
-
-        new_event = int(rs.cell(last_r, 1).value) + 1
-        val = results.get(param_heb)
-        if val is None:
-            val = 0.001
-
-        nr = last_r + 1
-        ws.write(nr, 1, new_event, yellow_style)
-        ws.write(nr, 2, xl_date, date_style)
-        ws.write(nr, 3, val, yellow_style)
-
-    with _tmp.NamedTemporaryFile(suffix=".xls", delete=False) as f:
-        out_path = f.name
-    wb.save(out_path)
-    data = open(out_path, "rb").read()
-    import os
-    os.unlink(tmp_in)
-    os.unlink(out_path)
-    return data
 
 
 HEBREW_MONTHS = ["ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני",
@@ -1619,6 +1354,8 @@ def _update_summary_well_bullets(doc: Document, samples: dict):
                 continue
             if "אותר" not in text and "לא אותרו" not in text:
                 continue
+            if "חורג" in text:
+                continue  # exceedance bullets: _update_exceedance_summary
             runs = p.runs
             if not runs:
                 continue
@@ -1688,22 +1425,491 @@ def _update_report_meta(doc: Document, author_name: str = None, submission_date:
                 break
 
 
-def _replace_chart_image(doc: Document, shape_idx: int, img_path: str):
-    if shape_idx >= len(doc.inline_shapes):
+def _well_num(name: str):
+    m = re.search(r'(\d+)\s*$', str(name).strip())
+    return m.group(1) if m else None
+
+
+def _merge_field_form(samples: dict, form: dict) -> list:
+    """
+    Put the field form's readings into the lab samples, matching wells by
+    their number ("חק-2" in the form, "HK-2" at the lab). The form is the
+    field record, so its values win over field values printed by the lab.
+    Returns the form wells that had no lab sample.
+    """
+    by_num = {_well_num(k): k for k in samples}
+    unmatched = []
+    for well, w in form.get("wells", {}).items():
+        key = by_num.get(_well_num(well))
+        if key is None:
+            unmatched.append(well)
+            continue
+        s = samples[key]
+        s.setdefault("field", {}).update(w.get("field", {}))
+        for k in ("water_level", "total_depth", "volume_l", "flow_lpm"):
+            if w.get(k) is not None:
+                s[k] = w[k]
+        if w.get("floating_layer"):
+            s["floating_layer"] = True
+    return unmatched
+
+
+def _fmt_conc(val) -> str:
+    """Concentration as text without exponent notation: 0.00421, 7.11, 2700."""
+    if val is None:
+        return ""
+    if val == 0:
+        return "0"
+    if abs(val) >= 1000:
+        return f"{val:.0f}"
+    if abs(val) < 1:
+        # three significant figures, as the lab prints them
+        digits = -int(f"{abs(val):e}".split("e")[1]) + 2
+        return f"{val:.{max(digits, 0)}f}".rstrip("0").rstrip(".")
+    return f"{val:.3g}" if abs(val) < 100 else f"{val:.0f}"
+
+
+def _fmt_like(old_text: str, val) -> str:
+    """
+    Field value in the style of the cell it replaces (or the row above):
+    same number of decimals, thousands separator if the old text had one.
+    """
+    if val is None:
+        return "-"
+    old = (old_text or "").strip()
+    m = re.fullmatch(r'-?[\d,]*\.?(\d*)-?', old)
+    if not old or not m or not re.search(r'\d', old):
+        return _fmt_field_val(val)
+    own = f"{val:.3f}".rstrip("0").split(".")
+    own_decimals = len(own[1]) if len(own) > 1 else 0
+    decimals = max(len(m.group(1)), own_decimals)  # never round away a measured digit
+    if "," in old:
+        return f"{val:,.{decimals}f}"
+    return f"{val:.{decimals}f}"
+
+
+def _cell_targets(tbl) -> dict:
+    """
+    The table's own target row ("ריכוז יעד לשיקום", "ריכוזי יעד לסיום
+    ניטור", "תקן מי שתייה" — any label with יעד or תקן, in any column).
+    """
+    col_map = _detect_chem_table_columns(tbl) or {3 + i: p for i, p in enumerate(COL_PARAMS)}
+    for row in tbl.rows[:6]:
+        cells = row.cells
+        labels = " ".join(c.text for ci, c in enumerate(cells) if ci not in col_map)
+        if "יעד" not in labels and "תקן" not in labels:
+            continue
+        out = {}
+        for ci, param in col_map.items():
+            if ci < len(cells):
+                try:
+                    out[param] = float(cells[ci].text.strip().replace(",", ""))
+                except ValueError:
+                    pass
+        if out:
+            return out
+    return {}
+
+
+def _result_text(results: dict, limits: dict, param: str):
+    """(text, value) for one compound: '<0.0002' for a non-detect."""
+    if param not in results:
+        return "-", None
+    val = results[param]
+    if val is None:
+        lim = limits.get(param)
+        return (f"<{_fmt_conc(lim)}" if lim else "<0.001"), None
+    return _fmt_conc(val), val
+
+
+def _is_chem_history_table(tbl) -> bool:
+    if len(tbl.columns) < 6:
+        return False
+    head = " ".join(c.text for row in tbl.rows[:3] for c in row.cells)
+    return "תאריך" in head and bool(_detect_chem_table_columns(tbl))
+
+
+def _update_chem_history_tables(doc: Document, new_date: str, samples: dict, wells_order: list) -> bool:
+    """
+    One new row per well in the chemistry history table that holds that well
+    (one or several tables, e.g. "חלק 1 מתוך 2"). The columns come from the
+    table's header, the targets from its own target row, and a water level
+    column ("עומק פני המים") is filled when the table has one. Returns False
+    when the document has no such table (older layouts are handled by
+    _update_historical_tables).
+    """
+    tables = [t for t in doc.tables if _is_chem_history_table(t)]
+    if not tables:
+        return False
+    for well in wells_order:
+        sample = samples.get(well)
+        if not sample:
+            continue
+        tbl = next((t for t in tables
+                    if any(r.cells and r.cells[0].text.strip() == well for r in t.rows)), None)
+        if tbl is None:
+            continue
+        col_map = _detect_chem_table_columns(tbl)
+        targets = _cell_targets(tbl)
+        head = [c.text.strip() for c in tbl.rows[0].cells]
+        level_col = next((ci for ci, h in enumerate(head) if "פני המים" in h or "מפלס" in h), None)
+
+        last = _last_row_for_well(tbl, well)
+        if last < 0:
+            continue
+        prev_text = {ci: c.text for ci, c in enumerate(tbl.rows[last].cells)}
+        if tbl.rows[last].cells[1].text.strip() == new_date:
+            new_row = tbl.rows[last]
+        else:
+            new_row = _insert_row_after(tbl, last, last)
+        cells = new_row.cells
+        _set_cell(cells[1], new_date, highlight=True)
+        if level_col is not None and level_col < len(cells):
+            lvl = sample.get("water_level")
+            _set_cell(cells[level_col], _fmt_like(prev_text.get(level_col, ""), lvl), highlight=True)
+        results, limits = sample.get("results", {}), sample.get("limits", {})
+        for ci, param in col_map.items():
+            if ci >= len(cells):
+                continue
+            if sample.get("floating_layer"):
+                _set_cell(cells[ci], "שכבה צפה" if ci == min(col_map) else "", highlight=True)
+                continue
+            txt, val = _result_text(results, limits, param)
+            exceeds = val is not None and param in targets and val > targets[param]
+            _set_cell(cells[ci], txt, bold=exceeds, highlight=True)
+    return True
+
+
+def _is_well_card(tbl):
+    """
+    A small per-well result table ("חק-4 / 02.06.26 / תרכובת | ריכוז יעד |
+    ריכוז"): row 0 is the well name in every cell, row 1 the date. Returns
+    the well name, or None.
+    """
+    if len(tbl.rows) < 4 or len(tbl.columns) > 4:
+        return None
+    r0 = {c.text.strip() for c in tbl.rows[0].cells}
+    r1 = {c.text.strip() for c in tbl.rows[1].cells}
+    if len(r0) != 1 or len(r1) != 1:
+        return None
+    if not re.fullmatch(r'\d{2}\.\d{2}\.\d{2,4}', next(iter(r1))):
+        return None
+    if "תרכובת" not in tbl.rows[2].cells[0].text:
+        return None
+    return next(iter(r0))
+
+
+def _update_well_cards(doc: Document, new_date: str, samples: dict) -> int:
+    """Date and results of the per-well tables on the site map. Returns how many were updated."""
+    by_num = {_well_num(w): w for w in samples}
+    done = 0
+    for tbl in doc.tables:
+        well = _is_well_card(tbl)
+        if not well:
+            continue
+        key = by_num.get(_well_num(well))
+        if key is None:
+            continue
+        sample = samples[key]
+        results, limits = sample.get("results", {}), sample.get("limits", {})
+        for c in {id(c._tc): c for c in tbl.rows[1].cells}.values():
+            _set_cell(c, new_date, highlight=True)
+        for row in tbl.rows[3:]:
+            cells = row.cells
+            param = _PARAM_CANONICAL.get(cells[0].text.strip())
+            if not param:
+                continue
+            txt, val = _result_text(results, limits, param)
+            try:
+                target = float(cells[1].text.strip())
+            except (ValueError, IndexError):
+                target = None
+            exceeds = val is not None and target is not None and val > target
+            _set_cell(cells[-1], txt, bold=exceeds, highlight=True)
+        done += 1
+    return done
+
+
+def _replace_in_paragraph(paragraph, pattern, repl) -> bool:
+    """
+    Regex replace over the paragraph's whole text, even when Word split it
+    into many runs. The new text goes into the first run the match touches
+    (keeping its formatting, highlighted); the rest of the match is removed.
+    """
+    runs = paragraph.runs
+    if not runs:
+        return False
+    text = "".join(r.text for r in runs)
+    m = re.search(pattern, text)
+    if not m:
+        return False
+    new = m.expand(repl) if isinstance(repl, str) else repl(m)
+    start, end = m.span()
+    pos = 0
+    first = True
+    for r in runs:
+        rs, rend = pos, pos + len(r.text)
+        pos = rend
+        if rend <= start or rs >= end:
+            continue
+        a, b = max(start, rs) - rs, min(end, rend) - rs
+        if first:
+            r.text = r.text[:a] + new + r.text[b:]
+            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+            first = False
+        else:
+            r.text = r.text[:a] + r.text[b:]
+    return not first
+
+
+def _num_txt(v: float) -> str:
+    return f"{int(v)}" if v == int(v) else f"{v:g}"
+
+
+def _update_sampling_paragraphs(doc: Document, samples: dict, sampler_name: str):
+    """
+    The field-round sentences: the sampler's name ("על ידי מר X, דוגם"),
+    the pumped volume ("נעה בין כ- 16 ל-22 ליטר") and the flow ("בספיקה של
+    0.4 ליטר בדקה" / "בספיקה שבין 0.40-0.48 ליטר בדקה").
+    """
+    vols = [s["volume_l"] for s in samples.values() if s.get("volume_l") is not None]
+    flows = sorted({round(s["flow_lpm"], 2) for s in samples.values() if s.get("flow_lpm") is not None})
+    for p in doc.paragraphs:
+        t = p.text
+        if sampler_name and "על ידי מר" in t and "דוגם" in t:
+            _replace_in_paragraph(p, r"(על ידי מר)\s*[^,]+?(,\s*דוגם)", rf"\1 {sampler_name}\2")
+        if vols and "ליטר" in t and "נעה בין" in t:
+            lo, hi = round(min(vols)), round(max(vols))
+            if lo == hi:
+                _replace_in_paragraph(p, r"נעה בין כ-\s*[\d.]+\s*ל-\s*[\d.]+\s*ליטר",
+                                      f"עמדה על כ- {_num_txt(lo)} ליטר")
+            else:
+                _replace_in_paragraph(p, r"(נעה בין כ-)\s*[\d.]+\s*ל-\s*[\d.]+\s*(ליטר)",
+                                      rf"\1 {_num_txt(lo)} ל-{_num_txt(hi)} \2")
+        if flows and "בספיקה" in t:
+            if len(flows) == 1:
+                flow_txt = f"של {_num_txt(flows[0])}"
+            else:
+                flow_txt = f"שבין {flows[0]:.2f}-{flows[-1]:.2f}"
+            _replace_in_paragraph(p, r"בספיקה\s+(?:של\s+[\d.]+|שבין\s+[\d.]+\s*-\s*[\d.]+)",
+                                  f"בספיקה {flow_txt}")
+
+
+def _update_exceedance_summary(doc: Document, samples: dict, wells_order: list, targets: dict) -> bool:
+    """
+    The summary bullets about exceedances of the site targets ("בקידוח חק-7
+    אותר בנזן בריכוז 0.743 מ"ג/ל' אשר חורג מערך היעד לשיקום (0.0935
+    מ"ג/ליטר)." and "בקידוחים חק-2, חק-3 ו- חק-4 לא אותרו ריכוזי BTEX MTBE
+    החורגים מערכי היעד לשיקום;"). Rebuilt from this round against the
+    report's own targets: one bullet for the wells without exceedances, one
+    per well with them. Returns False when the report has no such bullets.
+    """
+    from docx.text.paragraph import Paragraph
+
+    paras = [p for p in doc.paragraphs
+             if p.text.strip().startswith("בקידוח") and "חורג" in p.text]
+    if not paras or not targets:
+        return False
+    clean, exceed = [], []
+    for well in wells_order:
+        s = samples.get(well)
+        if not s or s.get("floating_layer"):
+            continue
+        res = s.get("results", {})
+        over = [(p, res[p]) for p in COL_PARAMS
+                if res.get(p) is not None and p in targets and res[p] > targets[p]]
+        (exceed if over else clean).append((well, over))
+
+    sentences = []
+    if clean:
+        names = [w for w, _ in clean]
+        if len(names) == 1:
+            sentences.append(f"בקידוח {names[0]} לא אותרו ריכוזי BTEX ו-MTBE החורגים מערכי היעד לשיקום;")
+        else:
+            sentences.append("בקידוחים " + ", ".join(names[:-1]) + f" ו-{names[-1]}"
+                             " לא אותרו ריכוזי BTEX ו-MTBE החורגים מערכי היעד לשיקום;")
+    for well, over in exceed:
+        parts = [f'{p} בריכוז {_fmt_conc(v)} מ"ג/ל\' אשר חורג מערך היעד לשיקום '
+                 f'({_fmt_conc(targets[p])} מ"ג/ליטר)' for p, v in over]
+        sentences.append(f"בקידוח {well} אותר " + "; ".join(parts) + ".")
+
+    for p, sentence in zip(paras, sentences):
+        runs = p.runs
+        runs[0].text = sentence
+        runs[0].font.highlight_color = WD_COLOR_INDEX.YELLOW
+        for r in runs[1:]:
+            r.text = ""
+    last = paras[min(len(paras), len(sentences)) - 1]
+    for sentence in sentences[len(paras):]:
+        new_p = copy.deepcopy(last._p)
+        last._p.addnext(new_p)
+        np_ = Paragraph(new_p, last._parent)
+        np_.runs[0].text = sentence
+        np_.runs[0].font.highlight_color = WD_COLOR_INDEX.YELLOW
+        for r in np_.runs[1:]:
+            r.text = ""
+        last = np_
+    for p in paras[len(sentences):]:
+        p._p.getparent().remove(p._p)
+    return True
+
+
+def _replace_textbox_dates(doc: Document, old_date: str, new_date: str) -> int:
+    """Dates written in text boxes on the site map (e.g. '02.06.26' labels)."""
+    if not old_date or old_date == new_date:
+        return 0
+    n = 0
+    for txbx in doc.element.body.iter(qn("w:txbxContent")):
+        for t in txbx.iter(qn("w:t")):
+            if t.text and old_date in t.text:
+                t.text = t.text.replace(old_date, new_date)
+                n += 1
+    return n
+
+
+def _latest_history_date(doc: Document):
+    """The newest date already in the chemistry history (the previous round)."""
+    best = None
+    for tbl in doc.tables:
+        if not _is_chem_history_table(tbl):
+            continue
+        for row in tbl.rows:
+            if len(row.cells) < 2:
+                continue
+            t = row.cells[1].text.strip().rstrip("*")
+            try:
+                d = datetime.strptime(t, "%d.%m.%y")
+            except ValueError:
+                continue
+            if best is None or d > best[0]:
+                best = (d, t)
+    return best[1] if best else None
+
+
+_MK_REMINDER = ("⚠️ שים לב: יש לעדכן את קובץ Mann-Kendall בתיקייה "
+                "ולהדביק את הגרפים המעודכנים לדוח.")
+
+
+def _remove_mk_reminders(doc: Document):
+    for p in list(doc.paragraphs):
+        if "יש לעדכן את קובץ Mann-Kendall" in p.text:
+            p._p.getparent().remove(p._p)
+
+
+def _add_mk_reminder(doc: Document):
+    """Yellow note before the first chart, once (not again on every round)."""
+    if any("יש לעדכן את קובץ Mann-Kendall" in p.text for p in doc.paragraphs):
         return
-    shape = doc.inline_shapes[shape_idx]
-    w_emu, h_emu = shape.width, shape.height
-    blip = shape._inline.find(".//" + qn("a:blip"))
-    if blip is None:
-        return
-    rId = blip.get(qn("r:embed"))
-    image_part = doc.part.related_parts[rId]
-    with open(img_path, "rb") as f:
-        image_part._blob = f.read()
-    extent = shape._inline.find(qn("wp:extent"))
-    if extent is not None:
-        extent.set("cx", str(w_emu))
-        extent.set("cy", str(h_emu))
+    chart_para = None
+    for p in doc.paragraphs:
+        if re.match(r"\s*גרף מספר", p.text):
+            chart_para = p
+            break
+    if chart_para is None:
+        for pi, p in enumerate(doc.paragraphs):
+            if pi > 40 and p._p.findall('.//' + qn('w:drawing')):
+                chart_para = p
+                break
+    from docx.oxml import OxmlElement
+    new_p = OxmlElement('w:p')
+    r = OxmlElement('w:r')
+    rpr = OxmlElement('w:rPr')
+    b = OxmlElement('w:b')
+    hl = OxmlElement('w:highlight')
+    hl.set(qn('w:val'), 'yellow')
+    rpr.append(b)
+    rpr.append(hl)
+    r.append(rpr)
+    t = OxmlElement('w:t')
+    t.text = _MK_REMINDER
+    r.append(t)
+    new_p.append(r)
+    if chart_para is not None:
+        chart_para._p.addprevious(new_p)
+    else:
+        doc.element.body.append(new_p)
+
+
+_CHART_PARAM_WORDS = [
+    ("אתיל בנזן", "אתיל בנזן"), ("בנזן", "בנזן"), ("MTBE", "MTBE"),
+    ("טולואן", "טולואן"), ("קסילן", "קסילן"), ("כסילן", "קסילן"),
+]
+
+
+def _chart_slots(doc: Document) -> dict:
+    """
+    {param: inline drawing} for each caption "גרף מספר N: ... <compound>"
+    followed (within a few paragraphs) by a paragraph with a picture.
+    """
+    paras = doc.paragraphs
+    slots = {}
+    for i, p in enumerate(paras):
+        t = p.text.strip()
+        if not t.startswith("גרף מספר"):
+            continue
+        param = next((pp for word, pp in _CHART_PARAM_WORDS if word in t), None)
+        if not param or param in slots:
+            continue
+        for q in paras[i + 1:i + 5]:
+            inl = q._p.find('.//' + qn('wp:inline'))
+            if inl is not None:
+                slots[param] = inl
+                break
+    return slots
+
+
+def _put_picture(doc: Document, inline, png_bytes: bytes):
+    """Replace the picture in an inline drawing: same width, height to the new aspect."""
+    from PIL import Image
+    rId, _ = doc.part.get_or_add_image(BytesIO(png_bytes))
+    blip = inline.find('.//' + qn('a:blip'))
+    blip.set(qn('r:embed'), rId)
+    w_px, h_px = Image.open(BytesIO(png_bytes)).size
+    ext = inline.find(qn('wp:extent'))
+    cx = int(ext.get('cx'))
+    cy = int(cx * h_px / w_px)
+    ext.set('cy', str(cy))
+    for e in inline.iter(qn('a:ext')):
+        if e.get('cx') is not None:
+            e.set('cx', str(cx))
+            e.set('cy', str(cy))
+
+
+def _update_mann_kendall(doc: Document, mk_xls_bytes: bytes, new_dt: datetime,
+                         samples: dict) -> tuple:
+    """
+    Add the round to the toolkit sheets in memory, draw each sheet the
+    report shows, and put the pictures in place of the old ones.
+    Returns (paste_rows_xlsx_bytes, [params whose picture was replaced], [notes]).
+    """
+    from soil_lab_tool.core import gw_mann_kendall as mk
+
+    wb = mk.read_mk_workbook(mk_xls_bytes)
+    sheets = mk.report_sheets(wb)
+    slots = _chart_slots(doc)
+    by_num = {_well_num(w): s for w, s in samples.items()}
+    notes, updated, touched = [], [], []
+    for param, sh in sheets.items():
+        values = {}
+        for w in sh.wells:
+            s = by_num.get(_well_num(w))
+            if s is None or s.get("floating_layer"):
+                values[w] = None  # not sampled this round
+                continue
+            res = s.get("results", {})
+            values[w] = mk.mk_value(res.get(param), measured=param in res)
+        if all(v is None for v in values.values()):
+            continue
+        if not mk.add_round(sh, new_dt, values):
+            notes.append(f"בגיליון {sh.name} בקובץ Mann-Kendall אין שורה פנויה לסבב חדש.")
+            continue
+        touched.append(sh)
+        if param in slots:
+            stats = mk.sheet_stats(sh, wb.kendall_dist)
+            _put_picture(doc, slots[param], mk.render_sheet_png(sh, stats, new_dt))
+            updated.append(param)
+    paste = mk.paste_rows_xlsx(touched, new_dt) if touched else None
+    return paste, updated, notes
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1714,39 +1920,36 @@ def run_update_bytes(
     word_bytes: bytes,
     lab_pdf_bytes,
     mk_xls_bytes: bytes = None,
-    field_pdf_bytes: bytes = None,   # reserved for future OCR use
-    lab_type: str = "bactochem",     # "bactochem" or "aminolab"
+    field_pdf_bytes: bytes = None,   # kept for old callers; not read
+    lab_type: str = "bactochem",     # "bactochem", "aminolab" or "als"
     author_name: str = None,         # optional: fills the cover-page "מחבר הדו"ח" field
     submission_date: str = None,     # optional: fills the cover-page "תאריך הגשה" field
+    field_form_bytes: bytes = None,  # optional: Yeda field form (.xlsx)
+    report: dict = None,             # optional: filled with what was done, for the app
 ) -> tuple:
     """
-    Process all inputs in memory and return (updated_word_bytes, updated_mk_xls_bytes).
-    updated_mk_xls_bytes is None if mk_xls_bytes was not provided.
+    Apply one sampling round to the report and return
+    (updated_word_bytes, mk_paste_rows_xlsx_bytes or None).
 
     lab_pdf_bytes:
       - "bactochem": a single PDF's bytes (one PDF covers all wells).
       - "aminolab":  bytes of ONE PDF, or a list/tuple of bytes — one per
         well/certificate — since each Aminolab certificate covers a single well.
+      - "als":       the ALS certificate, PDF or the XLSX appendix.
     """
-    import os
+    if report is None:
+        report = {}
+    report.setdefault("notes", [])
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
 
-        # Write inputs to temp files
-        word_path = tmp / "report.docx"
-        out_word  = tmp / "updated_report.docx"
-        out_mk    = tmp / "updated_mk.xls"
-
-        word_path.write_bytes(word_bytes)
-
-        has_mk = mk_xls_bytes is not None
-        if has_mk:
-            mk_path = tmp / "mk.xls"
-            mk_path.write_bytes(mk_xls_bytes)
-
         # ── Parse lab results ──────────────────────────────────────
-        if lab_type == "aminolab":
+        if lab_type == "als":
+            from soil_lab_tool.core.gw_round_inputs import parse_als_round
+            lab = parse_als_round(lab_pdf_bytes)
+            samples, new_date = lab["samples"], lab["sampling_date"]
+        elif lab_type == "aminolab":
             pdf_bytes_list = (
                 lab_pdf_bytes if isinstance(lab_pdf_bytes, (list, tuple))
                 else [lab_pdf_bytes]
@@ -1772,44 +1975,45 @@ def run_update_bytes(
             if not samples:
                 raise ValueError("לא נמצאו דגימות ב-PDF. ודא שהקובץ הוא דוח בקטוכם לדיגום מי תהום.")
 
+        # ── Field form ─────────────────────────────────────────────
+        sampler_name = next((s.get("sampler_name") for s in samples.values() if s.get("sampler_name")), None)
+        if field_form_bytes:
+            from soil_lab_tool.core.gw_round_inputs import parse_yeda_field_form
+            form = parse_yeda_field_form(field_form_bytes)
+            missing = _merge_field_form(samples, form)
+            if missing:
+                report["notes"].append("בטופס השדה יש בארות שאין להן תוצאות מעבדה: " + ", ".join(missing))
+            if form.get("sampler_name"):
+                sampler_name = form["sampler_name"]
+            if form.get("sampling_date"):
+                form_date = form["sampling_date"].strftime("%d.%m.%y")
+                if new_date and form_date != new_date:
+                    report["notes"].append(
+                        f"תאריך הדיגום בטופס השדה ({form_date}) שונה מהתאריך בתעודת המעבדה ({new_date}). "
+                        "נלקח התאריך של המעבדה.")
+                new_date = new_date or form_date
+        if not new_date:
+            raise ValueError("לא נמצא תאריך דיגום בתעודת המעבדה.")
+        if not samples:
+            raise ValueError("לא נמצאו דגימות בתעודת המעבדה.")
         new_dt = datetime.strptime(new_date, "%d.%m.%y")
-        chart_paths = {}
-        out_mk_bytes = None
-
-        if has_mk:
-            # ── Update Mann-Kendall ────────────────────────────────────
-            mk_data = _read_mann_kendall(str(mk_path))
-            mk_new = {}
-            for well, s in samples.items():
-                for param, val in s.get("results", {}).items():
-                    mk_new.setdefault(param, {})[well] = val
-            mk_data = _update_mann_kendall(mk_data, new_dt, mk_new)
-
-            # ── Generate charts ────────────────────────────────────────
-            chart_paths = _generate_charts(mk_data, tmp / "charts")
-
-            # ── Write updated MK XLS ──────────────────────────────────
-            _write_mann_kendall(mk_data, str(mk_path), str(out_mk))
-            out_mk_bytes = out_mk.read_bytes()
 
         # ── Update Word document ──────────────────────────────────
-        doc = Document(str(word_path))
+        doc = Document(BytesIO(word_bytes))
         layout = _detect_layout(doc)
+        previous_date = _latest_history_date(doc)
 
         # Detect the well-naming convention actually used in THIS document
         # (different sites use different prefixes, e.g. "מת-1" or "צא - 1"),
-        # then remap the parsed sample keys (always "מת-N") onto it by well number.
+        # then remap the parsed sample keys onto it by well number.
         #
         # Some documents have MULTIPLE tables that both mention the same well
         # number under different name spellings — e.g. a one-off "before/after
         # injection" snapshot table using Latin "PP-1", alongside the routine
-        # long-running chronological table using Hebrew "פפ-1". Picking between
-        # them via an unordered set (as before) depends on Python's hash-seed
-        # ordering and could non-deterministically point updates at the wrong
-        # (snapshot) table. Instead, score each name variant by how many
-        # chronological date-rows exist in the table(s) it appears in, and
-        # prefer the variant from the table with the deepest history — that's
-        # unambiguously the routine table meant to receive new readings.
+        # long-running chronological table using Hebrew "פפ-1". Score each
+        # name variant by how many chronological date-rows exist in the
+        # table(s) it appears in, and prefer the variant from the table with
+        # the deepest history — the routine table meant to receive new rows.
         _date_pat = re.compile(r'^\d{2}\.\d{2}\.\d{2}$')
         well_depth = {}
         for tbl in doc.tables:
@@ -1828,9 +2032,8 @@ def run_update_bytes(
         num_to_doc_well = {}
         num_to_depth = {}
         for w, depth in well_depth.items():
-            m = re.search(r'(\d+)\s*$', w)
-            if m:
-                num = m.group(1)
+            num = _well_num(w)
+            if num:
                 if num not in num_to_doc_well or depth > num_to_depth[num]:
                     num_to_doc_well[num] = w
                     num_to_depth[num] = depth
@@ -1838,22 +2041,20 @@ def run_update_bytes(
         remapped_samples = {}
         unmatched = []
         for well_key, sample in samples.items():
-            m = re.search(r'(\d+)$', well_key)
-            num = m.group(1) if m else None
-            doc_well = num_to_doc_well.get(num)
+            doc_well = num_to_doc_well.get(_well_num(well_key))
             if doc_well:
                 remapped_samples[doc_well] = sample
             else:
                 remapped_samples[well_key] = sample
                 unmatched.append(well_key)
         samples = remapped_samples
-        wells_order = list(samples.keys())
+        wells_order = sorted(samples, key=lambda w: int(_well_num(w) or 0))
 
         if unmatched:
             raise ValueError(
-                "לא נמצאה בדוח ה-Word התאמה לבארות הבאות מה-PDF: "
+                "לא נמצאה בדוח ה-Word התאמה לבארות הבאות מתעודת המעבדה: "
                 + ", ".join(unmatched)
-                + ". ודא שמספרי הבארות בדוח ה-PDF תואמים לבארות בדוח ה-Word."
+                + ". ודא שמספרי הבארות בתעודה תואמים לבארות בדוח ה-Word."
             )
 
         _update_field_table(doc, samples, wells_order)
@@ -1866,20 +2067,17 @@ def run_update_bytes(
             _update_chem_table_layout_b(doc, new_date,
                                         first_sample.get("water_level"),
                                         first_sample.get("results", {}))
-            # MK update for Layout B uses a different sheet structure
-            if has_mk:
-                out_mk_bytes = _update_mk_layout_b(
-                    mk_xls_bytes, new_dt, first_sample.get("results", {})
-                )
         else:
-            _update_historical_tables(doc, new_date, samples, wells_order)
+            if not _update_chem_history_tables(doc, new_date, samples, wells_order):
+                _update_historical_tables(doc, new_date, samples, wells_order)
             _update_historical_field_table_layout_a(doc, new_date, samples, wells_order)
+        cards = _update_well_cards(doc, new_date, samples)
+        if cards:
+            report["well_cards"] = cards
+        _replace_textbox_dates(doc, previous_date, new_date)
 
-        # ── Update narrative text (title month/year, date/sampler gaps,
-        #    BTEX concentration summary sentence) ────────────────────────
+        # ── Narrative ─────────────────────────────────────────────
         full_date_str = new_dt.strftime("%d.%m.%Y")
-        first_sample = next(iter(samples.values()), {})
-        sampler_name = first_sample.get("sampler_name")
         combined_results = {}
         for s in samples.values():
             combined_results.update(s.get("results", {}))
@@ -1889,54 +2087,31 @@ def run_update_bytes(
         if layout == "B":
             _update_narrative_layout_b(doc, full_date_str, combined_results)
         else:
-            _update_narrative_placeholders(doc, full_date_str, sampler_name)
+            _update_narrative_placeholders(doc, new_date, sampler_name)
+            _update_sampling_paragraphs(doc, samples, sampler_name)
             _update_concentration_summary(doc, combined_results)
+            targets = next((_cell_targets(t) for t in doc.tables if _is_chem_history_table(t)), {})
+            _update_exceedance_summary(doc, samples, wells_order, targets)
             _update_summary_well_bullets(doc, samples)
 
         _update_report_meta(doc, author_name=author_name, submission_date=submission_date)
 
-        # Replace chart images (shape 1 = Benzene, shape 2 = MTBE)
-        for chart_idx, sh_name in enumerate(["בנזן", "MTBE"]):
-            if sh_name in chart_paths:
-                _replace_chart_image(doc, 1 + chart_idx, chart_paths[sh_name])
-
-        # ── Yellow reminder note about charts — inserted before the charts ──
-        # Find the first paragraph that contains a drawing/chart image
-        _chart_para = None
-        for _pi, _p in enumerate(doc.paragraphs):
-            if _pi > 40 and _p._p.findall('.//' + qn('w:drawing')):
-                _chart_para = _p
-                break
-
-        _reminder_text = (
-            "⚠️ שים לב: יש לעדכן את קובץ Mann-Kendall בתיקייה "
-            "ולהדביק את הגרפים המעודכנים לדוח."
-        )
-
-        if _chart_para is not None:
-            # Insert a new paragraph immediately before the first chart paragraph
-            from docx.oxml import OxmlElement as _OxmlEl
-            _new_p = _OxmlEl('w:p')
-            _new_r = _OxmlEl('w:r')
-            _new_rpr = _OxmlEl('w:rPr')
-            _b = _OxmlEl('w:b')
-            _highlight = _OxmlEl('w:highlight')
-            _highlight.set(qn('w:val'), 'yellow')
-            _new_rpr.append(_b)
-            _new_rpr.append(_highlight)
-            _new_r.append(_new_rpr)
-            _new_t = _OxmlEl('w:t')
-            _new_t.text = _reminder_text
-            _new_r.append(_new_t)
-            _new_p.append(_new_r)
-            _chart_para._p.addprevious(_new_p)
+        # ── Mann-Kendall ──────────────────────────────────────────
+        paste_bytes = None
+        if mk_xls_bytes:
+            paste_bytes, charts, mk_notes = _update_mann_kendall(doc, mk_xls_bytes, new_dt, samples)
+            report["mk_charts"] = charts
+            report["notes"].extend(mk_notes)
+            _remove_mk_reminders(doc)
+            if not charts:
+                report["notes"].append(
+                    "לא נמצאו בדוח גרפים עם כיתוב 'גרף מספר' לבנזן/MTBE/טולואן, ולכן הגרפים לא הוחלפו.")
+                _add_mk_reminder(doc)
         else:
-            # Fallback: append at end
-            _rp = doc.add_paragraph()
-            _run = _rp.add_run(_reminder_text)
-            _run.bold = True
-            _run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+            _add_mk_reminder(doc)
 
-        doc.save(str(out_word))
-
-        return out_word.read_bytes(), out_mk_bytes
+        report["sampling_date"] = new_date
+        report["wells"] = wells_order
+        out = BytesIO()
+        doc.save(out)
+        return out.getvalue(), paste_bytes

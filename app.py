@@ -2093,29 +2093,43 @@ elif page == "groundwater":
     with gw_tab1:
         gw_lab_type = st.radio(
             "🧪 מעבדה",
-            ["בקטוכם", "אמינולאב"],
+            ["בקטוכם", "אמינולאב", "ALS"],
             horizontal=True,
             key="gw_lab_type",
         )
-        lab_type_code = "bactochem" if gw_lab_type == "בקטוכם" else "aminolab"
+        lab_type_code = {"בקטוכם": "bactochem", "אמינולאב": "aminolab", "ALS": "als"}[gw_lab_type]
 
         col1, col2 = st.columns(2)
         with col1:
             word_file = st.file_uploader("📄 דוח Word קודם (.docx)", type=["docx"], key="gw_word")
             st.caption("⚠️ לפני העלאה: פתח את הדוח ב-Word ← Review ← Accept All Changes ← שמור. ללא זאת העדכון עלול להיכשל.")
             if lab_type_code == "bactochem":
-                bactochem_files = st.file_uploader(
+                lab_files = st.file_uploader(
                     "🧪 תוצאות מעבדה — בקטוכם (.pdf, ניתן להעלות כמה דיגומים בבת אחת)",
                     type=["pdf"], accept_multiple_files=True, key="gw_lab_bactochem_multi",
                 )
                 st.caption("💡 אפשר להעלות כמה קבצי PDF של דיגומים שונים יחד — הם ימוינו לפי תאריך הדיגום ויוחלו בזה אחר זה על אותו דוח.")
-            else:
+            elif lab_type_code == "aminolab":
                 lab_files = st.file_uploader(
                     "🧪 תעודות מעבדה — אמינולאב (.pdf, קובץ אחד לכל באר)",
                     type=["pdf"], accept_multiple_files=True, key="gw_lab_multi",
                 )
+            else:
+                _als_file = st.file_uploader(
+                    "🧪 תעודת ALS (דוח ביצוע .pdf או נספח .xlsx)",
+                    type=["pdf", "xlsx", "xls"], key="gw_lab_als",
+                )
+                lab_files = [_als_file] if _als_file else []
         with col2:
-            field_file = st.file_uploader("📋 טופס ממצאי שדה (.pdf, אופציונלי)", type=["pdf"], key="gw_field")
+            field_file = st.file_uploader(
+                "📋 טופס ביצוע עבודה של ידע מים (.xlsx, אופציונלי)", type=["xlsx"], key="gw_field_form",
+                help="ממנו נלקחים ממצאי השדה (הקריאה האחרונה בכל באר), המפלסים, שם הדוגם, כמות המים והספיקה.",
+            )
+            mk_file = st.file_uploader(
+                "📈 קובץ Mann-Kendall (.xls, אופציונלי)", type=["xls"], key="gw_mk",
+                help="הקובץ רק נקרא ולא משתנה. הגרפים בדוח מוחלפים בעמודי MK מעודכנים, "
+                     "ותקבלו קובץ קטן עם השורות להדבקה בקובץ ה-MK.",
+            )
             gw_author_name = st.text_input(
                 "✍️ מחבר הדוח (אופציונלי)", key="gw_author_name",
                 help="אם תמלאו — יוזן אוטומטית בעמוד השער של הדוח.",
@@ -2126,14 +2140,14 @@ elif page == "groundwater":
                 help="אם תמלאו — יוזן אוטומטית בעמוד השער של הדוח.",
             )
 
-        if lab_type_code == "bactochem":
-            lab_ready = bool(bactochem_files)
-        else:
-            lab_ready = bool(lab_files)
-
-        if word_file and lab_ready:
+        _gw_sig = (lab_type_code,) + tuple(
+            (f.name, f.size) for f in [word_file, field_file, mk_file, *lab_files] if f)
+        if word_file and lab_files:
             if st.button("⚡ עדכן דוח", type="primary", use_container_width=True, key="gw_update_btn"):
                 with st.spinner("מעבד... ⏳"):
+                    result = {"word": None, "paste": None, "done": [], "notes": [], "error": None}
+                    field_bytes = field_file.getvalue() if field_file else None
+                    mk_bytes = mk_file.getvalue() if mk_file else None
                     try:
                         if lab_type_code == "bactochem":
                             import tempfile as _tempfile
@@ -2145,8 +2159,8 @@ elif page == "groundwater":
                             # order (oldest → newest), each one updating the
                             # Word doc produced by the previous round.
                             rounds = []
-                            for f in bactochem_files:
-                                pdf_bytes = f.read()
+                            for f in lab_files:
+                                pdf_bytes = f.getvalue()
                                 with _tempfile.TemporaryDirectory() as _tmp:
                                     _p = _Path(_tmp) / "lab.pdf"
                                     _p.write_bytes(pdf_bytes)
@@ -2159,69 +2173,99 @@ elif page == "groundwater":
                                 except Exception:
                                     return _datetime.max
                             rounds.sort(key=_sort_key)
+                            if len(rounds) > 1 and (field_bytes or mk_bytes):
+                                result["notes"].append(
+                                    "טופס השדה וקובץ ה-MK הוחלו רק על הדיגום האחרון "
+                                    f"({rounds[-1]['date'] or rounds[-1]['name']}).")
 
-                            current_word = word_file.read()
-                            processed, failed = [], None
-                            for r in rounds:
+                            current_word = word_file.getvalue()
+                            for i, r in enumerate(rounds):
+                                last = i == len(rounds) - 1
+                                rep = {}
                                 try:
-                                    current_word, _ = run_update_bytes(
-                                        current_word, r["bytes"], None,
-                                        field_pdf_bytes=None, lab_type="bactochem",
+                                    current_word, paste = run_update_bytes(
+                                        current_word, r["bytes"], mk_bytes if last else None,
+                                        lab_type="bactochem",
                                         author_name=gw_author_name,
                                         submission_date=gw_submission_date,
+                                        field_form_bytes=field_bytes if last else None,
+                                        report=rep,
                                     )
-                                    processed.append(r)
                                 except Exception as round_err:
-                                    failed = (r, round_err)
+                                    msg = f"העיבוד נעצר בקובץ '{r['name']}' (תאריך דיגום: {r['date'] or 'לא זוהה'}): {round_err}"
+                                    if result["done"]:
+                                        msg += ("\n\nהדיגומים שלפניו כן עודכנו — אפשר להוריד את הדוח החלקי, "
+                                                "לתקן את הקובץ הבעייתי, ולהעלות אותו שוב בנפרד יחד עם הדוח שהורדת.")
+                                    result["error"] = msg
                                     break
-
-                            if processed:
-                                st.success(
-                                    "✅ עודכנו " + str(len(processed)) + " דיגומים: "
-                                    + ", ".join(r["date"] or r["name"] for r in processed)
-                                )
-                                st.download_button(
-                                    "⬇️ הורד דוח Word מעודכן",
-                                    data=current_word,
-                                    file_name="דוח_ניטור_מעודכן.docx",
-                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                    use_container_width=True,
-                                    key="gw_dl_periodic",
-                                )
-                            if failed:
-                                r, err = failed
-                                msg = f"⚠️ העיבוד נעצר בקובץ '{r['name']}' (תאריך דיגום: {r['date'] or 'לא זוהה'}): {err}"
-                                if processed:
-                                    msg += "\n\nהדיגומים שלפניו כן עודכנו — אפשר להוריד את הדוח החלקי למעלה, לתקן את הקובץ הבעייתי, ולהעלות אותו שוב בנפרד יחד עם הדוח שהורדת."
-                                st.error(msg)
+                                result["word"] = current_word
+                                result["paste"] = paste or result["paste"]
+                                result["done"].append(r["date"] or r["name"])
+                                result["notes"].extend(rep.get("notes", []))
+                                result["mk_charts"] = rep.get("mk_charts")
                         else:
-                            out_word, _ = run_update_bytes(
-                                word_file.read(),
-                                [f.read() for f in lab_files],
-                                None,
-                                field_pdf_bytes=field_file.read() if field_file else None,
+                            rep = {}
+                            lab_input = ([f.getvalue() for f in lab_files] if lab_type_code == "aminolab"
+                                         else lab_files[0].getvalue())
+                            result["word"], result["paste"] = run_update_bytes(
+                                word_file.getvalue(), lab_input, mk_bytes,
                                 lab_type=lab_type_code,
                                 author_name=gw_author_name,
                                 submission_date=gw_submission_date,
+                                field_form_bytes=field_bytes,
+                                report=rep,
                             )
-                            st.success("✅ הדוח עודכן בהצלחה!")
-                            st.download_button(
-                                "⬇️ הורד דוח Word מעודכן",
-                                data=out_word,
-                                file_name="דוח_ניטור_מעודכן.docx",
-                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                use_container_width=True,
-                                key="gw_dl_periodic",
-                            )
+                            result["done"].append(rep.get("sampling_date", ""))
+                            result["notes"].extend(rep.get("notes", []))
+                            result["mk_charts"] = rep.get("mk_charts")
                     except Exception as e:
-                        st.error(f"שגיאה בעיבוד: {e}")
+                        result["error"] = f"שגיאה בעיבוד: {e}"
+                    result["sig"] = _gw_sig
+                    st.session_state["gw_periodic_result"] = result
+
+            # Kept in the session so the second download button still works
+            # after the first one reruns the page.
+            result = st.session_state.get("gw_periodic_result")
+            if result and result.get("sig") == _gw_sig:
+                if result.get("word"):
+                    st.success("✅ הדוח עודכן: דיגום " + ", ".join(d for d in result["done"] if d))
+                    if result.get("mk_charts"):
+                        _names = {"בנזן": "בנזן", "MTBE": "MTBE", "טולואן": "טולואן",
+                                  "אתיל בנזן": "אתיל בנזן", "קסילן": "קסילן"}
+                        st.info("📈 עמודי Mann-Kendall הוחלפו בדוח: "
+                                + ", ".join(_names.get(c, c) for c in result["mk_charts"]))
+                    st.download_button(
+                        "⬇️ הורד דוח Word מעודכן",
+                        data=result["word"],
+                        file_name="דוח_ניטור_מעודכן.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True,
+                        key="gw_dl_periodic",
+                    )
+                    if result.get("paste"):
+                        st.download_button(
+                            "⬇️ הורד שורות להדבקה בקובץ Mann-Kendall",
+                            data=result["paste"],
+                            file_name="שורות_להדבקה_Mann_Kendall.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                            key="gw_dl_mk_rows",
+                        )
+                        st.caption("קובץ ה-MK שלך לא שונה. בקובץ שהורדת מופיע לכל גיליון מספר השורה "
+                                   "והערכים להדבקה; הנוסחאות והגרפים בקובץ יתעדכנו לבד.")
+                for n in result.get("notes", []):
+                    st.warning("⚠️ " + n)
+                if result.get("error"):
+                    st.error(result["error"])
         else:
+            st.session_state.pop("gw_periodic_result", None)
             st.markdown(
                 '<div class="card"><div class="card-header">📋 שלבי השימוש</div>'
                 '<div class="steps">'
                 '<div class="step"><div class="step-num">1</div><div class="step-title">דוח Word קודם</div><div class="step-desc">הדוח מהסבב הקודם (.docx)</div></div>'
-                '<div class="step"><div class="step-num">2</div><div class="step-title">תוצאות מעבדה</div><div class="step-desc">PDF של בקטוכם או אמינולאב מהדיגום החדש</div></div>'
-                '<div class="step"><div class="step-num">3</div><div class="step-title">הורד</div><div class="step-desc">דוח Word מעודכן עם כל השינויים מסומנים בצהוב</div></div>'
+                '<div class="step"><div class="step-num">2</div><div class="step-title">תוצאות מעבדה</div><div class="step-desc">בקטוכם, אמינולאב או ALS מהדיגום החדש</div></div>'
+                '<div class="step"><div class="step-num">3</div><div class="step-title">טופס שדה ו-MK</div><div class="step-desc">אופציונלי: טופס ביצוע עבודה של ידע מים וקובץ Mann-Kendall</div></div>'
+                '<div class="step"><div class="step-num">4</div><div class="step-title">הורד</div><div class="step-desc">דוח Word מעודכן עם כל השינויים מסומנים בצהוב</div></div>'
                 '</div></div>',
                 unsafe_allow_html=True,
             )

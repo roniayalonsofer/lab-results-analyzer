@@ -127,6 +127,27 @@ everything else in those tables (older rows) is left untouched.
   filled in if the caller passes `author_name`/`submission_date` to
   `run_update_bytes()` — both optional, both no-ops if omitted.
 
+### Inputs: labs, field form, Mann-Kendall
+
+- **Labs:** Bactochem PDF, Aminolab PDFs, or ALS (PDF or the "נספח" XLSX,
+  read by `core/gw_round_inputs.parse_als_round`, results in mg/L; a
+  non-detect is `None` with its limit in `limits`, printed as `<0.0002`).
+- **Field form:** Yeda Water's "טופס ביצוע עבודה" .xlsx
+  (`parse_yeda_field_form`). Columns by header; each well takes its LAST
+  low-flow reading; "עומק דגימה מפני המים" is extraction depth minus water
+  level (1.0), by the owner's choice. Its values win over the lab's.
+- **Mann-Kendall** (`core/gw_mann_kendall.py`): the GSI toolkit .xls holds
+  thousands of formulas and charts, so it is **only read, never written**
+  (owner's decision). The round is added in memory, S/COV/CF/trend are
+  computed (they match Excel's cached values; CF comes from the workbook's
+  own Kendall_Dist sheet), the toolkit page is drawn as a picture and put in
+  place of the picture under the caption "גרף מספר N: ... <compound>", and
+  the app hands back the rows to paste into the .xls. Values below 0.01 or
+  non-detects are entered as 0.01 (the site's convention). The sheet for a
+  compound is the one whose events reach the latest date.
+- Per-well result tables on the site map ("חק-4 / date / תרכובת | ריכוז יעד |
+  ריכוז") are updated by `_update_well_cards`, bold over the card's own target.
+
 ### Idempotency / re-running safely
 
 `run_update_bytes()` can be called multiple times in a chain (the

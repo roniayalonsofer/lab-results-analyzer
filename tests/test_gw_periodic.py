@@ -1,0 +1,322 @@
+"""Periodic groundwater report: field form, Mann-Kendall, and the Word update.
+
+Small synthetic files that mimic the real layouts (Yeda field form, GSI
+Mann-Kendall toolkit, the Hof report tables), so no client data is committed.
+"""
+import io
+import os
+import sys
+from datetime import datetime
+
+import openpyxl
+import pytest
+import xlwt
+from docx import Document
+from docx.shared import Inches
+
+ROOT = os.path.join(os.path.dirname(__file__), "..")
+sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "soil_lab_tool"))
+
+from soil_lab_tool import gw_report_updater as upd  # noqa: E402
+from soil_lab_tool.core import gw_mann_kendall as mk  # noqa: E402
+from soil_lab_tool.core import gw_round_inputs as gri  # noqa: E402
+
+HEADER = ["Date", "Client Attributions", "Client » Name", "On site Contact » Name",
+          "On site Contact » Phone", "Schedule » User::Full Name", "Location",
+          "Quote » Location::Address", "Storage", "Well Form » Weather", "Notes",
+          "Exam Form » Supplier::Name", "EXAMINATION::Location",
+          "EXAMINATION::Well Header » Drill Depth", "EXAMINATION::Well Header » Drill Diameter",
+          "EXAMINATION::Well Header » Sea Depth", "EXAMINATION::Well Header » Extraction Depth",
+          "EXAMINATION::Well Header » Floating Layer",
+          "EXAMINATION::Well Header » Floating Layer Depth",
+          "EXAMINATION::Well Header » Water Volume", "EXAMINATION::Well Header » Water Flow",
+          "EXAMINATION::Time", "EXAMINATION::Well » Temperature", "EXAMINATION::Well » PH",
+          "EXAMINATION::Well » Conductivity", "EXAMINATION::Well » Cloudness",
+          "EXAMINATION::Well » Oxygen", "EXAMINATION::Well » Redox"]
+
+
+def _field_form() -> bytes:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(HEADER)
+    col = {h: i for i, h in enumerate(HEADER)}
+
+    def row(**kw):
+        r = [None] * len(HEADER)
+        for k, v in kw.items():
+            r[col[k]] = v
+        ws.append(r)
+
+    row(**{"Date": datetime(2026, 10, 1), "Schedule » User::Full Name": "דוגם בדיקה"})
+    for well, depth, water, readings in [
+        ("דיגום באר חק 2", "22.14", "18.23", [(27.4, 7.24, 1066, 34.1, 1.08, 12.7),
+                                             (28.7, 7.0, 1295, 4.22, 0.38, -12.7)]),
+        ("דיגום באר חק 7", "23.80", "18.06", [(28.2, 6.96, 1217, 10.7, 1.2, 51.8)]),
+    ]:
+        row(**{"EXAMINATION::Location": well,
+               "EXAMINATION::Well Header » Drill Depth": depth,
+               "EXAMINATION::Well Header » Sea Depth": water,
+               "EXAMINATION::Well Header » Extraction Depth": f"{float(water) + 1:.2f}",
+               "EXAMINATION::Well Header » Floating Layer": "לא",
+               "EXAMINATION::Well Header » Water Volume": "17.4 ליטר",
+               "EXAMINATION::Well Header » Water Flow": "440 מייל"})
+        ws.append([None] * len(HEADER))
+        for t, (temp, ph, ec, ntu, do, orp) in enumerate(readings):
+            row(**{"EXAMINATION::Time": f"9:{50 + t * 5}:00",
+                   "EXAMINATION::Well » Temperature": temp, "EXAMINATION::Well » PH": ph,
+                   "EXAMINATION::Well » Conductivity": ec, "EXAMINATION::Well » Cloudness": ntu,
+                   "EXAMINATION::Well » Oxygen": do, "EXAMINATION::Well » Redox": orp})
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_field_form_takes_last_reading_and_depths():
+    b = _field_form()
+    assert gri.is_yeda_field_form(b)
+    form = gri.parse_yeda_field_form(b)
+    assert form["sampler_name"] == "דוגם בדיקה"
+    assert form["sampling_date"] == datetime(2026, 10, 1).date()
+    w2 = form["wells"]["חק-2"]
+    assert w2["field"]["pH"] == 7.0 and w2["field"]["רדוקס"] == -12.7  # last reading, not first
+    assert w2["field"]["עומק פני המים"] == 18.23
+    assert w2["field"]["עומק כללי של הקידוח"] == 22.14
+    assert w2["field"]["עומק דגימה מפני המים"] == 1.0  # below the water, owner's choice
+    assert w2["volume_l"] == 17.4 and w2["flow_lpm"] == 0.44
+    assert set(form["wells"]) == {"חק-2", "חק-7"}
+
+
+# ── Mann-Kendall ────────────────────────────────────────────────────────────
+
+def _excel_date(y, m, d):
+    return (datetime(y, m, d) - datetime(1899, 12, 30)).days
+
+
+def _mk_xls(junk_row=True) -> bytes:
+    """A GSI toolkit sheet: header block, wells row, 40 event slots, statistics."""
+    wb = xlwt.Workbook()
+    dist = wb.add_sheet("Kendall_Dist")
+    for c, n in enumerate(range(4, 11), start=1):
+        dist.write(0, c, n)
+    # p for |S| = 0..3 and n = 4..10 (values only need to be plausible here)
+    for s in range(0, 4):
+        dist.write(s + 1, 0, s)
+        for c in range(1, 8):
+            dist.write(s + 1, c, round(0.5 - 0.1 * s, 3))
+    ws = wb.add_sheet("BENZEN NEW")
+    ws.write(3, 1, "Evaluation Date:")
+    ws.write(3, 2, "02.06.2026")
+    ws.write(4, 1, "Facility Name:")
+    ws.write(4, 2, "תחנה")
+    ws.write(4, 6, "Constituent:")
+    ws.write(4, 7, "BENZEN")
+    ws.write(5, 6, "Concentration Units:")
+    ws.write(5, 7, "mg/L")
+    ws.write(7, 2, "Sampling Point ID:")
+    ws.write(7, 3, "חק-2")
+    ws.write(7, 4, "חק-7")
+    data = [((2025, 1, 1), 0.5, 3.0), ((2025, 6, 1), 0.3, 2.0), ((2025, 10, 1), 0.2, 1.0),
+            ((2026, 2, 1), 0.1, 0.5), ((2026, 6, 2), 0.01, 0.743)]
+    for i in range(40):
+        ws.write(14 + i, 1, i + 1)
+    for i, (d, a, b) in enumerate(data):
+        ws.write(14 + i, 2, _excel_date(*d))
+        ws.write(14 + i, 3, a)
+        ws.write(14 + i, 4, b)
+    if junk_row:
+        ws.write(53, 2, _excel_date(2024, 2, 6))  # a leftover date with no values
+    ws.write(54, 2, "Coefficient of Variation:")
+    ws.write(55, 2, "Mann-Kendall Statistic (S):")
+    ws.write(56, 2, "Confidence Factor:")
+    ws.write(57, 2, "Concentration Trend:")
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_mk_statistics_and_trend_rules():
+    assert mk.mk_statistic([5, 4, 3, 2, 1]) == -10
+    assert mk.mk_statistic([1, 1, 1, 1]) == 0
+    assert mk.trend(-10, 0.99, 1.5) == "Decreasing"
+    assert mk.trend(-5, 0.92, 1.5) == "Prob. Decreasing"
+    assert mk.trend(-1, 0.6, 0.5) == "Stable"
+    assert mk.trend(-1, 0.6, 1.5) == "No Trend"
+    assert mk.trend(8, 0.97, 0.5) == "Increasing"
+    assert mk.trend(0, None, None) == ""  # fewer than four results
+    assert mk.mk_value(None) == 0.01 and mk.mk_value(0.004) == 0.01 and mk.mk_value(0.3) == 0.3
+    assert mk.mk_value(0.3, measured=False) == "-"
+
+
+def test_mk_reads_sheet_skips_leftover_date_and_adds_round():
+    wb = mk.read_mk_workbook(_mk_xls())
+    sh = mk.report_sheets(wb)["בנזן"]
+    assert sh.wells == ["חק-2", "חק-7"]
+    assert len(sh.events) == 5  # the leftover 2024 date without values is ignored
+    assert sh.next_free_row == 19
+    when = datetime(2026, 10, 1)
+    assert mk.add_round(sh, when, {"חק-2": 0.01, "חק-7": 0.01})
+    assert sh.event_rows[-1] == 19
+    assert mk.add_round(sh, when, {"חק-2": 0.01, "חק-7": 0.02})  # same date: replaced
+    assert len(sh.events) == 6 and sh.events[-1][1]["חק-7"] == 0.02
+    stats = mk.sheet_stats(sh, wb.kendall_dist)
+    assert stats["חק-7"]["s"] == mk.mk_statistic([3.0, 2.0, 1.0, 0.5, 0.743, 0.02])
+    png = mk.render_sheet_png(sh, stats, when)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    rows = openpyxl.load_workbook(io.BytesIO(mk.paste_rows_xlsx([sh], when))).active
+    values = [[c for c in r if c is not None] for r in rows.iter_rows(values_only=True)]
+    assert ["גיליון: BENZEN NEW", "שורה 20"] in values
+    assert [6, "01/10/2026", 0.01, 0.02] in values
+
+
+def test_bidi_labels_for_charts():
+    assert mk._bidi("חק-2") == "2-קח"
+    assert mk._bidi("סונול החוף") == "ףוחה לונוס"
+    assert mk._bidi("MTBE") == "MTBE"
+
+
+# ── Word update ─────────────────────────────────────────────────────────────
+
+def _png() -> bytes:
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 50), "white").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _report() -> bytes:
+    doc = Document()
+    doc.add_paragraph("דו\"ח ניטור מי תהום תקופתי, יוני 2026- תחנה")
+    doc.add_paragraph("בתאריך 02.06.26 נערך בתחנה דיגום תקופתי של מי התהום מקידוחים חק-2 ו- חק-7 "
+                      "על ידי מר דוגם קודם, דוגם חברת י.ד.ע מים.")
+    doc.add_paragraph("כמות המים שנשאבה מהקידוחים נעה בין כ- 16 ל-22 ליטר לכל קידוח בספיקה של 0.4 ליטר בדקה.")
+
+    t = doc.add_table(rows=5, cols=4)
+    for ci, h in enumerate(["בדיקה", "יחידות", "חק 2", "חק 7"]):
+        t.rows[0].cells[ci].text = h
+    for ri, (lab, unit, a, b) in enumerate([("pH", "-", "6.80", "6.32"),
+                                            ("רדוקס", "mv", "113", "10.0"),
+                                            ("עומק פני המים", "m", "18.06", "17.89"),
+                                            ("עומק דגימה מפני המים*", "m", "1.00", "1.00")], 1):
+        for ci, v in enumerate([lab, unit, a, b]):
+            t.rows[ri].cells[ci].text = v
+
+    card = doc.add_table(rows=5, cols=3)
+    a = card.rows[0].cells[0].merge(card.rows[0].cells[2])
+    a.text = "חק-7"
+    d = card.rows[1].cells[0].merge(card.rows[1].cells[2])
+    d.text = "02.06.26"
+    for ci, v in enumerate(["תרכובת", "ריכוז יעד לשיקום [מ\"ג/ל']", "ריכוז [מ\"ג/ל']"]):
+        card.rows[2].cells[ci].text = v
+    for ci, v in enumerate(["MTBE", "0.74", "0.00665"]):
+        card.rows[3].cells[ci].text = v
+    for ci, v in enumerate(["בנזן", "0.094", "0.743"]):
+        card.rows[4].cells[ci].text = v
+
+    chem = doc.add_table(rows=5, cols=9)
+    heads = [["קידוח", "תאריך דיגום", "עומק פני המים (מ')", "", "MTBE", "בנזן", "טולואן", "אתיל בנזן", "כסילן"],
+             ["קידוח", "תאריך דיגום", "עומק פני המים (מ')", "יחידות", "מ''ג/ל", "מ''ג/ל", "מ''ג/ל", "מ''ג/ל", "מ''ג/ל"],
+             ["קידוח", "תאריך דיגום", "עומק פני המים (מ')", "ריכוז יעד לשיקום^", "0.748", "0.0935", "13.09", "5.61", "9.35"],
+             ["חק-7", "05.02.26", "17.74", "", "0.00049", "0.0854", "0.00206", "0.00708", "0.00256"],
+             ["חק-7", "02.06.26", "17.89", "", "0.00665", "0.743", "0.0225", "0.0439", "0.0465"]]
+    for ri, row in enumerate(heads):
+        for ci, v in enumerate(row):
+            chem.rows[ri].cells[ci].text = v
+    chem2 = doc.add_table(rows=4, cols=9)
+    for ri, row in enumerate(heads[:3] + [["חק-2", "02.06.26", "18.06", "", "0.608", "0.00028", "0.00454", "0.00903", "0.00769"]]):
+        for ci, v in enumerate(row):
+            chem2.rows[ri].cells[ci].text = v
+
+    doc.add_paragraph("גרף מספר 1: שינוי ריכוזי בנזן כנגד הזמן")
+    doc.add_paragraph().add_run().add_picture(io.BytesIO(_png()), width=Inches(4))
+    doc.add_paragraph("סיכום")
+    doc.add_paragraph("בתאריך 02.06.26 נערך בתחנה דיגום תקופתי של מי התהום מקידוחים חק-2 ו- חק-7;")
+    doc.add_paragraph("בקידוחים חק-2 לא אותרו ריכוזי BTEX MTBE החורגים מערכי היעד לשיקום;")
+    doc.add_paragraph("בקידוח חק-7 אותר בנזן בריכוז 0.743 מ\"ג/ל' אשר חורג מערך היעד לשיקום (0.0935 מ\"ג/ליטר).")
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+@pytest.fixture
+def als_round(monkeypatch):
+    rnd = {"sampling_date": "01.10.26", "samples": {
+        "HK-2": {"results": {"MTBE": 0.115, "בנזן": None, "טולואן": 0.0161, "אתיל בנזן": 0.0639,
+                             "קסילן": 0.0617},
+                 "limits": {"בנזן": 0.0002}},
+        "HK-7": {"results": {"MTBE": None, "בנזן": 0.2, "טולואן": 0.00191, "אתיל בנזן": 0.00089,
+                             "קסילן": 0.00123},
+                 "limits": {"MTBE": 0.0002}},
+    }}
+    monkeypatch.setattr(gri, "parse_als_round", lambda b, name="": {
+        "sampling_date": rnd["sampling_date"],
+        "samples": {k: {"results": dict(v["results"]), "limits": dict(v["limits"])}
+                    for k, v in rnd["samples"].items()}})
+    return rnd
+
+
+def _texts(doc):
+    return [p.text for p in doc.paragraphs]
+
+
+def test_word_update_with_field_form_and_mk(als_round):
+    rep = {}
+    out, paste = upd.run_update_bytes(_report(), b"als", _mk_xls(), lab_type="als",
+                                      field_form_bytes=_field_form(), report=rep)
+    doc = Document(io.BytesIO(out))
+    field, card, chem, chem2 = doc.tables
+
+    # table 1: last field reading, matched to "חק 2" by number, measured digits kept
+    assert field.rows[1].cells[2].text == "7.00"
+    assert field.rows[2].cells[2].text == "-12.7"
+    assert field.rows[3].cells[3].text == "18.06"
+
+    # per-well card: date, "<limit" for a non-detect, bold over the card's own target
+    assert card.rows[1].cells[0].text == "01.10.26"
+    assert card.rows[3].cells[2].text == "<0.0002"
+    assert card.rows[4].cells[2].text == "0.2"
+    assert card.rows[4].cells[2].paragraphs[0].runs[0].bold is True
+
+    # chemistry history: a new row with the water level from the form
+    last = [c.text for c in chem.rows[-1].cells]
+    assert last[1:3] == ["01.10.26", "18.06"]
+    assert last[4:] == ["<0.0002", "0.2", "0.00191", "0.00089", "0.00123"]
+    assert chem.rows[-1].cells[5].paragraphs[0].runs[0].bold is True   # 0.2 > 0.0935
+    assert not chem.rows[-1].cells[6].paragraphs[0].runs[0].bold
+    assert [c.text for c in chem2.rows[-1].cells][1:5] == ["01.10.26", "18.23", "", "0.115"]
+
+    texts = _texts(doc)
+    assert any("מר דוגם בדיקה, דוגם" in t for t in texts)
+    assert any("נעה בין כ- 17 ל-17 ליטר" in t or "עמדה על כ- 17 ליטר" in t for t in texts)
+    assert any("בספיקה של 0.44 ליטר" in t for t in texts)
+    assert any(t.startswith("בתאריך 01.10.26 נערך") for t in texts)
+    assert "בקידוח חק-2 לא אותרו ריכוזי BTEX ו-MTBE החורגים מערכי היעד לשיקום;" in texts
+    assert any(t.startswith("בקידוח חק-7 אותר בנזן בריכוז 0.2") for t in texts)
+
+    # MK picture replaced, no reminder note, rows to paste returned
+    assert rep["mk_charts"] == ["בנזן"]
+    assert not any("Mann-Kendall" in t for t in texts)
+    assert paste is not None
+
+    # running the same round again changes nothing
+    out2, _ = upd.run_update_bytes(out, b"als", _mk_xls(), lab_type="als",
+                                   field_form_bytes=_field_form())
+    doc2 = Document(io.BytesIO(out2))
+    assert [len(t.rows) for t in doc2.tables] == [len(t.rows) for t in doc.tables]
+    assert _texts(doc2) == texts
+
+
+def test_without_mk_the_reminder_is_added_once(als_round):
+    out, paste = upd.run_update_bytes(_report(), b"als", None, lab_type="als")
+    out, _ = upd.run_update_bytes(out, b"als", None, lab_type="als")
+    texts = _texts(Document(io.BytesIO(out)))
+    assert paste is None
+    assert sum("יש לעדכן את קובץ Mann-Kendall" in t for t in texts) == 1
+
+
+def test_fmt_like_never_drops_measured_digits():
+    assert upd._fmt_like("113", -12.7) == "-12.7"
+    assert upd._fmt_like("6.80", 7.0) == "7.00"
+    assert upd._fmt_like("1,382.00", 1295.0) == "1,295.00"
+    assert upd._fmt_conc(0.00421) == "0.00421" and upd._fmt_conc(7.11) == "7.11"
+    assert upd._fmt_conc(0.0002) == "0.0002" and upd._fmt_conc(2700) == "2700"
