@@ -169,7 +169,11 @@ def test_mk_reads_sheet_skips_leftover_date_and_adds_round():
     assert [6, "01/10/2026", 0.01, 0.02] in values
 
 
-def test_bidi_labels_for_charts():
+def test_bidi_labels_for_charts(monkeypatch):
+    # matplotlib with libraqm orders Hebrew itself: the text goes in as is
+    monkeypatch.setattr(mk, "_mpl_does_bidi", lambda: True)
+    assert mk._bidi("פפ-1") == "פפ-1"
+    monkeypatch.setattr(mk, "_mpl_does_bidi", lambda: False)
     assert mk._bidi("חק-2") == "2-קח"
     assert mk._bidi("סונול החוף") == "ףוחה לונוס"
     assert mk._bidi("MTBE") == "MTBE"
@@ -422,3 +426,156 @@ def test_word_update_from_a_sorted_round_with_mk_over_two_rounds():
     values = [[c for c in row if c is not None] for row in rows.iter_rows(values_only=True)]
     assert [6, "01/08/2026", "", 0.5] in values or [6, "01/08/2026", 0.5] in values
     assert any(v[:2] == [7, "01/10/2026"] for v in values if len(v) >= 2)
+
+
+# ── Report with merged cells, a nested field table and a one-off table ─────
+
+def _parbar_like() -> Document:
+    """
+    Mimics the Parbar report: a one-off before/after table with each well
+    twice (must stay as is), the real field table nested in a one-cell
+    frame, and history tables whose header and rows span different grid
+    columns (header MTBE over two columns, a row's xylene over two, a well
+    name over two columns).
+    """
+    doc = Document()
+    doc.add_paragraph("טבלה מספר 4 – ממצאי שדה לפני ההחדרה ואחריה")
+    once = doc.add_table(rows=3, cols=6)
+    for ci, t in enumerate(["פרמטר", "יחידות", "פפ-1", "פפ-1", "פפ-2", "פפ-2"]):
+        once.cell(0, ci).text = t
+    for ci, t in enumerate(["תאריך דיגום", "", "14.12.25", "07.01.26", "14.12.25", "07.01.26"]):
+        once.cell(1, ci).text = t
+    for ci, t in enumerate(["pH", "-", "6.71", "7.33", "6.89", "8.1"]):
+        once.cell(2, ci).text = t
+    for label in ("חמצן מומס", "רדוקס", "עכירות", "טמפרטורה"):
+        cells = once.add_row().cells
+        cells[0].text = label
+        for ci in range(2, 6):
+            cells[ci].text = "1"
+
+    doc.add_paragraph("ממצאי בדיקות השדה מוצגים בטבלה מספר 6:")
+    frame = doc.add_table(rows=1, cols=1)
+    inner = frame.cell(0, 0).add_table(rows=1, cols=4)
+    for ci, t in enumerate(["בדיקה", "יחידות", "פפ-1", "פפ-2"]):
+        inner.cell(0, ci).text = t
+    for label, unit, a, b in (("pH", "-", "6.71", "6.67"), ("EC", "μS/cm", "223", "773"),
+                              ("רדוקס", "mV", "34", "-35"), ("עומק פני המים", "m", "11.78", "11.86"),
+                              ("עומק הקידוח", "m", "17.97", "18.01")):
+        cells = inner.add_row().cells
+        for ci, t in enumerate((label, unit, a, b)):
+            cells[ci].text = t
+
+    for well, rows in (("פפ-1", [("14.12.25", ["0.001", "<0.001", "<0.001", "0.001", "<0.001"]),
+                                 ("11.02.26", ["0.00057", "0.0051", "0.124", "0.246", "0.0117"])]),
+                       ("פפ-2", [("11.02.26", ["0.0785", "0.00631", "0.031", "0.0209", "0.00201"])])):
+        doc.add_paragraph(f"טבלה מספר 7 – {well}")
+        t = doc.add_table(rows=3, cols=9)
+        head = ["שם קידוח", "תאריך דיגום", "", "בנזן", "טולואן", "אתיל בנזן", "כסילן", "MTBE", ""]
+        for ci, x in enumerate(head):
+            t.cell(0, ci).text = x
+        t.cell(0, 7).merge(t.cell(0, 8))             # MTBE over two columns
+        t.cell(1, 2).text = "ערך יעד^"
+        for ci, x in enumerate(["0.1", "14", "6", "10", "0.8"]):
+            t.cell(1, 3 + ci).text = x
+        t.cell(1, 7).merge(t.cell(1, 8))
+        t.cell(2, 0).text = well
+        for i, (date, vals) in enumerate(rows):
+            r = t.rows[2] if i == 0 else t.add_row()
+            ri = len(t.rows) - 1 if i else 2
+            t.cell(ri, 1).text = date
+            for ci, x in enumerate(vals[:3]):
+                t.cell(ri, 3 + ci).text = x
+            t.cell(ri, 6).merge(t.cell(ri, 7))       # xylene over two columns
+            t.cell(ri, 6).text = vals[3]
+            t.cell(ri, 8).text = vals[4]
+    doc.add_paragraph("סיכום")
+    doc.add_paragraph("בתאריכים 07.02.2026 ו-11.02.2026 התבצע דיגום תקופתי של מי התהום בקידוחים פפ-1 ו-פפ-2;")
+    doc.add_paragraph("להלן פירוט ריכוזי המרכיבים שאותרו באירוע ניטור זה החורגים מריכוז היעד לשיקום:")
+    doc.add_paragraph('בקידוח פפ-2 אותר בנזן בריכוז של 0.364 ו-0.112 מ"ג לליטר בתאריכים 07.02.2026 ו-11.02.2026 בהתאמה.')
+    doc.add_paragraph("המלצה")
+    return doc
+
+
+def _june_samples():
+    return {
+        "פפ-1": {"results": {"בנזן": None, "טולואן": None, "אתיל בנזן": None, "קסילן": 0.013, "MTBE": None},
+                 "result_text": {"קסילן": "0.013"},
+                 "field": {"pH": 7.09, "EC": 601.0, "רדוקס": -75.0, "עומק פני המים": 11.8,
+                           "עומק כללי של הקידוח": 17.7},
+                 "field_text": {"pH": "7.09", "EC": "601", "רדוקס": "-75", "עומק פני המים": "11.80",
+                                "עומק כללי של הקידוח": "17.70"}},
+        "פפ-2": {"results": {"בנזן": 0.37, "טולואן": 0.023, "אתיל בנזן": 0.05, "קסילן": 0.079, "MTBE": 0.07},
+                 "result_text": {"בנזן": "0.370", "טולואן": "0.023", "אתיל בנזן": "0.050",
+                                 "קסילן": "0.079", "MTBE": "0.070"},
+                 "field": {"pH": 6.94, "EC": 1171.0, "רדוקס": -187.0, "עומק פני המים": 11.91,
+                           "עומק כללי של הקידוח": 17.71},
+                 "field_text": {"pH": "6.94", "EC": "1171", "רדוקס": "-187", "עומק פני המים": "11.91",
+                                "עומק כללי של הקידוח": "17.71"}},
+    }
+
+
+def test_merged_cells_nested_field_table_and_one_off_table():
+    doc = _parbar_like()
+    samples = _june_samples()
+    wells = ["פפ-1", "פפ-2"]
+    once_before = [[c.text for c in r.cells] for r in doc.tables[0].rows]
+
+    upd._update_field_table(doc, samples, wells)
+    assert upd._update_chem_history_tables(doc, "10.06.26", samples, wells)
+    targets = upd._cell_targets(doc.tables[2])
+    assert targets == {"בנזן": 0.1, "טולואן": 14.0, "אתיל בנזן": 6.0, "קסילן": 10.0, "MTBE": 0.8}
+    upd._update_narrative_placeholders(doc, "10.06.26", None)
+    upd._update_summary_well_bullets(doc, samples, targets)
+
+    # the one-off before/after table is untouched
+    assert [[c.text for c in r.cells] for r in doc.tables[0].rows] == once_before
+    # the nested field table took the round, as the lab printed it
+    inner = doc.tables[1].cell(0, 0).tables[0]
+    rows = {r.cells[0].text: [c.text for c in r.cells[2:]] for r in inner.rows}
+    assert rows["pH"] == ["7.09", "6.94"]
+    assert rows["EC"] == ["601", "1,171"]
+    assert rows["עומק פני המים"] == ["11.80", "11.91"]
+    assert rows["עומק הקידוח"] == ["17.70", "17.71"]
+    # history: each value in its own column despite the merged cells
+    hist = upd._well_history(doc)
+    assert hist["פפ-1"][-1] == ("10.06.26", {"בנזן": "<0.001", "טולואן": "<0.001", "אתיל בנזן": "<0.001",
+                                             "קסילן": "0.013", "MTBE": "<0.001"})
+    assert hist["פפ-2"][-1] == ("10.06.26", {"בנזן": "0.370", "טולואן": "0.023", "אתיל בנזן": "0.050",
+                                             "קסילן": "0.079", "MTBE": "0.070"})
+    assert hist["פפ-1"][-2][1]["MTBE"] == "0.0117"  # the previous row is unchanged
+    # summary: the round's date and only the exceedances
+    texts = [p.text for p in doc.paragraphs]
+    assert "בתאריך 10.06.26 התבצע דיגום תקופתי של מי התהום בקידוחים פפ-1 ו-פפ-2;" in texts
+    i = next(i for i, t in enumerate(texts) if t.startswith("להלן"))
+    assert texts[i + 1] == 'בקידוח פפ-2 אותר בנזן בריכוז של 0.370 מ"ג/ליטר;'
+    assert texts[i + 2] == "המלצה"
+
+
+def test_mk_pages_found_after_the_trend_sentence_without_captions():
+    doc = Document()
+    doc.add_paragraph("בגרפים הבאים מוצגת מגמת השתנות הפרמטרים העיקריים כנגד הזמן בקידוחים:")
+    doc.add_paragraph().add_run().add_picture(io.BytesIO(_png()), width=Inches(1))
+    doc.add_paragraph().add_run().add_picture(io.BytesIO(_png()), width=Inches(1))
+    doc.add_paragraph("סיכום והמלצות")
+    slots = upd._chart_slots(doc, ["בנזן", "MTBE"])
+    assert list(slots) == ["בנזן", "MTBE"]
+    assert slots["בנזן"] is not slots["MTBE"]
+
+
+def test_two_wells_in_one_history_table_each_get_their_row_at_the_end():
+    doc = Document()
+    t = doc.add_table(rows=1, cols=8)
+    for ci, x in enumerate(["קידוח", "תאריך דיגום", "", "MTBE", "בנזן", "טולואן", "אתיל בנזן", "כסילן"]):
+        t.cell(0, ci).text = x
+    for well, dates in (("חק-2", ["05.02.26", "02.06.26"]), ("חק-3", ["05.02.26", "02.06.26"])):
+        for i, d in enumerate(dates):
+            cells = t.add_row().cells
+            cells[0].text = well if i == 0 else ""
+            cells[1].text = d
+            for ci in range(3, 8):
+                cells[ci].text = "0.001"
+    samples = {w: {"results": {"MTBE": 0.002, "בנזן": None, "טולואן": None, "אתיל בנזן": None, "קסילן": None}}
+               for w in ("חק-2", "חק-3")}
+    upd._update_chem_history_tables(doc, "01.10.26", samples, ["חק-2", "חק-3"])
+    assert [r.cells[1].text for r in t.rows[1:]] == [
+        "05.02.26", "02.06.26", "01.10.26", "05.02.26", "02.06.26", "01.10.26"]

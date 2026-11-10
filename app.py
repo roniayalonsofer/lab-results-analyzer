@@ -2110,8 +2110,8 @@ elif page == "groundwater":
         st.markdown("#### 3 · Mann-Kendall (רשות)")
         mk_file = st.file_uploader(
             "קובץ Mann-Kendall (.xls)", type=["xls"], key="gw_mk",
-            help="הקובץ רק נקרא ולא משתנה. הגרפים בדוח מוחלפים בעמודי MK מעודכנים, "
-                 "ותקבלו קובץ קטן עם השורות להדבקה בקובץ ה-MK.",
+            help="עמודי ה-MK בדוח מוחלפים בעמודים חדשים שכוללים את הדיגום הזה. "
+                 "הקובץ שלך רק נקרא ולא משתנה.",
         )
         with st.expander("✍️ פרטי עמוד השער (רשות)"):
             gw_author_name = st.text_input("מחבר הדוח", key="gw_author_name")
@@ -2229,16 +2229,17 @@ elif page == "groundwater":
                         key="gw_dl_periodic",
                     )
                     if result.get("paste"):
-                        st.download_button(
-                            "⬇️ הורד שורות להדבקה בקובץ Mann-Kendall",
-                            data=result["paste"],
-                            file_name="שורות_להדבקה_Mann_Kendall.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True,
-                            key="gw_dl_mk_rows",
-                        )
-                        st.caption("קובץ ה-MK שלך לא שונה. בקובץ שהורדת מופיעים לכל גיליון מספר השורה "
-                                   "והערכים להקלדה; הנוסחאות והגרפים בקובץ יתעדכנו לבד.")
+                        with st.expander("📝 להוספת הדיגום גם לקובץ ה-Mann-Kendall שלך (לא חובה)"):
+                            st.caption("הגרפים בדוח כבר עודכנו. קובץ ה-MK שלך לא שונה. אם תרצי שהדיגום "
+                                       "יופיע גם בו, בקובץ הזה כתוב לכל גיליון באיזו שורה להקליד ומה.")
+                            st.download_button(
+                                "⬇️ הורד ערכים להקלדה בקובץ ה-MK",
+                                data=result["paste"],
+                                file_name="ערכים_להקלדה_Mann_Kendall.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True,
+                                key="gw_dl_mk_rows",
+                            )
                 for n in result.get("notes", []):
                     st.warning("⚠️ " + n)
                 if result.get("error"):
@@ -2383,14 +2384,17 @@ elif page == "groundwater":
                         if ann_charts:
                             st.info("📈 עמודי Mann-Kendall הוחלפו בדוח: " + ", ".join(ann_charts))
                         if ann_paste:
-                            st.download_button(
-                                "⬇️ הורד שורות להדבקה בקובץ Mann-Kendall",
-                                data=ann_paste,
-                                file_name=f"שורות_להדבקה_Mann_Kendall_{ann_year}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True,
-                                key="ann_dl_mk_rows",
-                            )
+                            with st.expander("📝 להוספת הדיגומים גם לקובץ ה-Mann-Kendall שלך (לא חובה)"):
+                                st.caption("הגרפים בדוח כבר עודכנו. קובץ ה-MK שלך לא שונה. בקובץ הזה כתוב "
+                                           "לכל גיליון באיזו שורה להקליד ומה.")
+                                st.download_button(
+                                    "⬇️ הורד ערכים להקלדה בקובץ ה-MK",
+                                    data=ann_paste,
+                                    file_name=f"ערכים_להקלדה_Mann_Kendall_{ann_year}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True,
+                                    key="ann_dl_mk_rows",
+                                )
 
                     except Exception as _e:
                         import traceback

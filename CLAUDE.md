@@ -158,6 +158,28 @@ everything else in those tables (older rows) is left untouched.
   `apply_mann_kendall`, but needs a real annual sample before more work.
 - Per-well result tables on the site map ("חק-4 / date / תרכובת | ריכוז יעד |
   ריכוז") are updated by `_update_well_cards`, bold over the card's own target.
+- Map labels in text boxes: the newest date on the map becomes the round's
+  date, and "MTBE/בנזן" pairs ("0.0117/0.00057") are matched to their well by
+  the previous round's history values, then tagged in the drawing's hidden
+  title (`gw-label:<well>|<p1>|<p2>`) so later rounds find them even when two
+  wells show the same values (`_update_map_labels`).
+- MK pages without a "גרף מספר" caption: the pictures right after "בגרפים
+  הבאים מוצגת מגמת ..." are taken in the MK file's sheet order.
+
+### Tables: grid columns, nested tables, one-off tables
+
+- Read chemistry tables by **grid column**, never by `row.cells` index:
+  headers and rows span different columns (MTBE header over two columns, a
+  row's xylene over two, `w:gridBefore`). `_history_header`,
+  `_row_param_cells` and `_history_rows` do this; a table may hold several
+  parts, each row uses the header above it.
+- Search tables with `_all_tables(doc)`: some field tables sit inside a
+  one-cell frame table, which `doc.tables` does not list.
+- A one-off table (e.g. before/after an injection) shows a well twice; the
+  current field table is the one with one column per well, so the one-off
+  is never touched.
+- Keep the lab's printed digits: Bactochem gives `result_text` / `field_text`
+  ("0.370", "11.80"), used instead of reformatting the float.
 
 ### Idempotency / re-running safely
 

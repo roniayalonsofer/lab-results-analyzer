@@ -390,6 +390,15 @@ _WELL_COLORS = ["#000080", "#c0504d", "#9bbb59", "#8064a2", "#4bacc6", "#f79646"
 _MARKERS = ["D", "s", "^", "x", "*", "o"]
 
 
+def _mpl_does_bidi() -> bool:
+    """matplotlib 3.11+ shapes text with libraqm, which already orders Hebrew right to left."""
+    try:
+        from matplotlib import ft2font
+    except Exception:
+        return False
+    return hasattr(ft2font, "__libraqm_version__")
+
+
 def _bidi(text: str) -> str:
     """
     Visual order for matplotlib, which draws left to right: the label is a
@@ -400,6 +409,8 @@ def _bidi(text: str) -> str:
     import re
     if not re.search(r"[֐-׿]", text):
         return text
+    if _mpl_does_bidi():
+        return text  # matplotlib lays out right-to-left text itself (libraqm)
     parts = re.split(r"([A-Za-z0-9][A-Za-z0-9.,/]*)", text)
     out = [p if re.match(r"[A-Za-z0-9]", p or " ") else p[::-1] for p in parts]
     return "".join(reversed(out))
