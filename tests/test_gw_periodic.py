@@ -704,3 +704,21 @@ def test_latin_wells_two_day_round_slash_dates_and_gray_marks():
     # a two-day round shows as one
     r = Round(date=datetime(2025, 9, 3), lab="bactochem", end_date=datetime(2025, 9, 4))
     assert r.span_str == "03-04.09.25"
+
+
+def test_sampler_sentence_with_two_names_and_mk_summary():
+    doc = Document()
+    p1 = doc.add_paragraph("הקידוחים נדגמו בשיטת Low Flow על ידי מר אחיעד וייס ומר יובל סבר, "
+                           "דוגמי חברת אדמה אפיון ושיקום אתרים. השאיבה התבצעה עד התייצבות.")
+    p2 = doc.add_paragraph("על פי מודל MANN-KENDALL ישנה מגמת ירידה בריכוזי הבנזן וה-MTBE ב- 10 קידוחים.")
+    buf = io.BytesIO()
+    doc.save(buf)
+    out = upd.apply_samplers(buf.getvalue(), ["לידור סוויסה", "לידור"], "י.ד.ע מים וסביבה")
+    d = Document(io.BytesIO(out))
+    assert "על ידי מר לידור סוויסה, דוגם חברת י.ד.ע מים וסביבה. השאיבה" in d.paragraphs[0].text
+    assert upd._update_mk_summary(d, {"בנזן": {"EAZ-1": "Decreasing", "EAZ-2": "Prob. Decreasing",
+                                               "EAZ-3": "Decreasing", "EAZ-12": "Increasing"},
+                                      "MTBE": {"EAZ-1": "Stable", "EAZ-2": "No Trend"}})
+    t = d.paragraphs[1].text
+    assert "ב- 3 קידוחים (בקידוחים EAZ-1 עד EAZ-3 קיימת ירידה בריכוזי הבנזן)" in t
+    assert "למעט מגמת עלייה בריכוזי הבנזן בקידוח EAZ-12." in t

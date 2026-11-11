@@ -2336,6 +2336,49 @@ def _num_txt(v: float) -> str:
     return f"{int(v)}" if v == int(v) else f"{v:g}"
 
 
+def _replace_sampler(p, sampler_name: str, sampler_org: str = None) -> bool:
+    """
+    "על ידי מר X, דוגם מעבדת Y." and "על ידי מר X ומר Z, דוגמי חברת Y." →
+    the round's sampler(s); `sampler_name` may hold several ("A ומר B").
+    The word before the company ("מעבדת"/"חברת") is kept.
+    """
+    pat = r"על ידי\s+מר\s+.+?,\s*דוג[םמ]\S*\s+(מעבדת|חברת)\s+(.+?)(?=\.\s|\.$)"
+    m = re.search(pat, p.text)
+    if not m:
+        return False
+    word = "דוגמי" if " ומר " in sampler_name else "דוגם"
+    org = sampler_org or m.group(2)
+    return _replace_in_paragraph(p, pat, lambda mm: f"על ידי מר {sampler_name}, {word} {mm.group(1)} {org}")
+
+
+def _samplers_text(names) -> str:
+    """Distinct names, a shorter one inside a longer one dropped ("לידור" in "לידור סוויסה")."""
+    names = [n.strip() for n in names if n and n.strip()]
+    keep = []
+    for n in sorted(set(names), key=len, reverse=True):
+        if not any(n in k for k in keep):
+            keep.append(n)
+    keep.sort(key=names.index)
+    return " ומר ".join(keep)
+
+
+def apply_samplers(word_bytes: bytes, names: list, org: str = None) -> bytes:
+    """After all rounds: everyone who sampled in them, in the sampling sentence."""
+    txt = _samplers_text(names)
+    if not txt:
+        return word_bytes
+    doc = Document(BytesIO(word_bytes))
+    changed = False
+    for p in doc.paragraphs:
+        if "על ידי מר" in p.text and "דוג" in p.text:
+            changed |= bool(_replace_sampler(p, txt, org))
+    if not changed:
+        return word_bytes
+    out = BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
+
 def _update_sampling_paragraphs(doc: Document, samples: dict, sampler_name: str, sampler_org: str = None):
     """
     The field-round sentences: the sampler's name ("על ידי מר X, דוגם"),
@@ -2346,11 +2389,8 @@ def _update_sampling_paragraphs(doc: Document, samples: dict, sampler_name: str,
     flows = sorted({round(s["flow_lpm"], 2) for s in samples.values() if s.get("flow_lpm") is not None})
     for p in doc.paragraphs:
         t = p.text
-        if sampler_name and "על ידי מר" in t and "דוגם" in t:
-            _replace_in_paragraph(p, r"(על ידי מר)\s*[^,]+?(,\s*דוגם)", rf"\1 {sampler_name}\2")
-            if sampler_org:
-                # "דוגם מעבדת י.ד.ע מים וסביבה." → the lab that sent the sampler
-                _replace_in_paragraph(p, r"(דוגם\s+מעבדת)\s+.+?(?=\.\s|\.$)", rf"\1 {sampler_org}")
+        if sampler_name and "על ידי מר" in t and "דוג" in t:
+            _replace_sampler(p, sampler_name, sampler_org)
         if vols and "ליטר" in t and "נעה בין" in t:
             lo, hi = round(min(vols)), round(max(vols))
             if lo == hi:
@@ -2765,7 +2805,74 @@ def _update_mann_kendall(doc: Document, mk_xls_bytes: bytes, rounds: list) -> tu
             _put_picture(doc, slots[key], mk.render_sheet_png(sh, stats, last_dt))
             updated.append(param if key == param else f"{param} ({sh.wells[0]}-{sh.wells[-1]})")
     paste = mk.paste_rows_xlsx(added) if added else None
+    trends = {}
+    for key, sh in sheets.items():
+        for w, st in mk.sheet_stats(sh, wb.kendall_dist).items():
+            if st.get("trend"):
+                trends.setdefault(sh.param, {})[w] = st["trend"]
+    if _update_mk_summary(doc, trends):
+        notes.append("פסקת Mann-Kendall בסיכום נכתבה מחדש לפי המגמות המחושבות. כדאי לעבור עליה.")
     return paste, updated, notes
+
+
+def _wells_list(wells: list) -> str:
+    """'EAZ-1 עד EAZ-6, EAZ-8 ו- EAZ-13': runs of consecutive numbers as ranges."""
+    ws = sorted(set(wells), key=lambda w: (_well_prefix(w), int(_well_num(w) or 0)))
+    parts, run = [], []
+    for w in ws + [None]:
+        if run and w is not None and _well_prefix(w) == _well_prefix(run[-1]) \
+                and int(_well_num(w)) == int(_well_num(run[-1])) + 1:
+            run.append(w)
+            continue
+        if run:
+            parts.append(f"{run[0]} עד {run[-1]}" if len(run) > 2 else ", ".join(run))
+        run = [w] if w is not None else []
+    flat = ", ".join(parts)
+    if ", " in flat:
+        head, tail = flat.rsplit(", ", 1)
+        return f"{head} ו- {tail}"
+    return flat
+
+
+def _in_wells(wells: list) -> str:
+    return f"בקידוח {wells[0]}" if len(set(wells)) == 1 else f"בקידוחים {_wells_list(wells)}"
+
+
+_PARAM_WORD = {"בנזן": "הבנזן", "MTBE": "ה- MTBE", "טולואן": "הטולואן",
+               "אתיל בנזן": "האתיל בנזן", "קסילן": "הקסילן"}
+
+
+def _update_mk_summary(doc: Document, trends: dict) -> bool:
+    """
+    The summary's Mann-Kendall paragraph ("על פי מודל MANN-KENDALL ישנה מגמת
+    ירידה ..."), written again from the trends the toolkit computes: falling
+    (Decreasing / Prob. Decreasing) and rising (Increasing / Prob. Increasing)
+    wells per compound; the other wells are stable or have no trend.
+    """
+    if not trends:
+        return False
+    para = next((p for p in doc.paragraphs
+                 if "KENDALL" in p.text.upper() and "מגמ" in p.text), None)
+    if para is None:
+        return False
+    params = [p for p in ("בנזן", "MTBE", "טולואן", "אתיל בנזן", "קסילן") if p in trends]
+    down = {p: [w for w, tr in trends[p].items() if "Decreasing" in tr] for p in params}
+    up = {p: [w for w, tr in trends[p].items() if "Increasing" in tr] for p in params}
+    all_down = {w for p in params for w in down[p]}
+    names = " ו".join(_PARAM_WORD.get(p, p) for p in params)
+    if all_down:
+        parts = [f"{_in_wells(down[p])} קיימת ירידה בריכוזי {_PARAM_WORD.get(p, p)}"
+                 for p in params if down[p]]
+        text = (f"על פי מודל MANN-KENDALL ישנה מגמת ירידה בריכוזי {names} ב- {len(all_down)} "
+                f"קידוחים ({' ו'.join(parts)}).")
+    else:
+        text = f"על פי מודל MANN-KENDALL לא נמצאה מגמת ירידה בריכוזי {names}."
+    rising = [f"בריכוזי {_PARAM_WORD.get(p, p)} {_in_wells(up[p])}" for p in params if up[p]]
+    if rising:
+        text += " ביתר הקידוחים המגמה יציבה או ללא שינוי, למעט מגמת עלייה " + " ו".join(rising) + "."
+    else:
+        text += " ביתר הקידוחים המגמה יציבה או ללא שינוי."
+    return _replace_in_paragraph(para, r"^.*\S", lambda m: text)
 
 
 _MONTH_RE = "(?:" + "|".join(HEBREW_MONTHS) + ")"
@@ -2940,7 +3047,7 @@ def run_update_bytes(
             form = {"wells": {}, "sampler_name": None, "sampling_date": None}
             for f in forms:
                 form["wells"].update(f.get("wells", {}))
-                form["sampler_name"] = form["sampler_name"] or f.get("sampler_name")
+                form["sampler_name"] = _samplers_text([form["sampler_name"], f.get("sampler_name")]) or None
                 d = f.get("sampling_date")
                 if d and (form["sampling_date"] is None or d < form["sampling_date"]):
                     form["sampling_date"] = d

@@ -2242,6 +2242,18 @@ elif page == "groundwater":
                     if result["word"]:
                         done = [r for r in rounds if any(x["date"] == r.date_str for x in result["rounds"])]
                         if done:
+                            # everyone who sampled in these rounds (Yeda's forms)
+                            from soil_lab_tool.core.gw_round_inputs import parse_yeda_field_form
+                            from soil_lab_tool.gw_report_updater import apply_samplers
+                            _names = []
+                            for r in done:
+                                for fb in (r.form_bytes or []):
+                                    try:
+                                        _names.append(parse_yeda_field_form(fb).get("sampler_name"))
+                                    except Exception:
+                                        pass
+                            if any(_names):
+                                result["word"] = apply_samplers(result["word"], _names, "י.ד.ע מים וסביבה")
                             from soil_lab_tool.gw_report_updater import apply_report_period
                             result["word"] = apply_report_period(
                                 result["word"], min(r.date for r in done),
