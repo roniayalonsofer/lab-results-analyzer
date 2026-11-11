@@ -186,7 +186,12 @@ def update_report_form(form_bytes: bytes, samples: dict, dates: list, factor: fl
     for fb in field_forms or []:
         from soil_lab_tool.core.gw_round_inputs import parse_yeda_field_form
         _set_well_ambiguity(list(samples))
-        _merge_field_form(samples, parse_yeda_field_form(fb))
+        form = parse_yeda_field_form(fb)
+        for well in _merge_field_form(samples, form):
+            # measured in the field but not sent to the lab: field rows only
+            w = form["wells"][well]
+            samples[well] = {"field": dict(w.get("field", {})), "results": {}, "limits": {},
+                             "water_level": w.get("water_level")}
     wb, ws = _read(form_bytes)
     _, cols = _well_columns(ws)
     if not cols:
