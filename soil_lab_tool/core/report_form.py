@@ -113,6 +113,12 @@ def unit_factor(form_bytes: bytes, previous: dict) -> float:
         ratios.sort()
         mid = ratios[len(ratios) // 2]
         return 1000.0 if mid > 30 else 1.0
+    # No report to compare with: a value under 0.01 is mg/L (µg/L forms
+    # don't go that low); "<0.20"-style or large values mean µg/L.
+    vals = [_num(ws.cell(r, c).value) for p, r in rows.items() if p in CHEM_CODES.values() for c in cols]
+    vals = [v for v in vals if v]
+    if vals:
+        return 1.0 if min(vals) < 0.01 else 1000.0
     unit = " ".join(str(ws.cell(r, 3).value or "") for r in rows.values())
     return 1000.0 if re.search(r"[µμu]g", unit) else 1.0
 
