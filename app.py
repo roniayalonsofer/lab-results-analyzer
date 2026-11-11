@@ -2104,7 +2104,7 @@ elif page == "groundwater":
             type=["pdf", "xlsx", "xls", "csv"], accept_multiple_files=True, key="gw_round_files",
         )
         st.caption("💡 אפשר לגרור את כל תיקיית תוצאות המעבדה: תעודות של ALS, בקטוכם או אמינולאב, "
-                   "טופס ביצוע העבודה של ידע מים, וגם קובץ Mann-Kendall. כל קובץ מזוהה לבד. "
+                   "טופס ביצוע העבודה של ידע מים, קובץ Mann-Kendall וטופס הדיווח לרשות המים (יתעדכן לכל דיגום). כל קובץ מזוהה לבד. "
                    "כמה דיגומים יחד יוחלו לפי הסדר מהישן לחדש.")
 
         st.markdown("#### 3 · Mann-Kendall (רשות)")
@@ -2197,6 +2197,28 @@ elif page == "groundwater":
                         result["rounds"].append({"date": r.date_str, "exceed": rep.get("exceedances", []),
                                                  "has_targets": rep.get("has_targets", False)})
                         result["notes"].extend(rep.get("notes", []))
+                    if result["word"]:
+                        done = [r for r in rounds if any(x["date"] == r.date_str for x in result["rounds"])]
+                        if done:
+                            from soil_lab_tool.gw_report_updater import apply_report_period
+                            result["word"] = apply_report_period(
+                                result["word"], min(r.date for r in done),
+                                max((r.end_date or r.date) for r in done))
+                    rf = sorted_files.get("report_form") if sorted_files else None
+                    if result["word"] and rf:
+                        try:
+                            from datetime import datetime as _dt
+                            from soil_lab_tool.core.report_form import (
+                                previous_results, unit_factor, update_report_form)
+                            _factor = unit_factor(rf[1], previous_results(word_file.getvalue()))
+                            result["forms"] = []
+                            for r in done:
+                                days = sorted({_dt.strptime(s["date"], "%d.%m.%y") for s in r.samples.values()
+                                               if re.fullmatch(r"\d{2}\.\d{2}\.\d{2}", str(s.get("date") or ""))}) or [r.date]
+                                result["forms"].append((r.span_str, update_report_form(
+                                    rf[1], r.samples, days, _factor, {}, r.form_bytes)))
+                        except Exception as form_err:
+                            result["notes"].append(f"טופס הדיווח לא עודכן: {form_err}")
                     if result["word"] and mk_input:
                         try:
                             done = [r for r in rounds if any(x["date"] == r.date_str for x in result["rounds"])]
@@ -2247,6 +2269,13 @@ elif page == "groundwater":
                                 use_container_width=True,
                                 key="gw_dl_mk_rows",
                             )
+                for span, fb in result.get("forms", []):
+                    st.download_button(
+                        f"⬇️ הורד טופס דיווח מעודכן – דיגום {span}",
+                        data=fb, file_name=f"טופס דיווח - {span}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True, key=f"gw_dl_form_{span}",
+                    )
                 for n in result.get("notes", []):
                     st.warning("⚠️ " + n)
                 if result.get("error"):

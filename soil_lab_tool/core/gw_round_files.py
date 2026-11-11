@@ -83,6 +83,13 @@ def _parse_date(s):
 
 
 def _pdf_text(data: bytes, pages: int = 3) -> str:
+    # PyMuPDF first: a scanned page takes pdfplumber seconds, PyMuPDF a few ms.
+    try:
+        import fitz
+        with fitz.open(stream=data, filetype="pdf") as d:
+            return "\n".join(d[i].get_text() for i in range(min(pages, len(d))))
+    except Exception:
+        pass
     try:
         import pdfplumber
         with pdfplumber.open(io.BytesIO(data)) as pdf:
@@ -102,6 +109,18 @@ def _with_tmp_pdf(data: bytes, fn):
             os.remove(path)
         except OSError:
             pass
+
+
+def _is_report_form(data: bytes) -> bool:
+    """The Water Authority report form: compound codes 2009 (MTBE) and 84 (benzene) in column A."""
+    try:
+        import openpyxl
+        ws = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True).worksheets[0]
+        codes = {str(r[0]).strip() for r in ws.iter_rows(min_col=1, max_col=1, max_row=80, values_only=True)
+                 if r and r[0] is not None}
+        return {"2009", "84"} <= codes
+    except Exception:
+        return False
 
 
 def identify(name: str, data: bytes) -> dict:
@@ -124,6 +143,8 @@ def identify(name: str, data: bytes) -> dict:
         return {"kind": "ignored", "reason": "קובץ CSV שלא זוהה כתוצאות בקטוכם"}
 
     if low.endswith((".xlsx", ".xls", ".xlsm")):
+        if low.endswith((".xlsx", ".xlsm")) and _is_report_form(data):
+            return {"kind": "report_form"}
         if low.endswith(".xlsx") and gri.is_yeda_field_form(data):
             form = gri.parse_yeda_field_form(data)
             d = form.get("sampling_date")
@@ -132,8 +153,9 @@ def identify(name: str, data: bytes) -> dict:
         if low.endswith(".xls"):
             try:
                 from soil_lab_tool.core.gw_mann_kendall import read_mk_workbook
-                read_mk_workbook(data)
-                return {"kind": "mk"}
+                wb = read_mk_workbook(data)
+                dates = [d for sh in wb.sheets for d, _ in sh.events]
+                return {"kind": "mk", "last": max(dates) if dates else None}
             except Exception:
                 pass
         try:
@@ -152,6 +174,12 @@ def identify(name: str, data: bytes) -> dict:
                         "samples": rnd["samples"]}
             except Exception:
                 pass
+        # Yeda Water's field sheets ("טפסי עבודה", heavy scans): known from
+        # their first pages, before any lab reader goes through every page.
+        is_yeda = "ע.ד.י" in text or "yeda-water" in text.lower()
+        if is_yeda and "CAS" not in text and "CERTIFICATE" not in text.upper():
+            return {"kind": "side",
+                    "reason": "טפסי שדה ב-PDF (לנספח). הנתונים נקראים מטופס ביצוע העבודה ב-Excel"}
         from soil_lab_tool.gw_report_updater import parse_aminolab_pdf, parse_bactochem_pdf
         for kind, fn in (("bactochem", parse_bactochem_pdf), ("aminolab", parse_aminolab_pdf)):
             try:
@@ -182,7 +210,8 @@ def identify(name: str, data: bytes) -> dict:
 def sort_round_files(files: list) -> dict:
     rounds: dict = {}
     forms, ignored, notes, side = [], [], [], []
-    mk = None
+    mk, mk_last = None, None
+    report_form = None
     for name, data in files:
         try:
             info = identify(name, data)
@@ -194,10 +223,20 @@ def sort_round_files(files: list) -> dict:
         elif kind == "side":
             side.append((name, info["reason"]))
         elif kind == "mk":
-            if mk:
-                ignored.append((name, "כבר הועלה קובץ Mann-Kendall אחר"))
+            # Several toolkit files (old per-well templates next to the real
+            # one): use the one whose data reaches the latest date.
+            last = info.get("last")
+            if mk is None or (last and (mk_last is None or last > mk_last)):
+                if mk:
+                    side.append((mk[0], "קובץ Mann-Kendall ישן יותר מקובץ אחר שהועלה"))
+                mk, mk_last = (name, data), last
             else:
-                mk = (name, data)
+                side.append((name, "קובץ Mann-Kendall ישן יותר מקובץ אחר שהועלה"))
+        elif kind == "report_form":
+            if report_form:
+                side.append((name, "כבר הועלה טופס דיווח אחר"))
+            else:
+                report_form = (name, data)
         elif kind == "field_form":
             forms.append((name, data, info.get("date")))
         else:
@@ -302,4 +341,5 @@ def sort_round_files(files: list) -> dict:
                 r.samples = {wells[0]: r.samples[nameless[0]]}
                 notes.append(f"בדיגום {r.date_str} הדגימה '{nameless[0]}' שויכה לבאר {wells[0]} "
                              "לפי טופס השדה.")
-    return {"rounds": ordered, "mk": mk, "ignored": ignored, "notes": notes, "side": side}
+    return {"rounds": ordered, "mk": mk, "ignored": ignored, "notes": notes, "side": side,
+            "report_form": report_form}

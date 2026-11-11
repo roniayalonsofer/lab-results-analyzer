@@ -214,9 +214,22 @@ def report_sheets(wb: MKWorkbook) -> dict:
         if not sh.param or not sh.events:
             continue
         key = (max(d for d, _ in sh.events), len(sh.events))
-        if sh.param not in best or key > best[sh.param][0]:
-            best[sh.param] = (key, sh)
-    return {p: v[1] for p, v in best.items()}
+        # A compound can be split over sheets by wells ("MTBE 1-7", "MTBE 8-14"):
+        # each set of wells is a page of its own in the report.
+        group = (sh.param, tuple(sh.wells))
+        if group not in best or key > best[group][0]:
+            best[group] = (key, sh)
+    latest = {}
+    for (param, wells), (key, sh) in best.items():
+        latest[param] = max(latest.get(param, key[0]), key[0])
+    out, seen = {}, {}
+    for (param, wells), (key, sh) in best.items():
+        # an older period of the same compound ("MTBE (2010-2019)") is not a page
+        if key[0] < latest[param] and any(set(wells) & set(w) for (p, w) in best if p == param and best[(p, w)][0][0] == latest[param]):
+            continue
+        seen[param] = seen.get(param, 0) + 1
+        out[param if seen[param] == 1 else f"{param}#{seen[param]}"] = sh
+    return out
 
 
 def mk_value(result, measured: bool = True):

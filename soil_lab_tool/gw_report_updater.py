@@ -714,9 +714,10 @@ def _find_field_table(doc: Document):
     for tbl in _all_tables(doc):
         score = 0
         for row in tbl.rows:
-            if not row.cells:
+            first = _tc_texts(row, 1)
+            if not first:
                 continue
-            label = row.cells[0].text.strip().rstrip("*")
+            label = first[0].strip().rstrip("*")
             if label in _FIELD_PARAM_HINTS or label in _FIELD_ROW_ALIASES:
                 score += 1
         if score < 3:
@@ -907,7 +908,7 @@ def _field_table_parts(doc: Document, best) -> list:
     for tbl in _all_tables(doc):
         if not tbl.rows:
             continue
-        labels = {row.cells[0].text.strip().rstrip("*") for row in tbl.rows if row.cells}
+        labels = {x[0].strip().rstrip("*") for x in (_tc_texts(row, 1) for row in tbl.rows) if x}
         if sum(1 for lb in labels if lb in _FIELD_PARAM_HINTS or lb in _FIELD_ROW_ALIASES) < 3:
             continue
         heads = [c.text.strip() for c in tbl.rows[0].cells[1:]]
@@ -915,7 +916,9 @@ def _field_table_parts(doc: Document, best) -> list:
         if not heads or len(heads) != len(set(heads)):
             continue
         parts.append(tbl)
-    return parts if best in parts else [best]
+    if best is not None and any(p._tbl is best._tbl for p in parts):
+        return parts
+    return [best]
 
 
 def _update_field_columns(tbl, field_data: dict, wells: list):
@@ -1928,6 +1931,25 @@ def _grid_cells(row) -> list:
     return out
 
 
+def _tc_texts(row, n=2) -> list:
+    """Text of the row's first n cells as written (fast; a merged-down cell is empty)."""
+    from docx.table import _Cell
+    return [_ctext(_Cell(tc, row.table)) for tc in row._tr.findall(qn("w:tc"))[:n]]
+
+
+def _ctext(cell) -> str:
+    """A cell's text straight from the XML (python-docx's .text is slow on big tables)."""
+    out = []
+    for e in cell._tc.iter(qn("w:t"), qn("w:tab"), qn("w:p")):
+        if e.tag == qn("w:t"):
+            out.append(e.text or "")
+        elif e.tag == qn("w:tab"):
+            out.append("\t")
+        elif out:
+            out.append("\n")
+    return "".join(out).strip("\n")
+
+
 def _cell_at(row, col):
     for a, b, c in _grid_cells(row):
         if a <= col <= b:
@@ -1945,7 +1967,7 @@ def _history_header(row):
     """
     params, date_col, well_col = {}, None, None
     for a, b, c in _grid_cells(row):
-        t = c.text.strip()
+        t = _ctext(c).strip()
         if t in _PARAM_CANONICAL:
             params[a] = _PARAM_CANONICAL[t]
         elif "תאריך" in t and date_col is None:
@@ -1996,11 +2018,11 @@ def _history_rows(tbl):
         if header is None:
             continue
         wc = _cell_at(row, header["well"])
-        wt = wc.text.strip() if wc is not None else ""
+        wt = _ctext(wc).strip() if wc is not None else ""
         if wt and re.search(r'\d', wt) and len(wt) < 20:
             well = wt
         dc = _cell_at(row, header["date"])
-        m = _DATE_CELL.match(dc.text.strip()) if dc is not None else None
+        m = _DATE_CELL.match(_ctext(dc).strip()) if dc is not None else None
         if m and well:
             out.append((ri, well, m.group(1).replace("/", "."), header))
     return out
@@ -2008,18 +2030,12 @@ def _history_rows(tbl):
 
 def _all_tables(doc: Document):
     """Every table in the body, including tables nested inside table cells."""
-    def walk(tables):
-        for t in tables:
-            yield t
-            seen = set()
-            for row in t.rows:
-                for c in row.cells:
-                    if id(c._tc) in seen:
-                        continue
-                    seen.add(id(c._tc))
-                    if c.tables:
-                        yield from walk(c.tables)
-    yield from walk(doc.tables)
+    from docx.table import Table
+    for t in doc.tables:
+        yield t
+        for el in t._tbl.iter(qn("w:tbl")):
+            if el is not t._tbl:
+                yield Table(el, t._parent)
 
 
 def _clone_row_after(tbl, after_idx: int, tmpl_idx: int):
@@ -2046,7 +2062,7 @@ def _well_history(doc: Document) -> dict:
     hist = {}
     for tbl in _all_tables(doc):
         for ri, well, date_txt, header in _history_rows(tbl):
-            vals = {p: c.text.strip() for p, c in _row_param_cells(tbl.rows[ri], header).items()}
+            vals = {p: _ctext(c).strip() for p, c in _row_param_cells(tbl.rows[ri], header).items()}
             hist.setdefault(well, []).append((date_txt, vals))
     return hist
 
@@ -2064,15 +2080,22 @@ def _update_chem_history_tables(doc: Document, new_date: str, samples: dict, wel
     tables = [t for t in _all_tables(doc) if _is_chem_history_table(t)]
     if not tables:
         return False
+    cache = {}
+
+    def rows_of(tbl):
+        if id(tbl._tbl) not in cache:
+            cache[id(tbl._tbl)] = _history_rows(tbl)
+        return cache[id(tbl._tbl)]
+
     for well in wells_order:
         sample = samples.get(well)
         if not sample:
             continue
-        # Read again for every well: a row added for the previous well in
-        # the same table moves the rows below it.
+        # A row added for the previous well moves the rows below it, so a
+        # table is read again after it changed (cache dropped below).
         by_num = {}
         for tbl in tables:
-            for ri, w, date_txt, header in _history_rows(tbl):
+            for ri, w, date_txt, header in rows_of(tbl):
                 by_num.setdefault(_wkey(w), []).append((tbl, ri, w, date_txt, header))
         found = by_num.get(_wkey(well))
         if not found:
@@ -2083,11 +2106,57 @@ def _update_chem_history_tables(doc: Document, new_date: str, samples: dict, wel
         for r in found:
             kinds.setdefault(frozenset(r[4]["params"].values()), []).append(r)
         for rows in kinds.values():
-            _add_history_row(rows, sample, new_date)
+            _add_history_row(rows, sample, new_date, rows_of)
+            cache.pop(id(rows[-1][0]._tbl), None)
+    _flow_history_tables(tables)
     return True
 
 
-def _add_history_row(rows, sample, new_date):
+def _flow_history_tables(tables):
+    """
+    History tables that were pinned to a page (floating) and grew: all of
+    them flow with the text, the header block (compounds, units, limits)
+    repeats on every page, and a caption written right after a table moves
+    above it, where it shows.
+    """
+    if not any(t._tbl.tblPr is not None and t._tbl.tblPr.find(qn("w:tblpPr")) is not None
+               for t in tables):
+        return
+    from docx.oxml import OxmlElement
+    for tbl in tables:
+        was_floating = tbl._tbl.tblPr.find(qn("w:tblpPr")) is not None
+        _unfloat(tbl)
+        rows = _history_rows(tbl)
+        first_data = rows[0][0] if rows else 0
+        for row in tbl.rows[:first_data]:
+            trPr = row._tr.get_or_add_trPr()
+            if trPr.find(qn("w:tblHeader")) is None:
+                trPr.append(OxmlElement("w:tblHeader"))
+        if not was_floating:
+            continue
+        nxt, prv = tbl._tbl.getnext(), tbl._tbl.getprevious()
+        def is_caption(el):
+            return el is not None and el.tag == qn("w:p") and                 "טבלה מספר" in "".join(x.text or "" for x in el.iter(qn("w:t")))
+        if is_caption(nxt) and not is_caption(prv):
+            tbl._tbl.addprevious(nxt)
+
+
+def _unfloat(tbl):
+    """
+    A floating table (w:tblpPr, pinned to a spot on the page) that grows
+    runs over the next one; once rows are added it flows with the text.
+    """
+    tblPr = tbl._tbl.tblPr
+    pos = tblPr.find(qn("w:tblpPr")) if tblPr is not None else None
+    if pos is not None:
+        tblPr.remove(pos)
+        ov = tblPr.find(qn("w:tblOverlap"))
+        if ov is not None:
+            tblPr.remove(ov)
+
+
+def _add_history_row(rows, sample, new_date, rows_of=_history_rows):
+    """One new row for `sample` in the last table of `rows` (one table kind)."""
     if True:
         tbl = rows[-1][0]
         rows = [r for r in rows if r[0] is tbl]
@@ -2105,7 +2174,7 @@ def _add_history_row(rows, sample, new_date):
         prev = tbl.rows[tmpl]
         # A round sampled over several days: each well keeps its own date.
         row_date = sample.get("date") if re.fullmatch(r"\d{2}\.\d{2}\.\d{2}", str(sample.get("date") or "")) else new_date
-        style = _exceed_style(tbl, rows, targets)
+        style = _exceed_style(tbl, rows_of(tbl), targets)
         if last_date == row_date:
             new_row = tbl.rows[last]
         else:
@@ -2164,13 +2233,14 @@ def _exceed_style(tbl, rows, targets) -> dict:
     """
     from collections import Counter
     fills, bolds = Counter(), Counter()
-    for ri, _, _, h in _history_rows(tbl):
+    for ri, _, _, h in rows:
         for p, c in _row_param_cells(tbl.rows[ri], h).items():
+            ct = _ctext(c)
             try:
-                v = float(re.sub(r"[^\d.]", "", c.text) or "x")
+                v = float(re.sub(r"[^\d.]", "", ct) or "x")
             except ValueError:
                 continue
-            if p in targets and v > targets[p] and not re.search(r"[<>]", c.text):
+            if p in targets and v > targets[p] and not re.search(r"[<>]", ct):
                 fills[_fill_of(c)] += 1
                 bolds[any(r.bold for par in c.paragraphs for r in par.runs)] += 1
     if not fills:
@@ -2586,7 +2656,7 @@ _CHART_PARAM_WORDS = [
 def _trend_intro_index(paras):
     """The paragraph that introduces the trend charts ("בגרפים הבאים מוצגת מגמת ...")."""
     return next((i for i, p in enumerate(paras)
-                 if "מגמת" in p.text and ("בגרפים" in p.text or "בגרף" in p.text)), None)
+                 if "מגמ" in p.text and ("בגרפים" in p.text or "בגרף" in p.text)), None)
 
 
 def _chart_slots(doc: Document, sheet_order: list = None) -> dict:
@@ -2619,13 +2689,22 @@ def _chart_slots(doc: Document, sheet_order: list = None) -> dict:
         return slots
     pics = []
     for q in paras[intro + 1:]:
-        inls = q._p.findall('.//' + qn('wp:inline'))
+        inls = [e for e in q._p.iter() if e.tag in (qn('wp:inline'), qn('wp:anchor'))]
         if inls:
             pics.extend(inls)
         elif q.text.strip() and "יש לעדכן את קובץ Mann-Kendall" not in q.text:
             break
-    for param, inl in zip(sheet_order, pics):
-        slots[param] = inl
+    # The pictures follow the order the sentence names the compounds
+    # ("בנזן ו-MTBE"), then the order of the sheets.
+    text = paras[intro].text
+
+    def pos(key):
+        param = key.split("#")[0]
+        hits = [text.find(w) for w, pp in _CHART_PARAM_WORDS if pp == param and w in text]
+        return min(hits) if hits else len(text)
+    ordered = sorted(sheet_order, key=lambda k: (pos(k), sheet_order.index(k)))
+    for key, inl in zip(ordered, pics):
+        slots[key] = inl
     return slots
 
 
@@ -2661,7 +2740,8 @@ def _update_mann_kendall(doc: Document, mk_xls_bytes: bytes, rounds: list) -> tu
     rounds = sorted(rounds, key=lambda r: r[0])
     last_dt = rounds[-1][0]
     notes, updated, added = [], [], []
-    for param, sh in sheets.items():
+    for key, sh in sheets.items():
+        param = sh.param
         changed = False
         for when, samples in rounds:
             by_num = {_wkey(w): s for w, s in samples.items()}
@@ -2680,12 +2760,81 @@ def _update_mann_kendall(doc: Document, mk_xls_bytes: bytes, rounds: list) -> tu
                 continue
             changed = True
             added.append((sh, when))
-        if changed and param in slots:
+        if changed and key in slots:
             stats = mk.sheet_stats(sh, wb.kendall_dist)
-            _put_picture(doc, slots[param], mk.render_sheet_png(sh, stats, last_dt))
-            updated.append(param)
+            _put_picture(doc, slots[key], mk.render_sheet_png(sh, stats, last_dt))
+            updated.append(param if key == param else f"{param} ({sh.wells[0]}-{sh.wells[-1]})")
     paste = mk.paste_rows_xlsx(added) if added else None
     return paste, updated, notes
+
+
+_MONTH_RE = "(?:" + "|".join(HEBREW_MONTHS) + ")"
+_PERIOD_RE = re.compile(
+    rf"({_MONTH_RE})((?:\s*(?:,|-|–|עד|ו-?)\s*{_MONTH_RE})+)\s+(\d{{4}})")
+
+
+def _period_text(first: datetime, last: datetime, connector: str) -> str:
+    m1, m2 = HEBREW_MONTHS[first.month - 1], HEBREW_MONTHS[last.month - 1]
+    if (first.year, first.month) == (last.year, last.month):
+        return f"{m1} {first.year}"
+    if first.year == last.year:
+        return f"{m1}{connector}{m2} {last.year}"
+    return f"{m1} {first.year}{connector}{m2} {last.year}"
+
+
+def _update_report_period(doc: Document, first: datetime, last: datetime) -> int:
+    """
+    A report that covers a range of months ("ינואר - מרץ 2024" in its title)
+    gets the period of the rounds just added, in the title and wherever the
+    text names that same period ("בחודשים ינואר, פברואר ומרץ 2024"). A title
+    with a single month is left to _update_title_month_year.
+    """
+    def months(m):
+        return {mm for mm in re.findall(_MONTH_RE, m.group(0))}
+    title = None
+    for p in doc.paragraphs[:25]:
+        m = _PERIOD_RE.search(p.text)
+        if m and len(months(m)) >= 2:
+            idx = [HEBREW_MONTHS.index(x) for x in months(m)]
+            title = (set(HEBREW_MONTHS[min(idx):max(idx) + 1]), m.group(3))  # the whole span
+            break
+    if title is None:
+        return 0
+    old_months, old_year = title
+
+    def repl(m):
+        conn = " עד " if ("עד" in m.group(2) or "," in m.group(2)) else " - "
+        return _period_text(first, last, conn)
+
+    paras = list(doc.paragraphs)
+    for tbl in doc.tables:
+        for row in tbl.rows:
+            for c in row.cells:
+                paras.extend(c.paragraphs)
+    for sec in doc.sections:
+        for part in (sec.header, sec.first_page_header, sec.footer):
+            paras.extend(part.paragraphs)
+    n = 0
+    for p in paras:
+        for _ in range(3):
+            m = _PERIOD_RE.search(p.text)
+            if not m or m.group(3) != old_year or not months(m) <= old_months or len(months(m)) < 2:
+                break
+            if _replace_in_paragraph(p, _PERIOD_RE, repl):
+                n += 1
+            else:
+                break
+    return n
+
+
+def apply_report_period(word_bytes: bytes, first: datetime, last: datetime) -> bytes:
+    """After all rounds: the report's period ("אוקטובר 2024 - אוגוסט 2026"), when its title has one."""
+    doc = Document(BytesIO(word_bytes))
+    if not _update_report_period(doc, first, last):
+        return word_bytes
+    out = BytesIO()
+    doc.save(out)
+    return out.getvalue()
 
 
 def apply_mann_kendall(word_bytes: bytes, mk_xls_bytes: bytes, rounds: list, report: dict = None) -> tuple:
@@ -2698,6 +2847,7 @@ def apply_mann_kendall(word_bytes: bytes, mk_xls_bytes: bytes, rounds: list, rep
         report = {}
     report.setdefault("notes", [])
     doc = Document(BytesIO(word_bytes))
+    _set_well_ambiguity(w for t in _all_tables(doc) for _, w, _, _ in _history_rows(t))
     paste, charts, notes = _update_mann_kendall(doc, mk_xls_bytes, rounds)
     report["mk_charts"] = charts
     report["notes"].extend(notes)
@@ -2832,14 +2982,12 @@ def run_update_bytes(
         _date_pat = re.compile(r'^\*?\d{2}[./]\d{2}[./]\d{2}\*?$')
         well_depth = {}
         for tbl in doc.tables:
-            date_rows = sum(
-                1 for row in tbl.rows
-                if len(row.cells) >= 2 and _date_pat.match(row.cells[1].text.strip())
-            )
-            for row in tbl.rows:
-                if not row.cells:
+            texts = [_tc_texts(row, 2) for row in tbl.rows]
+            date_rows = sum(1 for x in texts if len(x) >= 2 and _date_pat.match(x[1].strip()))
+            for x in texts:
+                if not x:
                     continue
-                w = row.cells[0].text.strip()
+                w = x[0].strip()
                 if w and re.search(r'\d', w) and len(w) < 20:
                     if date_rows > well_depth.get(w, -1):
                         well_depth[w] = date_rows
