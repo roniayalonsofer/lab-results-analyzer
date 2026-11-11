@@ -9,7 +9,8 @@ auto_detect_lab, and field-contractor PDFs look like nothing at all.
     sort_round_files([(name, bytes), ...]) -> {
         "rounds":  [Round, ...]   oldest first,
         "mk":      (name, bytes) | None,
-        "ignored": [(name, reason), ...],
+        "ignored": [(name, reason), ...],   files that could not be used
+        "side":    [(name, reason), ...],   known papers the update doesn't need
         "notes":   [str, ...],
     }
 """
@@ -145,8 +146,15 @@ def identify(name: str, data: bytes) -> dict:
             if samples and date:
                 return {"kind": kind, "date": date, "samples": samples}
         if "ע.ד.י" in text or "yeda-water" in text.lower():
-            return {"kind": "ignored",
+            return {"kind": "side",
                     "reason": "טפסי שדה ב-PDF (לנספח). הנתונים נקראים מטופס ביצוע העבודה ב-Excel"}
+        if not text.strip():
+            return {"kind": "side",
+                    "reason": "מסמך סרוק (למשל טופס נטילה מהשטח), לנספח. לא צריך אותו לעדכון"}
+        if "bactochem" in text.lower():
+            return {"kind": "side",
+                    "reason": "טופס של בקטוכם בלי תוצאות (שרשרת משמורת / קבלת דוגמאות), לנספח. "
+                              "לא צריך אותו לעדכון"}
         return {"kind": "ignored", "reason": "לא זוהה כתעודת מעבדה"}
 
     return {"kind": "ignored", "reason": "סוג קובץ לא נתמך"}
@@ -154,7 +162,7 @@ def identify(name: str, data: bytes) -> dict:
 
 def sort_round_files(files: list) -> dict:
     rounds: dict = {}
-    forms, ignored, notes = [], [], []
+    forms, ignored, notes, side = [], [], [], []
     mk = None
     for name, data in files:
         try:
@@ -164,6 +172,8 @@ def sort_round_files(files: list) -> dict:
         kind = info["kind"]
         if kind == "ignored":
             ignored.append((name, info["reason"]))
+        elif kind == "side":
+            side.append((name, info["reason"]))
         elif kind == "mk":
             if mk:
                 ignored.append((name, "כבר הועלה קובץ Mann-Kendall אחר"))
@@ -252,4 +262,4 @@ def sort_round_files(files: list) -> dict:
                 r.samples = {wells[0]: r.samples[nameless[0]]}
                 notes.append(f"בדיגום {r.date_str} הדגימה '{nameless[0]}' שויכה לבאר {wells[0]} "
                              "לפי טופס השדה.")
-    return {"rounds": ordered, "mk": mk, "ignored": ignored, "notes": notes}
+    return {"rounds": ordered, "mk": mk, "ignored": ignored, "notes": notes, "side": side}

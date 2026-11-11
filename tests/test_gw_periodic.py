@@ -170,9 +170,11 @@ def test_mk_reads_sheet_skips_leftover_date_and_adds_round():
 
 
 def test_bidi_labels_for_charts(monkeypatch):
-    # matplotlib with libraqm orders Hebrew itself: the text goes in as is
+    # matplotlib with libraqm orders Hebrew itself: the text goes in inside
+    # a right-to-left embedding, so a server that takes lines as LTR still
+    # puts the number on the left
     monkeypatch.setattr(mk, "_mpl_does_bidi", lambda: True)
-    assert mk._bidi("פפ-1") == "פפ-1"
+    assert mk._bidi("פפ-1") == "‫פפ-1‬"
     monkeypatch.setattr(mk, "_mpl_does_bidi", lambda: False)
     assert mk._bidi("חק-2") == "2-קח"
     assert mk._bidi("סונול החוף") == "ףוחה לונוס"
@@ -620,18 +622,24 @@ def test_bactochem_csv_is_read_like_the_pdf():
 
 
 def test_hebrew_order_check_draws_text():
-    mk._MPL_BIDI = None
-    assert mk._mpl_does_bidi() in (True, False)
-    # whatever matplotlib does, a label drawn through _bidi reads right to left:
-    # the first Hebrew letter must end up on the right.
-    import numpy as np
-    from matplotlib.figure import Figure
-    from matplotlib.backends.backend_agg import FigureCanvasAgg
-    fig = Figure(figsize=(3, 1), dpi=100)
-    canvas = FigureCanvasAgg(fig)
-    fig.text(0.5, 0.5, mk._bidi("אייייי"), fontsize=30, ha="center", va="center",
-             family="DejaVu Sans")
-    canvas.draw()
-    cols = (255 - np.asarray(canvas.buffer_rgba())[:, :, 0].astype(float)).sum(axis=0)
-    xs = np.nonzero(cols > 0)[0]
-    assert (cols * np.arange(len(cols))).sum() / cols.sum() > (xs[0] + xs[-1]) / 2
+    mk._BIDI_MODE = None
+    assert mk._bidi_mode() in ("rle", "manual")
+    # whatever matplotlib does, a label drawn through _bidi reads right to
+    # left: the Hebrew ends up on the right, the well number on the left.
+    assert mk._hebrew_on_the_right(mk._bidi("אייייי"))
+    assert mk._hebrew_on_the_right(mk._bidi("אאא-1"))
+    # and the check can fail: the reversed order leans left
+    assert not mk._hebrew_on_the_right(mk._bidi("1-אאא")) or mk._bidi_mode() == "manual"
+
+
+def test_scanned_and_custody_papers_are_side_files_not_errors():
+    import fitz
+    from soil_lab_tool.core.gw_round_files import sort_round_files
+    scan = fitz.open()
+    scan.new_page()
+    coc = fitz.open()
+    coc.new_page().insert_text((50, 50), "service@bactochem.co.il  QP-008")
+    res = sort_round_files([("cert.csv", _bacto_csv()), ("Netila.pdf", scan.tobytes()),
+                            ("COC.pdf", coc.tobytes())])
+    assert res["ignored"] == []
+    assert sorted(n for n, _ in res["side"]) == ["COC.pdf", "Netila.pdf"]

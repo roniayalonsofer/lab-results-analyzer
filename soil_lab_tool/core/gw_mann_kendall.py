@@ -390,59 +390,72 @@ _WELL_COLORS = ["#000080", "#c0504d", "#9bbb59", "#8064a2", "#4bacc6", "#f79646"
 _MARKERS = ["D", "s", "^", "x", "*", "o"]
 
 
-_MPL_BIDI = None
+_BIDI_MODE = None   # "rle": matplotlib orders it, inside an RTL embedding; "manual"
 
 
-def _mpl_does_bidi() -> bool:
-    """
-    Whether matplotlib already orders Hebrew right to left (libraqm in 3.11+).
-    Tested by drawing it, not by version: the Linux build on the server drew
-    Hebrew backwards while the Windows one with the same version did not.
-    The word drawn is alef followed by small yods: when matplotlib does bidi
-    the wide alef ends up on the right.
-    """
-    global _MPL_BIDI
-    if _MPL_BIDI is None:
-        try:
-            import numpy as np
-            import matplotlib
-            matplotlib.use("Agg")
-            from matplotlib.figure import Figure
-            from matplotlib.backends.backend_agg import FigureCanvasAgg
-            fig = Figure(figsize=(3, 1), dpi=100)
-            canvas = FigureCanvasAgg(fig)
-            fig.text(0.5, 0.5, "אייייי", fontsize=30, ha="center", va="center",
-                     family="DejaVu Sans")
-            canvas.draw()
-            ink = 255 - np.asarray(canvas.buffer_rgba())[:, :, 0].astype(float)
-            cols = ink.sum(axis=0)
-            xs = np.nonzero(cols > 0)[0]
-            if len(xs) == 0:
-                _MPL_BIDI = False
-            else:
-                mid = (xs[0] + xs[-1]) / 2
-                centre = (cols * np.arange(len(cols))).sum() / cols.sum()
-                _MPL_BIDI = bool(centre > mid)
-        except Exception:
-            _MPL_BIDI = False
-    return _MPL_BIDI
-
-
-def _bidi(text: str) -> str:
-    """
-    Visual order for matplotlib, which draws left to right: the label is a
-    right-to-left line, so the runs come in reverse order and the letters
-    of each Hebrew run are reversed; Latin letters and numbers keep theirs.
-    'חק-2' → '2-קח', 'סונול החוף' → 'ףוחה לונוס'.
-    """
+def _visual_rtl(text: str) -> str:
+    """'חק-2' → '2-קח', 'סונול החוף' → 'ףוחה לונוס' (for a renderer with no bidi)."""
     import re
-    if not re.search(r"[֐-׿]", text):
-        return text
-    if _mpl_does_bidi():
-        return text  # matplotlib lays out right-to-left text itself (libraqm)
     parts = re.split(r"([A-Za-z0-9][A-Za-z0-9.,/]*)", text)
     out = [p if re.match(r"[A-Za-z0-9]", p or " ") else p[::-1] for p in parts]
     return "".join(reversed(out))
+
+
+def _with_mode(text: str, mode: str) -> str:
+    if mode == "rle":
+        return "‫" + text + "‬"   # RIGHT-TO-LEFT EMBEDDING … POP
+    return _visual_rtl(text)
+
+
+def _hebrew_on_the_right(drawn: str) -> bool:
+    """Draw *drawn* and tell whether its ink leans right (where Hebrew goes)."""
+    import numpy as np
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    fig = Figure(figsize=(4, 1), dpi=100)
+    canvas = FigureCanvasAgg(fig)
+    fig.text(0.5, 0.5, drawn, fontsize=30, ha="center", va="center", family="DejaVu Sans")
+    canvas.draw()
+    cols = (255 - np.asarray(canvas.buffer_rgba())[:, :, 0].astype(float)).sum(axis=0)
+    xs = np.nonzero(cols > 0)[0]
+    if len(xs) == 0:
+        return False
+    return (cols * np.arange(len(cols))).sum() / cols.sum() > (xs[0] + xs[-1]) / 2
+
+
+def _bidi_mode() -> str:
+    """
+    How to hand Hebrew to matplotlib on THIS machine, found by drawing: 3.11
+    lays out bidi text itself (libraqm), but the server's build takes every
+    line as left to right, so 'פפ-1' came out as 'פפ-1' instead of '1-פפ'.
+    Two test words, alef (wide) then yods, and alefs then '-1': written
+    right, the alefs end up on the right.
+    """
+    global _BIDI_MODE
+    if _BIDI_MODE is None:
+        _BIDI_MODE = "manual"
+        try:
+            for mode in ("rle", "manual"):
+                if all(_hebrew_on_the_right(_with_mode(w, mode)) for w in ("אייייי", "אאא-1")):
+                    _BIDI_MODE = mode
+                    break
+        except Exception:
+            pass
+    return _BIDI_MODE
+
+
+def _mpl_does_bidi() -> bool:
+    return _bidi_mode() == "rle"
+
+
+def _bidi(text: str) -> str:
+    """A Hebrew label, ready for matplotlib to draw as a right-to-left line."""
+    import re
+    if not re.search(r"[֐-׿]", text):
+        return text
+    return _with_mode(text, "rle" if _mpl_does_bidi() else "manual")
 
 
 def _fmt_val(v) -> str:

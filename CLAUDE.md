@@ -146,9 +146,11 @@ everything else in those tables (older rows) is left untouched.
   the app hands back the rows to paste into the .xls. Values below 0.01 or
   non-detects are entered as 0.01 (the site's convention). The sheet for a
   compound is the one whose events reach the latest date. Hebrew in the
-  pictures: whether matplotlib orders it right to left is tested by drawing
-  (`_mpl_does_bidi`), never by version — the server's Linux build of the
-  same version drew it backwards.
+  pictures: labels go in inside a right-to-left embedding (RLE…PDF) when
+  matplotlib does bidi, else reversed by hand; `_bidi_mode` decides by
+  drawing test words, never by version — the server lays lines out left to
+  right, which turned 'פפ-1' around. Unknown-but-known papers (scans, a
+  lab's custody form) go to `side`, not `ignored`.
 - **No lab choice in the app:** the periodic tab takes all of a round's
   files at once; `core/gw_round_files.sort_round_files` identifies each file
   by READING it (lab parser must return samples — `auto_detect_lab` misses

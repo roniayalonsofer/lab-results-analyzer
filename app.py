@@ -2158,8 +2158,15 @@ elif page == "groundwater":
                 st.error("לא נמצאה תעודת מעבדה בין הקבצים שהועלו.")
             for n in sorted_files["notes"]:
                 st.info("ℹ️ " + n)
+            _side = list(sorted_files.get("side", []))
+            for r in sorted_files["rounds"]:
+                _side += [(n, "עותק של קובץ שכבר נקרא") for n in r.companion_files]
+            if _side:
+                with st.expander(f"קבצים נוספים שלא צריך לעדכון ({len(_side)})"):
+                    for name, why in _side:
+                        st.markdown(f"- **{name}** — {why}")
             if sorted_files["ignored"]:
-                with st.expander(f"קבצים שלא נקראו ({len(sorted_files['ignored'])})"):
+                with st.expander(f"⚠️ קבצים שלא זוהו ({len(sorted_files['ignored'])})"):
                     for name, why in sorted_files["ignored"]:
                         st.markdown(f"- **{name}** — {why}")
 
