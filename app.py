@@ -2187,6 +2187,12 @@ elif page == "groundwater":
             prev = previous_results(word_bytes) if word_bytes else {}
             factor = unit_factor(form_bytes, prev)
             out = []
+            if len(rnds) > 1:
+                from soil_lab_tool.core.report_form import summary_samples
+                summ, all_days = summary_samples([(r.samples, r.form_bytes) for r in rnds])
+                span = f"מסכם {rnds[0].date_str}-{(rnds[-1].end_date or rnds[-1].date):%d.%m.%y}"
+                out.append((span, update_report_form(form_bytes, summ, all_days or [r.date for r in rnds],
+                                                     factor, {}, None)))
             for r in rnds:
                 days = sorted({_dt.strptime(s["date"], "%d.%m.%y") for s in r.samples.values()
                                if re.fullmatch(r"\d{2}\.\d{2}\.\d{2}", str(s.get("date") or ""))}) or [r.date]
@@ -2208,7 +2214,7 @@ elif page == "groundwater":
                     st.error(f"טופס הדיווח לא עודכן: {fres[2]}")
                 for span, fb in fres[1]:
                     st.download_button(
-                        f"⬇️ הורד טופס דיווח – דיגום {span}", data=fb,
+                        (f"⬇️ הורד טופס דיווח {span}" if span.startswith("מסכם") else f"⬇️ הורד טופס דיווח – דיגום {span}"), data=fb,
                         file_name=f"טופס דיווח - {span}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True, key=f"gw_dl_form_only_{span}",
@@ -2315,7 +2321,7 @@ elif page == "groundwater":
                             )
                 for span, fb in result.get("forms", []):
                     st.download_button(
-                        f"⬇️ הורד טופס דיווח מעודכן – דיגום {span}",
+                        (f"⬇️ הורד טופס דיווח {span}" if span.startswith("מסכם") else f"⬇️ הורד טופס דיווח מעודכן – דיגום {span}"),
                         data=fb, file_name=f"טופס דיווח - {span}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True, key=f"gw_dl_form_{span}",

@@ -284,3 +284,44 @@ def previous_results(word_bytes: bytes) -> dict:
                     vals[p] = v
         out[well] = vals
     return out
+
+
+def summary_samples(rounds: list) -> tuple:
+    """
+    One set of samples for a form that sums up several rounds
+    [(samples, field_forms_bytes_or_None), ...] oldest first: each well keeps
+    its latest field reading and its latest lab result per compound.
+    Returns (samples, every sampling day).
+    """
+    import copy
+    from soil_lab_tool.core.gw_round_inputs import parse_yeda_field_form
+    from soil_lab_tool.gw_report_updater import _merge_field_form, _set_well_ambiguity, _wkey
+    out, names, days = {}, {}, set()
+    for samples, forms in rounds:
+        samples = copy.deepcopy(samples)
+        for fb in forms or []:
+            _set_well_ambiguity(list(samples))
+            form = parse_yeda_field_form(fb)
+            d = form.get("sampling_date")
+            for well in _merge_field_form(samples, form):
+                w = form["wells"][well]
+                samples[well] = {"field": dict(w.get("field", {})), "results": {}, "limits": {},
+                                 "water_level": w.get("water_level"),
+                                 "date": d.strftime("%d.%m.%y") if d else None}
+        for well, s in samples.items():
+            if s.get("date"):
+                try:
+                    days.add(datetime.strptime(s["date"], "%d.%m.%y"))
+                except ValueError:
+                    pass
+            key = _wkey(well)
+            name = names.setdefault(key, well)
+            cur = out.setdefault(name, {"field": {}, "results": {}, "limits": {}, "water_level": None})
+            cur["field"].update(s.get("field", {}))
+            for p, v in s.get("results", {}).items():
+                cur["results"][p] = v
+                if v is None and p in s.get("limits", {}):
+                    cur["limits"][p] = s["limits"][p]
+            if s.get("water_level") is not None:
+                cur["water_level"] = s["water_level"]
+    return out, sorted(days)

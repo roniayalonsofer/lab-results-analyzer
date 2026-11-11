@@ -722,3 +722,16 @@ def test_sampler_sentence_with_two_names_and_mk_summary():
     t = d.paragraphs[1].text
     assert "ב- 3 קידוחים (בקידוחים EAZ-1 עד EAZ-3 קיימת ירידה בריכוזי הבנזן)" in t
     assert "למעט מגמת עלייה בריכוזי הבנזן בקידוח EAZ-12." in t
+
+
+def test_summary_form_keeps_each_wells_latest_values():
+    from soil_lab_tool.core.report_form import summary_samples
+    r1 = {"EAZ-1": {"date": "07.10.24", "results": {"בנזן": 7.0, "MTBE": 60.0}, "limits": {}},
+          "EAZ-2": {"date": "07.10.24", "results": {"בנזן": None}, "limits": {"בנזן": 0.0002}}}
+    r2 = {"EAZ-1": {"date": "30.08.26", "results": {"בנזן": 53.6}, "limits": {},
+                    "field": {"pH": 7.24}, "water_level": 18.16}}
+    summ, days = summary_samples([(r1, None), (r2, None)])
+    assert summ["EAZ-1"]["results"] == {"בנזן": 53.6, "MTBE": 60.0}      # newest benzene, MTBE kept
+    assert summ["EAZ-1"]["water_level"] == 18.16
+    assert summ["EAZ-2"]["results"] == {"בנזן": None} and summ["EAZ-2"]["limits"] == {"בנזן": 0.0002}
+    assert [d.strftime("%d.%m.%y") for d in days] == ["07.10.24", "30.08.26"]
