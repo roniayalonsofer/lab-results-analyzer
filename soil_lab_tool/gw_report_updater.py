@@ -36,6 +36,14 @@ CAS_TO_HEB = {
     "1634-04-4": "MTBE",
     "108-88-3":  "טולואן",
     "1330-20-7": "קסילן",
+    # chlorinated compounds, for sites with a "תרכובות מוכלרות" table
+    "127-18-4":  "PCE",
+    "79-01-6":   "TCE",
+    "156-59-2":  "cis-1,2-DCE",
+    "75-35-4":   "1,1-DCE",
+    "75-01-4":   "VC",
+    "107-06-2":  "1,2-DCA",
+    "106-93-4":  "EDB",
 }
 
 
@@ -299,9 +307,16 @@ def parse_bactochem_pdf(pdf_path: str) -> dict:
             m = re.search(r"(\d+)\s+['\u05f3]?([א-ת]{1,3})(?:\s|$|-)", line)
         if m:
             segments.append((f"{m.group(2)[::-1]}-{m.group(1)}", i))
+            continue
+        # Latin well codes ("EAZ-2", "N-1"), as in the certificates Yeda Water sends
+        m = re.search(r"(?<![A-Za-z])([A-Z]{1,4})-?(\d{1,3})(?![\d.])", line)
+        if m:
+            segments.append((f"{m.group(1)}-{m.group(2)}", i))
     segments.append((None, len(lines)))  # sentinel
 
     # Sampler, in the header: "... ןאדמח הללאדבע :םגוד" (mirrored "דוגם: עבדאללה חמדאן")
+    # A certificate inside Yeda Water's "דוח ביצוע" was sampled by Yeda.
+    yeda_org = "י.ד.ע מים וסביבה" if any("ע.ד.י" in ln for ln in lines[:15]) else None
     sampler = None
     for line in lines:
         m = re.search(r'(\S+)\s+(\S+)\s+:םגוד\s*$', line)
@@ -339,19 +354,25 @@ def parse_bactochem_pdf(pdf_path: str) -> dict:
                 except ValueError:
                     pass
 
-            # Analyte: "CAS #: 71-43-2 0.001 mg/L 0.720 MTBE"
+            # Analyte: "CAS #: 71-43-2 0.001 mg/L 0.720 MTBE", sometimes with
+            # the drinking-water standard between unit and result ("X≤ 0.005")
             m = re.search(
-                r'CAS #:\s*([\d\-]+)\s+[\d.]+\s+mg/L\s+([\d.]+|Not Detected)',
+                r'CAS #:\s*([\d\-]+)\s+([\d.]+)\s+mg/L\s+(?:X\S?\s*[\d.]+\s+)?([\d.]+|Not Detected)',
                 line, re.IGNORECASE
             )
             if m:
-                cas, raw_val = m.group(1), m.group(2)
+                cas, loq, raw_val = m.group(1), m.group(2), m.group(3)
                 heb = CAS_TO_HEB.get(cas)
                 if heb:
                     sample["results"][heb] = (
                         None if raw_val.lower() == "not detected"
                         else float(raw_val)
                     )
+                    if raw_val.lower() == "not detected":
+                        try:
+                            sample.setdefault("limits", {})[heb] = float(loq)
+                        except ValueError:
+                            pass
                     if raw_val.lower() != "not detected":
                         # as printed ("0.370"), so the report keeps the lab's digits
                         sample.setdefault("result_text", {})[heb] = raw_val
@@ -419,7 +440,7 @@ def parse_bactochem_pdf(pdf_path: str) -> dict:
 
         if sampler:
             sample["sampler_name"] = sampler
-            sample["sampler_org"] = "בקטוכם"
+            sample["sampler_org"] = yeda_org or "בקטוכם"
         samples[well_id] = sample
 
     return {"sampling_date": global_date, "samples": samples}
@@ -546,6 +567,14 @@ _PARAM_CANONICAL = {
     "אתיל בנזן": "אתיל בנזן",
     "קסילן": "קסילן",
     "כסילן": "קסילן",  # alternate spelling for Xylene used by some templates
+    # chlorinated compounds: the codes and names report tables use
+    "TECE": "PCE", "PCE": "PCE", "Tetrachloroethene": "PCE",
+    "TCE": "TCE", "Trichloroethene": "TCE",
+    "CDCE": "cis-1,2-DCE", "cis-1,2-DCE": "cis-1,2-DCE", "cis-DCE": "cis-1,2-DCE",
+    "DCEY": "1,1-DCE", "1,1-DCE": "1,1-DCE",
+    "VYCL": "VC", "VC": "VC", "Vinyl Chloride": "VC", "ויניל כלוריד": "VC",
+    "1,2-DCA": "1,2-DCA", "1,2-Dichloroethane": "1,2-DCA",
+    "EDB": "EDB", "Ethylene Dibromide": "EDB",
 }
 
 
@@ -865,13 +894,43 @@ def _update_field_table(doc: Document, field_data: dict, wells: list):
             _set_cell(row_cells[-1], txt, highlight=True)
         return
 
+    # A long field table can be split in parts ("חלק 1 מתוך 3"), each a
+    # table of its own with the same rows and other wells.
+    for part in _field_table_parts(doc, tbl):
+        _update_field_columns(part, field_data, wells)
+
+
+def _field_table_parts(doc: Document, best) -> list:
+    """The field table and its other parts: tables with the same kind of rows,
+    one column per well (never a one-off table that shows a well twice)."""
+    parts = []
+    for tbl in _all_tables(doc):
+        if not tbl.rows:
+            continue
+        labels = {row.cells[0].text.strip().rstrip("*") for row in tbl.rows if row.cells}
+        if sum(1 for lb in labels if lb in _FIELD_PARAM_HINTS or lb in _FIELD_ROW_ALIASES) < 3:
+            continue
+        heads = [c.text.strip() for c in tbl.rows[0].cells[1:]]
+        heads = [h for h in heads if _well_num(h) and re.search(r"[A-Za-zא-ת]", h)]
+        if not heads or len(heads) != len(set(heads)):
+            continue
+        parts.append(tbl)
+    return parts if best in parts else [best]
+
+
+def _update_field_columns(tbl, field_data: dict, wells: list):
+    FIELD_ROWS = {
+        "pH": 1, "EC": 2, "טמפרטורה": 3, "חמצן מומס": 4,
+        "עכירות": 5, "רדוקס": 6, "עומק פני המים": 7,
+        "עומק כללי של הקידוח": 8, "עומק דגימה מפני המים": 9,
+    }
     # Column headers may spell the well differently from the history tables
     # ("חק 2" vs "חק-2"), so match them by well number.
     header = tbl.rows[0]
-    num_to_well = {_well_num(w): w for w in wells}
+    num_to_well = {_wkey(w): w for w in wells}
     well_col = {}
     for ci, c in enumerate(header.cells):
-        w = num_to_well.get(_well_num(c.text)) if ci > 0 else None
+        w = num_to_well.get(_wkey(c.text)) if ci > 0 else None
         if w and w not in well_col:
             well_col[w] = ci
     # Look up each row by its actual label (column 0), the same way the
@@ -1088,7 +1147,10 @@ def _detect_layout(doc: Document) -> str:
         t2 = doc.tables[2]
         if len(t2.columns) >= 9:
             headers = [c.text.strip() for c in t2.rows[1].cells] if len(t2.rows) > 1 else []
-            if any(h in ("pH", "EC", "pH units") for h in headers):
+            # Parameters as column headers; a field table whose row labels
+            # start with "pH" (one column per well) is not this layout.
+            names = {"pH", "EC", "pH units", "טמפרטורה", "רדוקס", "חמצן מומס", "עכירות", "מוליכות חשמלית"}
+            if len({h for h in headers if h in names}) >= 2:
                 return "B"
     return "A"
 
@@ -1662,8 +1724,43 @@ def _update_report_meta(doc: Document, author_name: str = None, submission_date:
 
 
 def _well_num(name: str):
-    m = re.search(r'(\d+)\s*$', str(name).strip())
-    return m.group(1) if m else None
+    m = re.search(r'(\d+)\s*\*?\s*$', str(name).strip())
+    return str(int(m.group(1))) if m else None
+
+
+# Wells are matched by number ("חק-2" in a form, "HK-2" at the lab), unless
+# the report uses one number under two prefixes ("EAZ-1" and "נ-1"): then
+# the prefix counts too, Hebrew letters read as Latin ("נ-1" = "N-1").
+_HEB_LAT = {"א": "A", "ב": "B", "ג": "G", "ד": "D", "ה": "H", "ו": "V", "ז": "Z",
+            "ח": "H", "ט": "T", "י": "Y", "כ": "K", "ך": "K", "ל": "L", "מ": "M",
+            "ם": "M", "נ": "N", "ן": "N", "ס": "S", "ע": "A", "פ": "P", "ף": "P",
+            "צ": "TZ", "ץ": "TZ", "ק": "K", "ר": "R", "ש": "SH", "ת": "T"}
+_WELL_AMBIG: set = set()
+
+
+def _well_prefix(name: str) -> str:
+    m = re.match(r"\s*(.*?)\d+\s*\*?\s*$", str(name))
+    letters = re.sub(r"[^A-Za-zא-ת]", "", m.group(1) if m else "")
+    return "".join(_HEB_LAT.get(ch, ch) for ch in letters).upper()
+
+
+def _set_well_ambiguity(names) -> None:
+    """Numbers the report uses under more than one prefix."""
+    prefixes: dict = {}
+    for n in names:
+        num = _well_num(n)
+        if num:
+            prefixes.setdefault(num, set()).add(_well_prefix(n))
+    _WELL_AMBIG.clear()
+    _WELL_AMBIG.update(num for num, ps in prefixes.items() if len(ps) > 1)
+
+
+def _wkey(name: str):
+    """The key two spellings of one well share."""
+    num = _well_num(name)
+    if num is None:
+        return None
+    return f"{_well_prefix(name)}-{num}" if num in _WELL_AMBIG else num
 
 
 def _merge_field_form(samples: dict, form: dict) -> list:
@@ -1673,10 +1770,10 @@ def _merge_field_form(samples: dict, form: dict) -> list:
     field record, so its values win over field values printed by the lab.
     Returns the form wells that had no lab sample.
     """
-    by_num = {_well_num(k): k for k in samples}
+    by_num = {_wkey(k): k for k in samples}
     unmatched = []
     for well, w in form.get("wells", {}).items():
-        key = by_num.get(_well_num(well))
+        key = by_num.get(_wkey(well))
         if key is None:
             unmatched.append(well)
             continue
@@ -1748,7 +1845,7 @@ def _cell_targets(tbl) -> dict:
             continue
         params = header["params"]
         labels = " ".join(c.text for a, b, c in _grid_cells(row) if a not in params)
-        if "יעד" not in labels and "תקן" not in labels:
+        if "יעד" not in labels and "תקן" not in labels and "סף" not in labels:
             continue
         out = {}
         for param, c in _row_param_cells(row, header).items():
@@ -1838,7 +1935,7 @@ def _cell_at(row, col):
     return None
 
 
-_DATE_CELL = re.compile(r'^(\d{2}\.\d{2}\.\d{2})\*?$')
+_DATE_CELL = re.compile(r'^\*?(\d{2}[./]\d{2}[./]\d{2})\*?$')
 
 
 def _history_header(row):
@@ -1905,7 +2002,7 @@ def _history_rows(tbl):
         dc = _cell_at(row, header["date"])
         m = _DATE_CELL.match(dc.text.strip()) if dc is not None else None
         if m and well:
-            out.append((ri, well, m.group(1), header))
+            out.append((ri, well, m.group(1).replace("/", "."), header))
     return out
 
 
@@ -1976,10 +2073,22 @@ def _update_chem_history_tables(doc: Document, new_date: str, samples: dict, wel
         by_num = {}
         for tbl in tables:
             for ri, w, date_txt, header in _history_rows(tbl):
-                by_num.setdefault(_well_num(w), []).append((tbl, ri, w, date_txt, header))
-        rows = by_num.get(_well_num(well))
-        if not rows:
+                by_num.setdefault(_wkey(w), []).append((tbl, ri, w, date_txt, header))
+        found = by_num.get(_wkey(well))
+        if not found:
             continue
+        # A well can sit in two kinds of table (BTEX/MTBE, and chlorinated
+        # compounds): one new row in the last table of each kind.
+        kinds = {}
+        for r in found:
+            kinds.setdefault(frozenset(r[4]["params"].values()), []).append(r)
+        for rows in kinds.values():
+            _add_history_row(rows, sample, new_date)
+    return True
+
+
+def _add_history_row(rows, sample, new_date):
+    if True:
         tbl = rows[-1][0]
         rows = [r for r in rows if r[0] is tbl]
         _, last, _, last_date, header = rows[-1]
@@ -1994,11 +2103,17 @@ def _update_chem_history_tables(doc: Document, new_date: str, samples: dict, wel
                      if len({id(c._tc) for c in _row_param_cells(tbl.rows[ri], h).values()}) == len(h["params"])),
                     last)
         prev = tbl.rows[tmpl]
-        if last_date == new_date:
+        # A round sampled over several days: each well keeps its own date.
+        row_date = sample.get("date") if re.fullmatch(r"\d{2}\.\d{2}\.\d{2}", str(sample.get("date") or "")) else new_date
+        style = _exceed_style(tbl, rows, targets)
+        if last_date == row_date:
             new_row = tbl.rows[last]
         else:
             new_row = _clone_row_after(tbl, last, tmpl)
-        _set_cell(_cell_at(new_row, header["date"]), new_date, highlight=True)
+        prev_date_txt = _cell_at(prev, header["date"]).text.strip() if _cell_at(prev, header["date"]) is not None else ""
+        shown_date = row_date.replace(".", "/") if "/" in prev_date_txt else row_date
+        date_cell = _cell_at(new_row, header["date"])
+        _set_cell(date_cell, shown_date, highlight=True)
         if level_col is not None and _cell_at(new_row, level_col) is not None:
             old = _cell_at(prev, level_col)
             _set_cell(_cell_at(new_row, level_col),
@@ -2012,8 +2127,57 @@ def _update_chem_history_tables(doc: Document, new_date: str, samples: dict, wel
                 continue
             txt, val = _result_text(results, limits, param, sample.get("result_text"))
             exceeds = val is not None and param in targets and val > targets[param]
-            _set_cell(cell, txt, bold=exceeds, highlight=True)
+            _set_cell(cell, txt, bold=exceeds and style["bold"], highlight=True)
+            if style["fill"]:
+                _set_fill(cell, style["fill"] if exceeds else _fill_of(date_cell))
     return True
+
+
+def _fill_of(cell):
+    tcPr = cell._tc.tcPr
+    shd = tcPr.find(qn("w:shd")) if tcPr is not None else None
+    fill = shd.get(qn("w:fill")) if shd is not None else None
+    return fill if fill and fill.lower() not in ("auto", "ffffff") else None
+
+
+def _set_fill(cell, fill):
+    """Cell background: `fill` ("D9D9D9"), or none."""
+    tcPr = cell._tc.get_or_add_tcPr()
+    shd = tcPr.find(qn("w:shd"))
+    if fill is None:
+        if shd is not None:
+            shd.set(qn("w:fill"), "auto")
+        return
+    if shd is None:
+        from docx.oxml import OxmlElement
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:val"), "clear")
+        shd.set(qn("w:color"), "auto")
+        tcPr.append(shd)
+    shd.set(qn("w:fill"), fill)
+
+
+def _exceed_style(tbl, rows, targets) -> dict:
+    """
+    How this table marks a result over its limit, read from a result that
+    is over it: a gray cell ("התוצאות המסומנות באפור") or bold text.
+    """
+    from collections import Counter
+    fills, bolds = Counter(), Counter()
+    for ri, _, _, h in _history_rows(tbl):
+        for p, c in _row_param_cells(tbl.rows[ri], h).items():
+            try:
+                v = float(re.sub(r"[^\d.]", "", c.text) or "x")
+            except ValueError:
+                continue
+            if p in targets and v > targets[p] and not re.search(r"[<>]", c.text):
+                fills[_fill_of(c)] += 1
+                bolds[any(r.bold for par in c.paragraphs for r in par.runs)] += 1
+    if not fills:
+        return {"fill": None, "bold": True}
+    fill = fills.most_common(1)[0][0]
+    bold = bolds.most_common(1)[0][0]
+    return {"fill": fill, "bold": bold or not fill}
 
 
 def _is_well_card(tbl):
@@ -2037,13 +2201,13 @@ def _is_well_card(tbl):
 
 def _update_well_cards(doc: Document, new_date: str, samples: dict) -> int:
     """Date and results of the per-well tables on the site map. Returns how many were updated."""
-    by_num = {_well_num(w): w for w in samples}
+    by_num = {_wkey(w): w for w in samples}
     done = 0
     for tbl in doc.tables:
         well = _is_well_card(tbl)
         if not well:
             continue
-        key = by_num.get(_well_num(well))
+        key = by_num.get(_wkey(well))
         if key is None:
             continue
         sample = samples[key]
@@ -2288,7 +2452,7 @@ def _update_map_labels(doc: Document, new_date: str, samples: dict, history: dic
                 _txbx_set_text(b, new_date)
 
     # Value pairs
-    by_num = {_well_num(w): w for w in samples}
+    by_num = {_wkey(w): w for w in samples}
     last_row = {w: rows[-1][1] for w, rows in history.items() if rows}
     params = COL_PARAMS
     found, pending = [], []
@@ -2328,7 +2492,7 @@ def _update_map_labels(doc: Document, new_date: str, samples: dict, history: dic
 
     done, matched = 0, set()
     for b, docpr, well, p1, p2 in found:
-        key = by_num.get(_well_num(well))
+        key = by_num.get(_wkey(well))
         if key is None:
             continue
         s = samples[key]
@@ -2500,10 +2664,10 @@ def _update_mann_kendall(doc: Document, mk_xls_bytes: bytes, rounds: list) -> tu
     for param, sh in sheets.items():
         changed = False
         for when, samples in rounds:
-            by_num = {_well_num(w): s for w, s in samples.items()}
+            by_num = {_wkey(w): s for w, s in samples.items()}
             values = {}
             for w in sh.wells:
-                s = by_num.get(_well_num(w))
+                s = by_num.get(_wkey(w))
                 if s is None or s.get("floating_layer"):
                     values[w] = None  # not sampled this round
                     continue
@@ -2620,7 +2784,16 @@ def run_update_bytes(
         sampler_org = next((s.get("sampler_org") for s in samples.values() if s.get("sampler_org")), None)
         if field_form_bytes:
             from soil_lab_tool.core.gw_round_inputs import parse_yeda_field_form
-            form = parse_yeda_field_form(field_form_bytes)
+            # one form, or several for a round sampled over several days
+            forms = [parse_yeda_field_form(b) for b in (
+                field_form_bytes if isinstance(field_form_bytes, (list, tuple)) else [field_form_bytes])]
+            form = {"wells": {}, "sampler_name": None, "sampling_date": None}
+            for f in forms:
+                form["wells"].update(f.get("wells", {}))
+                form["sampler_name"] = form["sampler_name"] or f.get("sampler_name")
+                d = f.get("sampling_date")
+                if d and (form["sampling_date"] is None or d < form["sampling_date"]):
+                    form["sampling_date"] = d
             missing = _merge_field_form(samples, form)
             if missing:
                 report["notes"].append("בטופס השדה יש בארות שאין להן תוצאות מעבדה: " + ", ".join(missing))
@@ -2656,7 +2829,7 @@ def run_update_bytes(
         # name variant by how many chronological date-rows exist in the
         # table(s) it appears in, and prefer the variant from the table with
         # the deepest history — the routine table meant to receive new rows.
-        _date_pat = re.compile(r'^\d{2}\.\d{2}\.\d{2}$')
+        _date_pat = re.compile(r'^\*?\d{2}[./]\d{2}[./]\d{2}\*?$')
         well_depth = {}
         for tbl in doc.tables:
             date_rows = sum(
@@ -2671,10 +2844,11 @@ def run_update_bytes(
                     if date_rows > well_depth.get(w, -1):
                         well_depth[w] = date_rows
 
+        _set_well_ambiguity(well_depth)
         num_to_doc_well = {}
         num_to_depth = {}
         for w, depth in well_depth.items():
-            num = _well_num(w)
+            num = _wkey(w)
             if num:
                 if num not in num_to_doc_well or depth > num_to_depth[num]:
                     num_to_doc_well[num] = w
@@ -2683,14 +2857,14 @@ def run_update_bytes(
         remapped_samples = {}
         unmatched = []
         for well_key, sample in samples.items():
-            doc_well = num_to_doc_well.get(_well_num(well_key))
+            doc_well = num_to_doc_well.get(_wkey(well_key))
             if doc_well:
                 remapped_samples[doc_well] = sample
             else:
                 remapped_samples[well_key] = sample
                 unmatched.append(well_key)
         samples = remapped_samples
-        wells_order = sorted(samples, key=lambda w: int(_well_num(w) or 0))
+        wells_order = sorted(samples, key=lambda w: (_well_prefix(w), int(_well_num(w) or 0)))
 
         if unmatched:
             raise ValueError(
@@ -2735,7 +2909,11 @@ def run_update_bytes(
             _update_narrative_placeholders(doc, new_date, sampler_name)
             _update_sampling_paragraphs(doc, samples, sampler_name, sampler_org)
             _update_concentration_summary(doc, combined_results)
-            targets = next((_cell_targets(t) for t in doc.tables if _is_chem_history_table(t)), {})
+            targets = {}
+            for t in _all_tables(doc):
+                if _is_chem_history_table(t):
+                    for k, v in _cell_targets(t).items():
+                        targets.setdefault(k, v)
             if not _update_exceedance_summary(doc, samples, wells_order, targets):
                 _update_summary_well_bullets(doc, samples, targets)
             else:
@@ -2761,8 +2939,8 @@ def run_update_bytes(
         report["wells"] = wells_order
         report["exceedances"] = [
             (w, p, samples[w]["results"][p], targets[p])
-            for w in wells_order for p in COL_PARAMS
-            if samples[w].get("results", {}).get(p) is not None and p in targets
+            for w in wells_order for p in targets
+            if samples[w].get("results", {}).get(p) is not None
             and samples[w]["results"][p] > targets[p]
         ]
         report["has_targets"] = bool(targets)

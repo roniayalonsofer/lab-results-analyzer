@@ -159,6 +159,16 @@ everything else in those tables (older rows) is left untouched.
   MK workbook. The app then runs `run_update_bytes(..., parsed_round=...)`
   per round, oldest first, and `apply_mann_kendall` once with all rounds.
 - ALS without a "Sum of xylenes" row: xylene = m+p + o.
+- **Yeda Water rounds** (Egged Azor): Yeda's "דוח ביצוע" PDF holds the lab's
+  certificate (Bactochem, read by `parse_bactochem_pdf`, Latin well codes; or
+  ALS, read from the "נספח" XLSX). Rounds of one lab within 7 days are one
+  round (`sort_round_files`), each sample keeps its own date in the history
+  tables, and every day's Yeda form is merged. Wells match by number, plus
+  the prefix when the report uses one number twice ("EAZ-1" and "נ-1";
+  Hebrew letters read as Latin, `_wkey`). Chlorinated compounds (TECE/TCE/
+  CDCE/DCEY/VYCL) get their own row per table kind; limits from a "ערך סף"
+  row; exceedances marked the way the table marks them (gray fill or bold,
+  `_exceed_style`). A split field table ("חלק 1 מתוך 3") is updated in every part.
 - The annual report engine (`core/annual_gw_report.py`) only knows "מת-"
   wells and the last round per well; it takes a MK file through
   `apply_mann_kendall`, but needs a real annual sample before more work.

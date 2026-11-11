@@ -82,8 +82,8 @@ def _find_columns(header: list) -> dict:
 
 
 def _well_from_location(text: str) -> str | None:
-    """'דיגום באר חק 2' → 'חק-2'."""
-    m = re.search(r"([א-ת]{1,3})['׳]?\s*-?\s*(\d+)\s*$", str(text).strip())
+    """'דיגום באר חק 2' → 'חק-2', 'באר EAZ-2' → 'EAZ-2'."""
+    m = re.search(r"([A-Za-z]{1,4}|[א-ת]{1,3})['׳]?\s*-?\s*(\d+)\s*$", str(text).strip())
     if not m:
         return None
     return f"{m.group(1)}-{m.group(2)}"
@@ -204,6 +204,18 @@ _ALS_TO_PARAM = {
     "m+p-xylene": "_mp_xylene",
     "ortho-xylene": "_o_xylene",
     "o-xylene": "_o_xylene",
+    # chlorinated compounds (sites with a "תרכובות מוכלרות" table)
+    "tetrachloroethene": "PCE",
+    "trichloroethene": "TCE",
+    "cis-1.2-dichloroethene": "cis-1,2-DCE",
+    "cis-1,2-dichloroethene": "cis-1,2-DCE",
+    "1.1-dichloroethene": "1,1-DCE",
+    "1,1-dichloroethene": "1,1-DCE",
+    "vinyl chloride": "VC",
+    "1.2-dichloroethane": "1,2-DCA",
+    "1,2-dichloroethane": "1,2-DCA",
+    "1.2-dibromoethane (edb)": "EDB",
+    "1,2-dibromoethane (edb)": "EDB",
 }
 
 _TO_MG_L = {"mg/l": 1.0, "µg/l": 0.001, "μg/l": 0.001, "ug/l": 0.001, "g/l": 0.001}
@@ -238,6 +250,7 @@ def parse_als_round(file_bytes: bytes, filename: str = "") -> dict:
         s = samples.setdefault(r["sample_id"], {"results": {}, "limits": {}})
         if r.get("sampling_date"):
             dates.add(r["sampling_date"])
+            s.setdefault("date", r["sampling_date"])  # a round can span days
         flag = r.get("flag") or ""
         val = r.get("value")
         if flag.startswith("<") or flag == "ND":
@@ -262,5 +275,10 @@ def parse_als_round(file_bytes: bytes, filename: str = "") -> dict:
             lim.pop(p, None)
     if not samples:
         raise ValueError("לא נמצאו תוצאות BTEX/MTBE בקובץ של ALS.")
-    sampling_date = sorted(dates)[-1] if dates else None
+    def _key(d):
+        try:
+            return datetime.strptime(d, "%d.%m.%y")
+        except (TypeError, ValueError):
+            return datetime.min
+    sampling_date = max(dates, key=_key) if dates else None
     return {"sampling_date": sampling_date, "samples": samples}

@@ -2141,7 +2141,7 @@ elif page == "groundwater":
             rows = []
             for r in sorted_files["rounds"]:
                 rows.append(
-                    f"<tr><td dir='ltr'>{r.date_str}</td><td>{LAB_NAMES.get(r.lab, r.lab)}</td>"
+                    f"<tr><td dir='ltr'>{r.span_str}</td><td>{LAB_NAMES.get(r.lab, r.lab)}</td>"
                     f"<td dir='ltr'>{', '.join(r.wells)}</td>"
                     f"<td>{'✅' if r.field_form else '—'}</td></tr>")
             if rows:
@@ -2182,7 +2182,7 @@ elif page == "groundwater":
                             current, _ = run_update_bytes(
                                 current, None, None, lab_type=r.lab,
                                 author_name=gw_author_name, submission_date=gw_submission_date,
-                                field_form_bytes=r.field_form[1] if r.field_form else None,
+                                field_form_bytes=r.form_bytes,
                                 parsed_round={"sampling_date": r.date_str, "samples": r.samples},
                                 report=rep,
                             )

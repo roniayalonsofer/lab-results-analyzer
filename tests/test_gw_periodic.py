@@ -643,3 +643,64 @@ def test_scanned_and_custody_papers_are_side_files_not_errors():
                             ("COC.pdf", coc.tobytes())])
     assert res["ignored"] == []
     assert sorted(n for n, _ in res["side"]) == ["COC.pdf", "Netila.pdf"]
+
+
+def _azor_like() -> Document:
+    """EAZ-1 and נ-1 in one report, dates with '/', limits in a "ערך סף" row,
+    exceedances shaded gray, and a second table of chlorinated compounds."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn as _qn
+    doc = Document()
+    for params, rows in ((["בנזן", "טולואן", "אתיל בנזן", "כסילן", "MTBE"],
+                          {"EAZ-1": ["2.26", "5.85", "0.5", "3.09", "10.72"], "נ-1": ["0.001", "<0.005", "<0.001", "<0.003", "0.5"]}),
+                         (["TECE", "TCE", "CDCE", "DCEY", "VYCL"],
+                          {"EAZ-1": ["<0.01", "0.03", "<0.01", "0.023", "<0.01"], "נ-1": ["<0.001", "0.1", "0.002", "<0.001", "<0.001"]})):
+        t = doc.add_table(rows=3, cols=8)
+        for ci, x in enumerate(["שם קידוח", "תאריך דיגום", ""] + params):
+            t.cell(0, ci).text = x
+        t.cell(1, 2).text = "ערך סף^"
+        lim = ["0.204", "28.56", "12.24", "20.4", "1.632"] if params[0] == "בנזן" else ["0.408", "0.816", "0.204", "0.408", "0.0204"]
+        for ci, x in enumerate(lim):
+            t.cell(1, 3 + ci).text = x
+        first = True
+        for well, vals in rows.items():
+            r = t.rows[2] if first else t.add_row()
+            first = False
+            r.cells[0].text, r.cells[1].text = well, "*02/01/17"
+            for ci, x in enumerate(vals):
+                r.cells[3 + ci].text = x
+                if x[0].isdigit() and float(x) > float(lim[ci]):
+                    shd = OxmlElement("w:shd")
+                    shd.set(_qn("w:val"), "clear")
+                    shd.set(_qn("w:fill"), "D9D9D9")
+                    r.cells[3 + ci]._tc.get_or_add_tcPr().append(shd)
+    return doc
+
+
+def test_latin_wells_two_day_round_slash_dates_and_gray_marks():
+    from soil_lab_tool.core.gw_round_files import Round
+    doc = _azor_like()
+    buf = io.BytesIO()
+    doc.save(buf)
+    samples = {
+        "EAZ-1": {"date": "03.09.25", "results": {"בנזן": 15.5, "MTBE": 0.9, "TCE": 0.007, "VC": 0.024},
+                  "limits": {}},
+        "N-1": {"date": "04.09.25", "results": {"בנזן": None, "MTBE": 1.4, "TCE": 0.14, "VC": None},
+                "limits": {"בנזן": 0.001, "VC": 0.001}},
+    }
+    out, _ = upd.run_update_bytes(buf.getvalue(), None, lab_type="bactochem",
+                                  parsed_round={"sampling_date": "03.09.25", "samples": samples})
+    d = Document(io.BytesIO(out))
+    hist = upd._well_history(d)
+    new_rows = [r for r in hist["EAZ-1"] if r[0] == "03.09.25"]   # one in each table
+    assert new_rows == [("03.09.25", {"בנזן": "15.5", "טולואן": "-", "אתיל בנזן": "-", "קסילן": "-", "MTBE": "0.9"}),
+                        ("03.09.25", {"PCE": "-", "TCE": "0.007", "cis-1,2-DCE": "-", "1,1-DCE": "-", "VC": "0.024"})]
+    assert hist["נ-1"][-1] == ("04.09.25", {"PCE": "-", "TCE": "0.14", "cis-1,2-DCE": "-", "1,1-DCE": "-", "VC": "<0.001"})
+    t = d.tables[0]
+    row = [r for r in t.rows if r.cells[1].text == "03/09/25"][0]   # the table's own date style
+    assert upd._fill_of(row.cells[3]) == "D9D9D9"                    # benzene 15.5 > 0.204: gray
+    assert upd._fill_of(row.cells[7]) is None                       # MTBE 0.9 < 1.632
+    assert not any(r.bold for p in row.cells[3].paragraphs for r in p.runs)
+    # a two-day round shows as one
+    r = Round(date=datetime(2025, 9, 3), lab="bactochem", end_date=datetime(2025, 9, 4))
+    assert r.span_str == "03-04.09.25"

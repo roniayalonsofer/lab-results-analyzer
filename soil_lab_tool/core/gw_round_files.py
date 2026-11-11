@@ -22,6 +22,8 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 
+_ROUND_DAYS = 7  # samples this close together belong to one round
+
 LAB_NAMES = {"als": "ALS", "bactochem": "בקטוכם", "aminolab": "אמינולאב"}
 
 
@@ -31,12 +33,29 @@ class Round:
     lab: str                       # "als" | "bactochem" | "aminolab"
     lab_files: list = field(default_factory=list)      # [(name, bytes)] used for the results
     samples: dict = field(default_factory=dict)        # {sample: {"results", "limits", ...}}
-    field_form: tuple | None = None                    # (name, bytes)
+    field_form: tuple | None = None                    # (name, bytes), the first form
     companion_files: list = field(default_factory=list)  # names of copies not read (PDF of an xlsx)
+    end_date: datetime | None = None                   # last day of a round sampled over days
+    field_forms: list = field(default_factory=list)    # [(name, bytes)], one per sampling day
 
     @property
     def date_str(self) -> str:
         return self.date.strftime("%d.%m.%y")
+
+    @property
+    def span_str(self) -> str:
+        """'03.09.25' or '03-04.09.25' for a round sampled over two days."""
+        end = self.end_date or self.date
+        if end.date() == self.date.date():
+            return self.date_str
+        if (end.month, end.year) == (self.date.month, self.date.year):
+            return f"{self.date:%d}-{end:%d.%m.%y}"
+        return f"{self.date_str}-{end:%d.%m.%y}"
+
+    @property
+    def form_bytes(self):
+        """The field forms' bytes for run_update_bytes, or None."""
+        return [b for _, b in self.field_forms] or None
 
     @property
     def lab_input(self):
@@ -231,15 +250,36 @@ def sort_round_files(files: list) -> dict:
                 rnd.samples.setdefault(k, v)
 
     ordered = sorted(rounds.values(), key=lambda r: r.date)
+    # One round sampled over a few days (03.09 and 04.09) is one round: each
+    # sample keeps its own date for the history tables.
+    merged = []
+    for r in ordered:
+        for v in r.samples.values():
+            v.setdefault("date", r.date_str)
+        last = merged[-1] if merged else None
+        if last and last.lab == r.lab and (r.date - (last.end_date or last.date)).days <= _ROUND_DAYS:
+            last.lab_files += r.lab_files
+            last.companion_files += r.companion_files
+            for k, v in r.samples.items():
+                last.samples.setdefault(k, v)
+            last.end_date = r.date
+        else:
+            merged.append(r)
+    ordered = merged
+    form_days: dict = {}
     for name, data, d in forms:
-        match = [r for r in ordered if d and r.date.date() == d.date()]
+        match = [r for r in ordered
+                 if d and r.date.date() <= d.date() <= (r.end_date or r.date).date()]
         if not match and len(ordered) == 1 and d is None:
             match = ordered
         if match:
-            if match[0].field_form:
+            day = d.date() if d else None
+            if day in form_days.setdefault(id(match[0]), set()):
                 ignored.append((name, "כבר הועלה טופס שדה לאותו דיגום"))
             else:
-                match[0].field_form = (name, data)
+                form_days[id(match[0])].add(day)
+                match[0].field_forms.append((name, data))
+                match[0].field_form = match[0].field_form or (name, data)
         else:
             ds = d.strftime("%d.%m.%y") if d else "ללא תאריך"
             ignored.append((name, f"טופס שדה מ-{ds}, ואין תעודת מעבדה מאותו תאריך"))
