@@ -579,3 +579,59 @@ def test_two_wells_in_one_history_table_each_get_their_row_at_the_end():
     upd._update_chem_history_tables(doc, "01.10.26", samples, ["חק-2", "חק-3"])
     assert [r.cells[1].text for r in t.rows[1:]] == [
         "05.02.26", "02.06.26", "01.10.26", "05.02.26", "02.06.26", "01.10.26"]
+
+
+def _bacto_csv() -> bytes:
+    head = ['מספר תעודה', 'מספר דוגמה', 'אנליזה', 'רכיב', 'תוצאה', 'יחידות מידה',
+            'תאריך דיגום', 'תיאור דוגמה', 'נדגם ע"י', 'CAS_NUM']
+    rows = []
+    for well, benz, ph, ec in (("פפ 3", "0.370", "6.99", "1115"), ("פפ 5", "Not Detected", "6.96", "1027")):
+        desc = f"דיגום מי תהום-אתר- {well}"
+        rows += [
+            ["1", "2", "BTEX", "Benzene", benz, "mg/L", "10/06/2026", desc, "X", "71-43-2"],
+            ["1", "2", "BTEX", "Xylene", "0.013", "mg/L", "10/06/2026", desc, "X", "1330-20-7"],
+            ["1", "2", "LOWFLOW", "Depth of upper level", "11.80", "M", "10/06/2026", desc, "X", ""],
+            ["1", "2", "LOWFLOW", "pH (after stabilization)", ph, "pH units", "10/06/2026", desc, "X", ""],
+            ["1", "2", "LOWFLOW", "Elctr.conductivity (after stabilization)", ec, "µS/cm", "10/06/2026", desc, "X", ""],
+            ["1", "2", "LOWFLOW", "Total depth of drilling", "17.70", "M", "10/06/2026", desc, "X", ""],
+        ]
+    import csv
+    buf = io.StringIO()
+    w = csv.writer(buf, quoting=csv.QUOTE_ALL)
+    w.writerow(head)
+    w.writerows(rows)
+    return buf.getvalue().encode("utf-8-sig")
+
+
+def test_bactochem_csv_is_read_like_the_pdf():
+    lab = upd.parse_bactochem_csv(_bacto_csv())
+    assert lab["sampling_date"] == "10.06.26"
+    s3, s5 = lab["samples"]["פפ-3"], lab["samples"]["פפ-5"]
+    assert s3["results"]["בנזן"] == 0.37 and s3["result_text"]["בנזן"] == "0.370"
+    assert s5["results"]["בנזן"] is None and s5["results"]["קסילן"] == 0.013
+    assert s3["field"]["pH"] == 6.99 and s3["field_text"]["EC"] == "1115"
+    assert s3["water_level"] == 11.8 and s3["total_depth"] == 17.7
+
+    from soil_lab_tool.core.gw_round_files import sort_round_files
+    res = sort_round_files([("cert.csv", _bacto_csv())])
+    (r,) = res["rounds"]
+    assert r.lab == "bactochem" and r.wells == ["פפ-3", "פפ-5"]
+    assert any("CSV" in n for n in res["notes"])  # no sampler name in a CSV
+
+
+def test_hebrew_order_check_draws_text():
+    mk._MPL_BIDI = None
+    assert mk._mpl_does_bidi() in (True, False)
+    # whatever matplotlib does, a label drawn through _bidi reads right to left:
+    # the first Hebrew letter must end up on the right.
+    import numpy as np
+    from matplotlib.figure import Figure
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    fig = Figure(figsize=(3, 1), dpi=100)
+    canvas = FigureCanvasAgg(fig)
+    fig.text(0.5, 0.5, mk._bidi("אייייי"), fontsize=30, ha="center", va="center",
+             family="DejaVu Sans")
+    canvas.draw()
+    cols = (255 - np.asarray(canvas.buffer_rgba())[:, :, 0].astype(float)).sum(axis=0)
+    xs = np.nonzero(cols > 0)[0]
+    assert (cols * np.arange(len(cols))).sum() / cols.sum() > (xs[0] + xs[-1]) / 2

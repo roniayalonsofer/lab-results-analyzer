@@ -129,7 +129,8 @@ everything else in those tables (older rows) is left untouched.
 
 ### Inputs: labs, field form, Mann-Kendall
 
-- **Labs:** Bactochem PDF, Aminolab PDFs, or ALS (PDF or the "נספח" XLSX,
+- **Labs:** Bactochem PDF or its CSV (`parse_bactochem_csv`, same shape;
+  the PDF wins when both come, the CSV has no sampler's name), Aminolab PDFs, or ALS (PDF or the "נספח" XLSX,
   read by `core/gw_round_inputs.parse_als_round`, results in mg/L; a
   non-detect is `None` with its limit in `limits`, printed as `<0.0002`).
 - **Field form:** Yeda Water's "טופס ביצוע עבודה" .xlsx
@@ -144,7 +145,10 @@ everything else in those tables (older rows) is left untouched.
   place of the picture under the caption "גרף מספר N: ... <compound>", and
   the app hands back the rows to paste into the .xls. Values below 0.01 or
   non-detects are entered as 0.01 (the site's convention). The sheet for a
-  compound is the one whose events reach the latest date.
+  compound is the one whose events reach the latest date. Hebrew in the
+  pictures: whether matplotlib orders it right to left is tested by drawing
+  (`_mpl_does_bidi`), never by version — the server's Linux build of the
+  same version drew it backwards.
 - **No lab choice in the app:** the periodic tab takes all of a round's
   files at once; `core/gw_round_files.sort_round_files` identifies each file
   by READING it (lab parser must return samples — `auto_detect_lab` misses

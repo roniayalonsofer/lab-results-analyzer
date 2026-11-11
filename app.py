@@ -2100,8 +2100,8 @@ elif page == "groundwater":
 
         st.markdown("#### 2 · קבצי הדיגום")
         round_files = st.file_uploader(
-            "כל הקבצים של הדיגום (PDF / Excel)",
-            type=["pdf", "xlsx", "xls"], accept_multiple_files=True, key="gw_round_files",
+            "כל הקבצים של הדיגום (PDF / Excel / CSV)",
+            type=["pdf", "xlsx", "xls", "csv"], accept_multiple_files=True, key="gw_round_files",
         )
         st.caption("💡 אפשר לגרור את כל תיקיית תוצאות המעבדה: תעודות של ALS, בקטוכם או אמינולאב, "
                    "טופס ביצוע העבודה של ידע מים, וגם קובץ Mann-Kendall. כל קובץ מזוהה לבד. "

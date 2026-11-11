@@ -425,6 +425,105 @@ def parse_bactochem_pdf(pdf_path: str) -> dict:
     return {"sampling_date": global_date, "samples": samples}
 
 
+# Bactochem CSV (the certificate's data file, opens in Excel): one row per
+# sample × component, the low-flow readings included. English component
+# name → field key used by the PDF parser.
+_BACTO_CSV_FIELDS = {
+    "depth of upper level": "עומק פני המים",
+    "dissolved o2": "חמצן מומס",
+    "elctr.conductivity": "EC",
+    "electr.conductivity": "EC",
+    "electrical conductivity": "EC",
+    "ph": "pH",
+    "redox": "רדוקס",
+    "temp": "טמפרטורה",
+    "turbidity": "עכירות",
+    "total depth of drilling": "עומק כללי של הקידוח",
+    "sampling depth": "עומק שאיבה",
+}
+
+
+def parse_bactochem_csv(data: bytes) -> dict:
+    """
+    Read Bactochem's CSV export into the same shape as parse_bactochem_pdf.
+    Columns are found by their header ("רכיב", "תוצאה", "תאריך דיגום",
+    "תיאור דוגמה", "CAS_NUM"); the well is the end of the sample description
+    ("דיגום מי תהום-דלק פרבר- פפ 3" → "פפ-3"). The CSV has no sampler's full
+    name, so the sampler sentence of the report is left as it is.
+    """
+    import csv as _csv
+    for enc in ("utf-8-sig", "cp1255"):
+        try:
+            text = data.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        raise ValueError("קידוד לא מוכר")
+    import io as _io
+    rows = list(_csv.reader(_io.StringIO(text)))
+    if not rows:
+        raise ValueError("קובץ ריק")
+    head = [h.strip() for h in rows[0]]
+
+    def col(*names):
+        for n in names:
+            if n in head:
+                return head.index(n)
+        return None
+
+    c_comp, c_val = col("רכיב"), col("תוצאה")
+    c_date, c_desc, c_cas = col("תאריך דיגום"), col("תיאור דוגמה"), col("CAS_NUM")
+    if None in (c_comp, c_val, c_date, c_desc):
+        raise ValueError("לא קובץ CSV של בקטוכם")
+
+    samples, global_date = {}, None
+    for r in rows[1:]:
+        if len(r) <= max(c_comp, c_val, c_date, c_desc):
+            continue
+        m = re.search(r"([א-ת]{1,3})['׳]?[\s\-]*(\d+)\s*$", r[c_desc].strip())
+        if not m:
+            continue
+        well = f"{m.group(1)}-{m.group(2)}"
+        try:
+            date = datetime.strptime(r[c_date].strip()[:10], "%d/%m/%Y").strftime("%d.%m.%y")
+        except ValueError:
+            continue
+        global_date = global_date or date
+        s = samples.setdefault(well, {
+            "date": date, "results": {}, "field": {}, "field_text": {},
+            "water_level": None, "total_depth": None, "floating_layer": False,
+        })
+        comp, raw = r[c_comp].strip(), r[c_val].strip()
+        cas = r[c_cas].strip() if c_cas is not None and c_cas < len(r) else ""
+        heb = CAS_TO_HEB.get(cas)
+        if heb:
+            nd = raw.lower() in ("not detected", "nd", "n.d.") or raw.startswith("<")
+            try:
+                s["results"][heb] = None if nd else float(raw)
+            except ValueError:
+                continue
+            if not nd:
+                s.setdefault("result_text", {})[heb] = raw
+            continue
+        key = next((v for k, v in _BACTO_CSV_FIELDS.items()
+                    if comp.lower() == k or comp.lower().startswith(k + " ")), None)
+        if not key:
+            continue
+        try:
+            v = float(raw.replace(",", ""))
+        except ValueError:
+            continue
+        s["field"][key] = v
+        if key != "עומק שאיבה":
+            s["field_text"][key] = raw
+        if key == "עומק פני המים":
+            s["water_level"] = v
+        elif key == "עומק כללי של הקידוח":
+            s["total_depth"] = v
+    return {"sampling_date": global_date, "samples": samples}
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # WORD DOCUMENT UPDATER
 # ──────────────────────────────────────────────────────────────────────────────

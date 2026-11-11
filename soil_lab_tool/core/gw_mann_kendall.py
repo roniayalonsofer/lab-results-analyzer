@@ -390,13 +390,42 @@ _WELL_COLORS = ["#000080", "#c0504d", "#9bbb59", "#8064a2", "#4bacc6", "#f79646"
 _MARKERS = ["D", "s", "^", "x", "*", "o"]
 
 
+_MPL_BIDI = None
+
+
 def _mpl_does_bidi() -> bool:
-    """matplotlib 3.11+ shapes text with libraqm, which already orders Hebrew right to left."""
-    try:
-        from matplotlib import ft2font
-    except Exception:
-        return False
-    return hasattr(ft2font, "__libraqm_version__")
+    """
+    Whether matplotlib already orders Hebrew right to left (libraqm in 3.11+).
+    Tested by drawing it, not by version: the Linux build on the server drew
+    Hebrew backwards while the Windows one with the same version did not.
+    The word drawn is alef followed by small yods: when matplotlib does bidi
+    the wide alef ends up on the right.
+    """
+    global _MPL_BIDI
+    if _MPL_BIDI is None:
+        try:
+            import numpy as np
+            import matplotlib
+            matplotlib.use("Agg")
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_agg import FigureCanvasAgg
+            fig = Figure(figsize=(3, 1), dpi=100)
+            canvas = FigureCanvasAgg(fig)
+            fig.text(0.5, 0.5, "אייייי", fontsize=30, ha="center", va="center",
+                     family="DejaVu Sans")
+            canvas.draw()
+            ink = 255 - np.asarray(canvas.buffer_rgba())[:, :, 0].astype(float)
+            cols = ink.sum(axis=0)
+            xs = np.nonzero(cols > 0)[0]
+            if len(xs) == 0:
+                _MPL_BIDI = False
+            else:
+                mid = (xs[0] + xs[-1]) / 2
+                centre = (cols * np.arange(len(cols))).sum() / cols.sum()
+                _MPL_BIDI = bool(centre > mid)
+        except Exception:
+            _MPL_BIDI = False
+    return _MPL_BIDI
 
 
 def _bidi(text: str) -> str:

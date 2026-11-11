@@ -92,6 +92,17 @@ def identify(name: str, data: bytes) -> dict:
     from soil_lab_tool.core import gw_round_inputs as gri
 
     low = name.lower()
+    if low.endswith(".csv"):
+        from soil_lab_tool.gw_report_updater import parse_bactochem_csv
+        try:
+            lab = parse_bactochem_csv(data)
+        except Exception:
+            lab = {}
+        if lab.get("samples"):
+            return {"kind": "bactochem", "date": _parse_date(lab.get("sampling_date")),
+                    "samples": lab["samples"]}
+        return {"kind": "ignored", "reason": "קובץ CSV שלא זוהה כתוצאות בקטוכם"}
+
     if low.endswith((".xlsx", ".xls", ".xlsm")):
         if low.endswith(".xlsx") and gri.is_yeda_field_form(data):
             form = gri.parse_yeda_field_form(data)
@@ -179,6 +190,32 @@ def sort_round_files(files: list) -> dict:
                 else:
                     rnd.companion_files.append(name)
                 continue
+            if kind == "bactochem":
+                # The certificate as PDF and as CSV: the PDF wins (it has the
+                # sampler's name); the CSV is read only for wells the PDF lacks.
+                is_csv = name.lower().endswith(".csv")
+                if is_csv:
+                    if rnd.samples and set(info["samples"]) <= set(rnd.samples):
+                        rnd.companion_files.append(name)
+                        continue
+                    rnd.lab_files.append((name, data))
+                    for k, v in info["samples"].items():
+                        rnd.samples.setdefault(k, v)
+                    continue
+                rnd.lab_files.append((name, data))
+                rnd.samples.update(info["samples"])
+                for fn, fb in list(rnd.lab_files):
+                    if fn.lower().endswith(".csv"):
+                        try:
+                            from soil_lab_tool.gw_report_updater import parse_bactochem_csv
+                            wells = set(parse_bactochem_csv(fb)["samples"])
+                        except Exception:
+                            wells = set()
+                        pdf_wells = set(info["samples"])
+                        if wells <= pdf_wells:
+                            rnd.lab_files.remove((fn, fb))
+                            rnd.companion_files.append(fn)
+                continue
             rnd.lab_files.append((name, data))
             for k, v in info["samples"].items():
                 rnd.samples.setdefault(k, v)
@@ -196,6 +233,12 @@ def sort_round_files(files: list) -> dict:
         else:
             ds = d.strftime("%d.%m.%y") if d else "ללא תאריך"
             ignored.append((name, f"טופס שדה מ-{ds}, ואין תעודת מעבדה מאותו תאריך"))
+
+    for r in ordered:
+        if r.lab == "bactochem" and r.lab_files and all(
+                n.lower().endswith(".csv") for n, _ in r.lab_files):
+            notes.append(f"בדיגום {r.date_str} התוצאות נקראו מקובץ ה-CSV של בקטוכם. אין בו את שם "
+                         "הדוגם, ולכן משפט הדוגם בדוח לא עודכן. אפשר להעלות גם את תעודת ה-PDF.")
 
     # A lab may name a lone sample after the site ("Hof Station"); when the
     # round's field form has exactly one well, that sample is that well.
