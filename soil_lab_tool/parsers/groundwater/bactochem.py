@@ -941,11 +941,27 @@ class BactochemGroundwaterParser(BaseParser):
         (row 0 = column names; row 1 = first data row).
         """
         try:
-            if isinstance(file_obj, str) and file_obj.lower().endswith(".csv"):
-                df = pd.read_csv(
-                    file_obj, encoding="utf-8-sig", dtype=str,
-                    engine="python", usecols=list(range(21)),
-                ).fillna("")
+            # Bytes that are neither .xlsx (zip "PK") nor .xls (OLE) are the CSV export.
+            is_csv = isinstance(file_obj, str) and file_obj.lower().endswith(".csv")
+            if not isinstance(file_obj, str):
+                head = file_obj.read(8)
+                file_obj.seek(0)
+                is_csv = not (head.startswith(b"PK") or head.startswith(b"\xd0\xcf\x11\xe0"))
+            if is_csv:
+                # Python's csv reader: the header has a quote inside a quoted
+                # field ("נדגם ע"י"), which pandas refuses.
+                import csv as _csv
+                raw = file_obj.read() if not isinstance(file_obj, str) else open(file_obj, "rb").read()
+                for enc in ("utf-8-sig", "cp1255"):
+                    try:
+                        text = raw.decode(enc)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                rows = list(_csv.reader(io.StringIO(text)))
+                width = len(rows[0])
+                df = pd.DataFrame([(r + [""] * width)[:width] for r in rows[1:]],
+                                  columns=rows[0], dtype=str).fillna("")
             else:
                 xl = pd.ExcelFile(file_obj)
                 raw = xl.parse(xl.sheet_names[0], header=None,

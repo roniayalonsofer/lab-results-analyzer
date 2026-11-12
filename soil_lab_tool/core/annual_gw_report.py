@@ -414,6 +414,33 @@ def parse_lab_reports(files: list[tuple[str, bytes]]) -> list[SamplingEvent]:
 
     events = []
     for fname, fdata in files:
+        if fname.lower().endswith(".csv"):
+            # Bactochem's CSV export: the reader the periodic report uses
+            try:
+                from soil_lab_tool.gw_report_updater import parse_bactochem_csv
+                lab = parse_bactochem_csv(fdata)
+            except Exception as e:
+                print(f"[annual_gw_report] {fname}: {e}")
+                continue
+            keys = {"pH": "ph", "EC": "ec", "טמפרטורה": "temp", "חמצן מומס": "do",
+                    "עכירות": "turbidity", "רדוקס": "redox", "עומק פני המים": "water_level",
+                    "עומק כללי של הקידוח": "total_depth"}
+            chem = {"בנזן": "benzene", "טולואן": "toluene", "אתיל בנזן": "ethylbenzene",
+                    "קסילן": "xylene", "MTBE": "mtbe"}
+            for well, s in lab["samples"].items():
+                ev = SamplingEvent(well, s.get("date") or lab["sampling_date"])
+                for k, attr in keys.items():
+                    v = s.get("field_text", {}).get(k) or s.get("field", {}).get(k)
+                    if v is not None:
+                        setattr(ev, attr, str(v))
+                for k, attr in chem.items():
+                    if k in s.get("results", {}):
+                        v = s["results"][k]
+                        setattr(ev, attr, s.get("result_text", {}).get(k) or ("<0.001" if v is None else str(v)))
+                ev.method = "Low flow"
+                ev.source = "בקטוכם"
+                events.append(ev)
+            continue
         try:
             lab = auto_detect_lab(fname, fdata)
             cat = auto_detect_category(fname, fdata, lab) or "groundwater"
@@ -424,7 +451,12 @@ def parse_lab_reports(files: list[tuple[str, bytes]]) -> list[SamplingEvent]:
                 elif b"aminolab" in fdata[:2000].lower() or b'\xe0\xee\xe9\xf0\xe5' in fdata[:2000]:
                     lab = "aminolab"
 
-            parser  = get_parser(lab, cat)
+            # An annual groundwater report: the lab's groundwater reader when it
+            # has one (a Bactochem CSV looks like its soil export).
+            try:
+                parser = get_parser(lab, "groundwater")
+            except Exception:
+                parser = get_parser(lab, cat)
             records = parser.parse(io.BytesIO(fdata))
 
             # Build sample_id → borehole_name map (for Bactochem PDFs)

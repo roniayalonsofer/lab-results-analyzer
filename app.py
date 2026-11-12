@@ -2078,6 +2078,27 @@ elif page == "groundwater":
     _render_nav("groundwater")
     from soil_lab_tool.gw_report_updater import run_update_bytes, parse_bactochem_pdf
 
+    def _report_forms(form_bytes, rnds, word_bytes=None):
+        """[(round span, updated form bytes)], one form per round."""
+        from datetime import datetime as _dt
+        from soil_lab_tool.core.report_form import (
+            previous_results, unit_factor, update_report_form)
+        prev = previous_results(word_bytes) if word_bytes else {}
+        factor = unit_factor(form_bytes, prev)
+        out = []
+        if len(rnds) > 1:
+            from soil_lab_tool.core.report_form import summary_samples
+            summ, all_days = summary_samples([(r.samples, r.form_bytes) for r in rnds])
+            span = f"מסכם {rnds[0].date_str}-{(rnds[-1].end_date or rnds[-1].date):%d.%m.%y}"
+            out.append((span, update_report_form(form_bytes, summ, all_days or [r.date for r in rnds],
+                                                 factor, {}, None)))
+        for r in rnds:
+            days = sorted({_dt.strptime(s["date"], "%d.%m.%y") for s in r.samples.values()
+                           if re.fullmatch(r"\d{2}\.\d{2}\.\d{2}", str(s.get("date") or ""))}) or [r.date]
+            out.append((r.span_str, update_report_form(form_bytes, r.samples, days, factor, {}, r.form_bytes)))
+        return out
+
+
     st.markdown(
         '<div class="page-wrapper">'
         '<div class="hero" style="padding:1.5rem 2.5rem;">'
@@ -2178,26 +2199,6 @@ elif page == "groundwater":
         rounds = sorted_files["rounds"] if sorted_files else []
         report_form_in = ((form_file.name, form_file.getvalue()) if form_file
                           else (sorted_files.get("report_form") if sorted_files else None))
-
-        def _report_forms(form_bytes, rnds, word_bytes=None):
-            """[(round span, updated form bytes)], one form per round."""
-            from datetime import datetime as _dt
-            from soil_lab_tool.core.report_form import (
-                previous_results, unit_factor, update_report_form)
-            prev = previous_results(word_bytes) if word_bytes else {}
-            factor = unit_factor(form_bytes, prev)
-            out = []
-            if len(rnds) > 1:
-                from soil_lab_tool.core.report_form import summary_samples
-                summ, all_days = summary_samples([(r.samples, r.form_bytes) for r in rnds])
-                span = f"מסכם {rnds[0].date_str}-{(rnds[-1].end_date or rnds[-1].date):%d.%m.%y}"
-                out.append((span, update_report_form(form_bytes, summ, all_days or [r.date for r in rnds],
-                                                     factor, {}, None)))
-            for r in rnds:
-                days = sorted({_dt.strptime(s["date"], "%d.%m.%y") for s in r.samples.values()
-                               if re.fullmatch(r"\d{2}\.\d{2}\.\d{2}", str(s.get("date") or ""))}) or [r.date]
-                out.append((r.span_str, update_report_form(form_bytes, r.samples, days, factor, {}, r.form_bytes)))
-            return out
 
         if report_form_in and rounds:
             if st.button("📄 עדכן רק את טופס הדיווח", use_container_width=True, key="gw_form_btn"):
@@ -2371,8 +2372,8 @@ elif page == "groundwater":
                 help="הדוח התקופתי האחרון שיצא (למשל אוגוסט 2025). מכיל את ההיסטוריה המצטברת.",
             )
             ann_lab_files = st.file_uploader(
-                "🧪 תעודות מעבדה של השנה (.pdf / .xlsx / .xls)",
-                type=["pdf", "xlsx", "xls"],
+                "🧪 תעודות מעבדה של השנה (.pdf / .xlsx / .xls / .csv)",
+                type=["pdf", "xlsx", "xls", "csv"],
                 accept_multiple_files=True,
                 key="ann_lab_files",
                 help="כל תעודות המעבדה של הדיגומים שבוצעו השנה ולא כלולים בדוח התקופתי שהועלה. תומך בבקטוכם ואמינולאב.",
@@ -2380,6 +2381,10 @@ elif page == "groundwater":
             ann_mk = st.file_uploader(
                 "📈 קובץ Mann-Kendall (.xls, אופציונלי)", type=["xls"], key="ann_mk",
                 help="הקובץ רק נקרא ולא משתנה. עמודי ה-MK בדוח יוחלפו בעמודים שכוללים את כל הדיגומים של השנה.",
+            )
+            ann_form = st.file_uploader(
+                "📄 טופס דיווח לרשות המים (.xlsx, אופציונלי)", type=["xlsx", "xlsm"], key="ann_form",
+                help="יוצא טופס דיווח מסכם לשנה, וטופס לכל דיגום. אפשר לעדכן רק את הטופס.",
             )
 
         # Show detected labs for uploaded files
@@ -2399,6 +2404,36 @@ elif page == "groundwater":
                 pass
 
         ready = bool(ann_word and ann_year)
+
+        def _ann_forms():
+            """The report forms for the year's rounds (the lab files read like the periodic tab)."""
+            from soil_lab_tool.core.gw_round_files import sort_round_files
+            res = sort_round_files([(f.name, f.getvalue()) for f in (ann_lab_files or [])])
+            if not res["rounds"]:
+                raise ValueError("לא נמצאו תעודות מעבדה בין הקבצים.")
+            return _report_forms(ann_form.getvalue(), res["rounds"],
+                                 ann_word.getvalue() if ann_word else None)
+
+        def _show_ann_forms(forms, key):
+            for span, fb in forms:
+                st.download_button(
+                    (f"⬇️ הורד טופס דיווח {span}" if span.startswith("מסכם")
+                     else f"⬇️ הורד טופס דיווח – דיגום {span}"),
+                    data=fb, file_name=f"טופס דיווח - {span}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True, key=f"{key}_{span}",
+                )
+
+        if ann_form and ann_lab_files:
+            if st.button("📄 עדכן רק את טופס הדיווח", use_container_width=True, key="ann_form_btn"):
+                with st.spinner("מעדכן את טופס הדיווח... ⏳"):
+                    try:
+                        st.session_state["ann_form_result"] = _ann_forms()
+                    except Exception as form_err:
+                        st.session_state["ann_form_result"] = []
+                        st.error(f"טופס הדיווח לא עודכן: {form_err}")
+            if st.session_state.get("ann_form_result"):
+                _show_ann_forms(st.session_state["ann_form_result"], "ann_dl_form_only")
 
         if ready:
             if st.button("⚡ צור דוח שנתי", type="primary", use_container_width=True, key="ann_gen_btn"):
@@ -2469,6 +2504,11 @@ elif page == "groundwater":
                         )
                         if ann_charts:
                             st.info("📈 עמודי Mann-Kendall הוחלפו בדוח: " + ", ".join(ann_charts))
+                        if ann_form and ann_lab_files:
+                            try:
+                                _show_ann_forms(_ann_forms(), "ann_dl_form")
+                            except Exception as form_err:
+                                st.warning(f"⚠️ טופס הדיווח לא עודכן: {form_err}")
                         if ann_paste:
                             with st.expander("📝 להוספת הדיגומים גם לקובץ ה-Mann-Kendall שלך (לא חובה)"):
                                 st.caption("הגרפים בדוח כבר עודכנו. קובץ ה-MK שלך לא שונה. בקובץ הזה כתוב "
