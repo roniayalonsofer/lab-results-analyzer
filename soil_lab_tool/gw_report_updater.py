@@ -298,6 +298,23 @@ def parse_bactochem_pdf(pdf_path: str) -> dict:
     # matches wells by their number.
     segments = []
     for i, line in enumerate(lines):
+        # 2026 layout: "16/09/2026 09:00 P-1 1 הדוקנ- איליעמ לונוס-םוהת ימ םוגיד 2115252"
+        # (the line repeats at the top of a page where the sample goes on)
+        nm = re.match(r"\s*\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}\s+(.+)$", line)
+        if nm and ("הדוקנ" in line or "םוגיד" in line) and "רפסמ" not in line:
+            if "קנלב" in line or "בלנק" in line:
+                segments.append(("__blank__", i))
+                continue
+            rest = nm.group(1)
+            m = re.match(r"([A-Za-z]{1,4})-?(\d{1,3})(?![\d.])", rest)
+            if m:
+                segments.append((f"{m.group(1)}-{m.group(2)}", i))
+                continue
+            m = re.search(r"(\d+)-['\u05f3]?([א-ת]{1,3})(?!\S)", rest) or \
+                re.search(r"(\d+)\s+['\u05f3]?([א-ת]{1,3})(?:\s|$|-)", rest)
+            if m:
+                segments.append((f"{m.group(2)[::-1]}-{m.group(1)}", i))
+            continue
         if "רפסמ" not in line or "המגודה" not in line:
             continue
         if "בלנק" in line or "קיפ" in line:
@@ -329,10 +346,10 @@ def parse_bactochem_pdf(pdf_path: str) -> dict:
         _, end = segments[seg_idx + 1]
         seg_lines = lines[start:end]
 
-        if well_id in samples:
-            continue  # already parsed (blank sample continuation)
-
-        sample = {
+        if well_id == "__blank__":
+            continue  # an equipment blank, not a well
+        # a sample that goes on after a page break: the rest is added to it
+        sample = samples.get(well_id) or {
             "date": None,
             "results": {},
             "field": {},
@@ -342,7 +359,7 @@ def parse_bactochem_pdf(pdf_path: str) -> dict:
             "floating_layer": False,
         }
 
-        for line in seg_lines:
+        for li, line in enumerate(seg_lines):
             # Sampling date: "03/08/2025 07:20 :םוגיד דעומ"
             m = re.search(r'(\d{2}/\d{2}/\d{4})\s+\d{2}:\d{2}', line)
             if m and sample["date"] is None:
@@ -377,8 +394,22 @@ def parse_bactochem_pdf(pdf_path: str) -> dict:
                         # as printed ("0.370"), so the report keeps the lab's digits
                         sample.setdefault("result_text", {})[heb] = raw_val
 
+            m = re.match(r'\s*(?:①\s*)?([\d.]+)\s+mg/L\s+([\d.]+|Not Detected)\s+[A-Za-z]', line, re.IGNORECASE)
+            nxt = seg_lines[li + 1] if li + 1 < len(seg_lines) else ""
+            mc = re.search(r'Cas\s*#\s*:\s*([\d\-]+)', nxt, re.IGNORECASE)
+            if m and mc and "CAS #" not in line:
+                loq, raw_val = m.group(1), m.group(2)
+                heb = CAS_TO_HEB.get(mc.group(1))
+                if heb:
+                    nd = raw_val.lower() == "not detected"
+                    sample["results"][heb] = None if nd else float(raw_val)
+                    if nd:
+                        sample.setdefault("limits", {})[heb] = float(loq)
+                    else:
+                        sample.setdefault("result_text", {})[heb] = raw_val
+
             # Floating layer: "ןכ : הפצ הבכש תוחכונ"
-            if "הפצ הבכש" in line and "ןכ" in line:
+            if ("הפצ הבכש" in line or "הבכש תוחכונ" in line) and re.search(r"(?:^|\s)ןכ(?:\s|$)", line):
                 sample["floating_layer"] = True
 
             # Field: water level "M 15.59 ןוילע סלפמ קמוע"
@@ -395,32 +426,33 @@ def parse_bactochem_pdf(pdf_path: str) -> dict:
                 sample["field"]["EC"] = float(m.group(1).replace(",", ""))
                 sample["field_text"]["EC"] = m.group(1)
 
-            # pH: "pH units 7.11"
-            m = re.search(r'pH units\s+([\d.]+)', line)
+            # pH: "pH units 7.11", or in the 2026 layout "7.37 )תובצייתה רחאל( pH"
+            m = re.search(r'pH units\s+([\d.]+)', line) or \
+                re.search(r'([\d.]+)\s+[()]תובצייתה רחאל[()]\s+pH', line)
             if m:
                 sample["field"]["pH"] = float(m.group(1))
                 sample["field_text"]["pH"] = m.group(1)
 
             # DO: "mg/L 2.1 (תובצייתה רחאל) סמומ ןצמח"
-            m = re.search(r'mg/L\s+([\d.]+)\s+\(תובצייתה רחאל\) סמומ ןצמח', line)
+            m = re.search(r'mg/L\s+([\d.]+)\s+[()]תובצייתה רחאל[()] סמומ ןצמח', line)
             if m:
                 sample["field"]["חמצן מומס"] = float(m.group(1))
                 sample["field_text"]["חמצן מומס"] = m.group(1)
 
             # Redox: "mV -229 (תובצייתה רחאל) סקודר"
-            m = re.search(r'mV\s+(-?[\d.]+)\s+\(תובצייתה רחאל\) סקודר', line)
+            m = re.search(r'mV\s+(-?[\d.]+)\s+[()]תובצייתה רחאל[()] סקודר', line)
             if m:
                 sample["field"]["רדוקס"] = float(m.group(1))
                 sample["field_text"]["רדוקס"] = m.group(1)
 
             # Temp: "C° 27.9 (תובצייתה רחאל) הרוטרפמט"
-            m = re.search(r'C°\s+([\d.]+)\s+\(תובצייתה רחאל\) הרוטרפמט', line)
+            m = re.search(r'C°\s+([\d.]+)\s+[()]תובצייתה רחאל[()] הרוטרפמט', line)
             if m:
                 sample["field"]["טמפרטורה"] = float(m.group(1))
                 sample["field_text"]["טמפרטורה"] = m.group(1)
 
             # Turbidity: "NTU 18 (תובצייתה רחאל) תוריכע"
-            m = re.search(r'NTU\s+([\d.]+)\s+\(תובצייתה רחאל\) תוריכע', line)
+            m = re.search(r'NTU\s+([\d.]+)\s+[()]תובצייתה רחאל[()] תוריכע', line)
             if m:
                 sample["field"]["עכירות"] = float(m.group(1))
                 sample["field_text"]["עכירות"] = m.group(1)
