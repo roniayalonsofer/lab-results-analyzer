@@ -72,3 +72,21 @@ def test_aminolab_excel_appendix():
     assert (v["Lead"]["value"], v["Lead"]["flag"], v["Lead"]["cas"]) == (5, "<LOQ", "7439-92-1")
     assert (v["Benzene"]["value"], v["Benzene"]["analysis_type"]) == (0.02, "SOIL_VOC")
     assert (v["4-Nitroaniline"]["cas"], v["4-Nitroaniline"]["analysis_type"]) == ("100-01-6", "SOIL_SVOC")
+
+
+def test_machon_haneft_certificate_layout():
+    """Sample name over two header rows; ND at the detection limit; "50>" below the quantitation limit."""
+    from parsers.soil.machon_haneft_cert import parse_certificate_sheet
+    rows = [["תוצאות הבדיקות", "", "", "", "", "", ""],
+            ["VOC by GC-MS-HS", "", "", "", "S-1", "גבול", "גבול"],
+            ["", "Cas.No.", "Compound", "יחידות", "-2.0", "הגילוי", "הכימות"],
+            ["1", "71-43-2", "Benzene", "mg/Kg", "ND", "0.003", "0.01"],
+            ["2", "108-88-3", "Toluene*", "mg/Kg", "0.5", "0.003", "0.01"],
+            ["3", "100-41-4", "Ethylbenzene", "mg/Kg", "50>", "0.003", "0.01"],
+            ["סוף תעודה", "", "", "", "", "", ""]]
+    rs = parse_certificate_sheet(pd.DataFrame(rows), "מכון הנפט")
+    v = {r["compound"]: r for r in rs}
+    assert {r["sample_id"] for r in rs} == {"S-1-2.0"}
+    assert (v["Benzene"]["value"], v["Benzene"]["flag"]) == (0.003, "<LOD")
+    assert (v["Toluene"]["value"], v["Toluene"]["flag"], v["Toluene"]["analysis_type"]) == (0.5, "", "SOIL_VOC")
+    assert (v["Ethylbenzene"]["value"], v["Ethylbenzene"]["flag"]) == (50.0, "<LOQ")

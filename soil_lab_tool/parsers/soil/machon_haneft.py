@@ -162,6 +162,12 @@ class MachonHaneftSoilParser(BaseParser):
                 records.extend(self._parse_metals(xl, sheet_map[key]))
                 break
 
+        if not records:
+            # Older files laid out as the printed certificate (2020-2023)
+            from parsers.soil.machon_haneft_cert import parse_certificate_sheet
+            for s in xl.sheet_names:
+                records.extend(parse_certificate_sheet(
+                    xl.parse(s, header=None, dtype=str), self.LAB_NAME))
         return records
 
     # ------------------------------------------------------------------

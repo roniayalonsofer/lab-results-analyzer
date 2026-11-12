@@ -156,10 +156,40 @@ def test_kte_groundwater_edd():
     assert v["6 (23.03.2023)"]["loq"] == 0.0001 and {r["unit"] for r in rs} == {"mg/L"}
 
 
-@pytest.mark.xfail(reason="not read yet: older Machon HaNeft Excel (4231 / 2689)")
-def test_machon_haneft_older_excel():
+# ── Machon HaNeft, files laid out as the printed certificate (2020-2023) ────
+
+def test_machon_haneft_certificate_tph():
     rs = _records(HANEFT_OLD, "מכון הנפט", "soil")
-    assert rs
+    assert {(r["sample_id"], r["compound"], r["value"], r["flag"]) for r in rs} == {
+        ("EL-2-1", "TPH (C10-C40)", 50.0, "<LOQ"), ("EL-2-3", "TPH (C10-C40)", 50.0, "<LOQ")}
+
+
+def test_machon_haneft_certificate_voc():
+    rs = _records(HANEFT_4231_VOC, "מכון הנפט", "soil")
+    v = {r["compound"]: r for r in rs}
+    assert len(rs) == 62 and {r["sample_id"] for r in rs} == {"EL-2-3"}
+    assert (v["Methylene chloride"]["value"], v["Methylene chloride"]["flag"]) == (0.08, "")
+    assert (v["Benzene"]["value"], v["Benzene"]["flag"], v["Benzene"]["loq"]) == (0.003, "<LOD", 0.01)
+
+
+def test_machon_haneft_certificate_metals():
+    rs = _records(HANEFT_2689, "מכון הנפט", "soil")
+    v = {(r["sample_id"], r["compound"]): r for r in rs}
+    assert len(rs) == 44
+    assert v[("SZ-1.1-8 A-1", "Arsenic")]["value"] == 7.7 and v[("PS-1.1-14 A-3", "Iron")]["value"] == 1755
+    assert (v[("PS-1.1-14 A-3", "Boron")]["value"], v[("PS-1.1-14 A-3", "Boron")]["flag"]) == (2.0, "<LOQ")
+
+
+def test_machon_haneft_certificate_2023_job():
+    """One job in three files: the same sample name in each; a value name over two rows."""
+    voc = _records(HANEFT_2384 + "11.04.23/2384 SVOC.xlsx", "מכון הנפט", "soil")
+    met = _records(HANEFT_2384 + "13.04.23/2384 מתכות.xlsx", "מכון הנפט", "soil")
+    tph = _records(HANEFT_2384 + "16.04.23/2384 TPH+D+O.xlsx", "מכון הנפט", "soil")
+    assert (len(voc), len(met), len(tph)) == (58, 22, 3)
+    assert {r["sample_id"] for r in voc + met + tph} == {"TBM-3 R297-T A-1"}
+    assert {r["analysis_type"] for r in voc} == {"SOIL_VOC"}      # the file name says SVOC
+    assert "Isopropylbenzene (Cumene)" in {r["compound"] for r in voc}
+    assert {r["compound"] for r in tph} == {"TPH (C10-C40)", "DRO", "ORO"}
 
 
 # ── Aminolab soil ───────────────────────────────────────────────────────────
