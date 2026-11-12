@@ -11,6 +11,7 @@ from parsers.base import BaseParser
 from parsers.soil_gas.alchem    import AlchemSoilGasParser
 from parsers.soil_gas.alchem_pdf import AlchemSoilGasPDFParser
 from parsers.soil_gas.kte       import KTESoilGasParser
+from parsers.soil_gas.als_to15  import ALSSoilGasTO15Parser
 from parsers.soil.alchem        import AlchemSoilParser, AlchemMultiSectionParser
 from parsers.alchem             import AlchemTPHPDFParser
 from parsers.soil.kte           import KTESoilParser
@@ -55,6 +56,7 @@ _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
     ("als",           "soil_pdf"):   ALSSoilPDFParser,
     ("als",           "groundwater"): ALSGroundwaterParser,
     ("als",           "grain_size"):  ALSGrainSizeParser,
+    ("als",           "soil_gas"):    ALSSoilGasTO15Parser,
     ("aminolab",      "groundwater"): AminolabGroundwaterParser,
     ("aminolab",      "soil"):        AminolabGroundwaterParser,
     ("אמינולאב",     "groundwater"): AminolabGroundwaterParser,

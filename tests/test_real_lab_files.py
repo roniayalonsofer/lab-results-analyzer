@@ -122,18 +122,29 @@ def test_als_soil():
     assert v[("TM3.1 (4.0)", "Aluminium")] == 1750.0
 
 
-@pytest.mark.xfail(reason="known: ALS soil files potassium (and maybe other metals) under SOIL_SVOC")
-def test_als_soil_metals_on_the_metals_sheet():
+def test_als_soil_elements_on_the_metals_sheet():
+    """Potassium, sodium, calcium ... with the metals; ketones and alcohols with the VOCs."""
     rs = _records(ALS_SOIL, "als", "soil")
-    assert all(r["analysis_type"] == "SOIL_METALS" for r in rs if r["compound"] == "Potassium")
+    t = {r["compound"]: r["analysis_type"] for r in rs}
+    for el in ("Potassium", "Sodium", "Calcium", "Magnesium", "Aluminium", "Titanium"):
+        assert t[el] == "SOIL_METALS", el
+    for v in ("Acetone", "2-Butanone (MEK)", "tert-Butyl alcohol"):
+        assert t[v] == "SOIL_VOC", v
+    assert "Dry matter @ 105°C" not in t
 
 
 # ── Known gaps (not read yet) ───────────────────────────────────────────────
 
-@pytest.mark.xfail(reason="not supported yet: ALS soil gas TO-15")
 def test_als_to15_soil_gas():
+    """One sheet per sample; QC sheets skipped; "<0.36" a non-detect at the MDL; "J" kept."""
     rs = _records(ALS_TO15, "als", "soil_gas")
-    assert rs
+    assert len({r["sample_id"] for r in rs}) == 6 and len(rs) == 450
+    v = {(r["sample_id"], r["compound"]): r for r in rs}
+    assert (v[("EL 3.2", "Propene")]["value"], v[("EL 3.2", "Propene")]["flag"]) == (16.0, "")
+    assert (v[("EL 3.2", "Chloromethane")]["value"], v[("EL 3.2", "Chloromethane")]["flag"]) == (0.36, "<LOD")
+    assert v[("EL 3.2", "1,2-Dichloropropane")]["qualifier"] == "J"
+    assert ("EL 3.2", "1,2-Dichloro-1,1,2,2-tetrafluoroethane (CFC 114)") in v   # name over two lines
+    assert {r["unit"] for r in rs} == {"µg/m³"}
 
 
 @pytest.mark.xfail(reason="not read yet: KTE groundwater EDD Excel")

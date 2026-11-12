@@ -324,6 +324,10 @@ class ALSSoilParser(BaseParser):
         "MERCURY", "BARIUM", "SILVER", "MANGANESE", "IRON", "ALUMINUM",
         "ALUMINIUM", "SELENIUM", "ANTIMONY", "BERYLLIUM", "COBALT",
         "MOLYBDENUM", "THALLIUM", "VANADIUM", "COBALT", "TIN",
+        # major and other elements ALS reports with the metals
+        "POTASSIUM", "SODIUM", "CALCIUM", "MAGNESIUM", "PHOSPHORUS",
+        "SULPHUR", "SULFUR", "SILICON", "STRONTIUM", "TITANIUM", "ZIRCONIUM",
+        "BISMUTH", "BORON", "LITHIUM", "TELLURIUM", "TUNGSTEN", "URANIUM",
     })
     _VOC = frozenset({
         "BENZENE", "TOLUENE", "XYLENE", "ETHYLBENZENE", "STYRENE",
@@ -342,6 +346,9 @@ class ALSSoilParser(BaseParser):
         # Alkylbenzenes and other common VOCs
         "TRIMETHYLBENZENE", "BUTYLBENZENE", "PROPYLBENZENE",
         "ISOPROPYLBENZENE", "ISOPROPYLTOLUENE", "INDANE", "DIOXANE",
+        # ketones, alcohols and other EPA 8260 volatiles
+        "ACETONE", "BUTANONE", "MEK", "METHYL ISOBUTYL KETONE", "MIBK",
+        "TERT-BUTYL ALCOHOL", "TRICHLOROPROPANE",
     })
     _WATER_ATYPE_MAP = {
         "SOIL_VOC":    "GW_VOC",
@@ -549,6 +556,8 @@ class ALSSoilParser(BaseParser):
             if any(p in compound.lower() for p in _SVOC_NAMES):
                 return "SOIL_SVOC"
             return "SOIL_VOC"
+        if "DRY MATTER" in c:
+            return "SKIP"   # not a contaminant (the method code says so when the file has one)
         if any(k in c for k in self._METALS):
             return "SOIL_METALS"
         if any(k in c for k in self._VOC):
