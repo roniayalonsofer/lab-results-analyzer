@@ -2079,7 +2079,7 @@ elif page == "groundwater":
     from soil_lab_tool.gw_report_updater import run_update_bytes, parse_bactochem_pdf
 
     def _run_all_rounds(word_bytes, rounds, mk_bytes=None, form_bytes=None,
-                        author=None, submission=None):
+                        author=None, submission=None, photos=None, reports=None):
         """
         Every round on the report, oldest first, then the people who sampled,
         the period / year, Mann-Kendall and the report forms. The same steps
@@ -2123,6 +2123,33 @@ elif page == "groundwater":
                 result["word"] = apply_samplers(result["word"], names, "י.ד.ע מים וסביבה")
             result["word"] = apply_report_period(result["word"], min(r.date for r in done),
                                                  max((r.end_date or r.date) for r in done))
+            from soil_lab_tool.gw_report_updater import apply_round_summary
+            result["word"] = apply_round_summary(result["word"], [(r.date, r.samples, r.form_bytes) for r in done])
+            if photos is not None:
+                from datetime import datetime as _dt
+                from soil_lab_tool.core.report_extras import update_well_photos
+                well_dates = {}
+                for r in done:
+                    for w, s in r.samples.items():
+                        try:
+                            d = _dt.strptime(s.get("date") or r.date_str, "%d.%m.%y")
+                        except ValueError:
+                            d = r.date
+                        well_dates[w] = max(d, well_dates.get(w, d))
+                prep = {}
+                result["word"] = update_well_photos(result["word"], photos, well_dates, prep)
+                if prep.get("photos_removed"):
+                    result["notes"].append("לא הועלתה תמונה חדשה לקידוחים " + ", ".join(prep["photos_removed"])
+                                           + " — התמונה הישנה נמחקה והתאריך סומן בצהוב.")
+            if reports:
+                from soil_lab_tool.core.report_extras import add_report_paragraphs
+                rrep = {}
+                result["word"] = add_report_paragraphs(result["word"], reports, rrep)
+                if rrep.get("reports_added"):
+                    result["notes"].append("נוספה פסקה בצהוב בסוף פרק הרקע לכל אחד מהדוחות: "
+                                           + ", ".join(rrep["reports_added"]) + " — כדאי לעבור על הנוסח.")
+                for name, why in rrep.get("reports_failed", []):
+                    result["notes"].append(f"הדוח {name} לא נקרא: {why}")
             if form_bytes:
                 try:
                     result["forms"] = _report_forms(form_bytes, done, word_bytes)
@@ -2356,6 +2383,9 @@ elif page == "groundwater":
                             result["word"] = apply_report_period(
                                 result["word"], min(r.date for r in done),
                                 max((r.end_date or r.date) for r in done))
+                            from soil_lab_tool.gw_report_updater import apply_round_summary
+                            result["word"] = apply_round_summary(
+                                result["word"], [(r.date, r.samples, r.form_bytes) for r in done])
                     if result["word"] and report_form_in:
                         try:
                             result["forms"] = _report_forms(report_form_in[1], done, word_file.getvalue())
@@ -2450,7 +2480,22 @@ elif page == "groundwater":
             "טופס הדיווח האחרון (.xlsx)", type=["xlsx", "xlsm"], key="an_form",
             help="יוצא טופס מסכם מהטופס הקודם ועד הדיגום האחרון, וטופס לכל דיגום.",
         )
-        an_sig = tuple((f.name, f.size) for f in [an_word, an_mk, an_form, *(an_files or [])] if f)
+        st.markdown("#### 5 · תמונות קידוחים (רשות)")
+        an_photos = st.file_uploader(
+            "התמונות החדשות של הקידוחים (שם הקובץ עם שם הקידוח, למשל P-1.jpg)",
+            type=["jpg", "jpeg", "png"], accept_multiple_files=True, key="an_photos",
+            help="התמונות מהדוח הקודם נמחקות. תמונה חדשה נכנסת במקום התמונה של אותו קידוח, "
+                 "והתאריך שמעליה מתעדכן לדיגום האחרון.",
+        )
+        st.markdown("#### 6 · דוחות נוספים מהשנה האחרונה (רשות)")
+        an_reports = st.file_uploader(
+            "דוחות שצריכים להיכנס לדוח השנתי כפסקה (סקר קרקע, וידוא ניקיון וכו') — PDF או Word",
+            type=["pdf", "docx"], accept_multiple_files=True, key="an_reports",
+            help="מכל דוח נבנית פסקה מהכותרת, מהתאריך ומפרק הסיכום שלו. הפסקה נוספת בסוף פרק הרקע, "
+                 "מסומנת בצהוב לבדיקה.",
+        )
+        an_sig = tuple((f.name, f.size) for f in [an_word, an_mk, an_form, *(an_files or []),
+                                                   *(an_photos or []), *(an_reports or [])] if f)
         if an_files:
             cached = st.session_state.get("an_sorted")
             if cached and cached[0] == an_sig:
@@ -2480,7 +2525,9 @@ elif page == "groundwater":
                             an_word.getvalue(), an_sorted["rounds"],
                             an_mk.getvalue() if an_mk else (an_sorted["mk"][1] if an_sorted["mk"] else None),
                             an_form.getvalue() if an_form else
-                            (an_sorted["report_form"][1] if an_sorted.get("report_form") else None))
+                            (an_sorted["report_form"][1] if an_sorted.get("report_form") else None),
+                            photos=[(f.name, f.getvalue()) for f in an_photos] if an_photos else [],
+                            reports=[(f.name, f.getvalue()) for f in an_reports] if an_reports else None)
                         res["sig"] = an_sig
                         st.session_state["an_result"] = res
             _an_form_in = an_form.getvalue() if an_form else (

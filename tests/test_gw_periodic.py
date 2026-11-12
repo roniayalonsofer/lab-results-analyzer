@@ -760,3 +760,35 @@ def test_annual_report_dates_with_full_year_target_row_and_title_year():
     out = upd.apply_report_period(buf.getvalue(), _dt(2026, 3, 4), _dt(2026, 9, 16))
     texts = [p.text for p in Document(io.BytesIO(out)).paragraphs]
     assert texts[:2] == ["שנתי 2026", 'דו"ח ניטור מי תהום שנתי - 2026']
+
+
+def test_well_photos_replaced_by_name_and_report_paragraph():
+    from soil_lab_tool.core.report_extras import update_well_photos, add_report_paragraphs
+    doc = Document()
+    doc.add_paragraph("רקע")
+    doc.add_paragraph("טקסט רקע ארוך מספיק כדי לשמש תבנית לפסקה החדשה שנוספת כאן.")
+    doc.add_paragraph("מהלך הדיגום, ממצאי השדה")
+    t = doc.add_table(rows=3, cols=2)
+    t.cell(0, 0).text, t.cell(0, 1).text = "תאריך – 03.09.2024", "תאריך – 03.09.2024"
+    t.cell(1, 0).text, t.cell(1, 1).text = "T-1", "T-2"
+    for c in (0, 1):
+        t.cell(2, c).paragraphs[0].add_run().add_picture(io.BytesIO(_png()), width=Inches(1))
+    buf = io.BytesIO()
+    doc.save(buf)
+    rep = {}
+    out = update_well_photos(buf.getvalue(), [("מעיליא T1.png", _png())],
+                             {"T-1": datetime(2026, 9, 16)}, rep)
+    assert rep == {"photos_replaced": ["T-1"], "photos_removed": ["T-2"]}
+    d = Document(io.BytesIO(out))
+    assert d.tables[0].cell(0, 0).text == "תאריך – 16.09.2026"
+    assert d.tables[0].cell(0, 1).text == "תאריך – "
+    # a report of the year: title from the file name, summary from its "סיכום"
+    rdoc = Document()
+    for x in ("דו\"ח סקר קרקע", "דצמבר 2025", "רקע", "סיכום", "לא אותרו מזהמים בקרקע.", "המלצות", "אין"):
+        rdoc.add_paragraph(x)
+    rb = io.BytesIO()
+    rdoc.save(rb)
+    out2 = add_report_paragraphs(out, [("סקר קרקע מעיליא 2025.docx", rb.getvalue())])
+    texts = [p.text for p in Document(io.BytesIO(out2)).paragraphs]
+    i = texts.index("מהלך הדיגום, ממצאי השדה")
+    assert texts[i - 1] == "סקר קרקע מעיליא 2025, דצמבר 2025: לא אותרו מזהמים בקרקע."

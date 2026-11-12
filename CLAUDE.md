@@ -182,6 +182,18 @@ everything else in those tables (older rows) is left untouched.
 - MK pages without a "גרף מספר" caption: the pictures right after "בגרפים
   הבאים מוצגת מגמת ..." are taken in the MK file's sheet order.
 
+### Annual report = the last annual report + every round since
+
+The annual tab runs the periodic engine (`_run_all_rounds` in `app.py`) on
+the last annual report: tables, field findings, map, year in the title
+(`_update_report_year`), summary sentences over all rounds
+(`apply_round_summary`: water-depth range, where MTBE was found, the
+exceedance sentence), MK, report forms. Dates may have a 4-digit year and
+are written back in each table's style (`_date_like`). Well photos and
+reports of the year live in `core/report_extras.py`: photos replace the old
+ones by well name in the file name (old ones are removed), and a report
+becomes a yellow paragraph from its title and "סיכום" (no outside service).
+
 ### Tables: grid columns, nested tables, one-off tables
 
 - Read chemistry tables by **grid column**, never by `row.cells` index:

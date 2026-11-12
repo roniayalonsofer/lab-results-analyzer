@@ -433,6 +433,20 @@ def parse_bactochem_pdf(pdf_path: str) -> dict:
                 sample["field"]["עומק כללי של הקידוח"] = v
                 sample["field_text"]["עומק כללי של הקידוח"] = m.group(1)
 
+            # Bailer sampling prints the depths without a unit
+            m = re.search(r'(?:^|\s)([\d.]+)\s+םימה ינפ קמוע', line)
+            if m and sample["water_level"] is None:
+                v = float(m.group(1))
+                sample["water_level"] = v
+                sample["field"]["עומק פני המים"] = v
+                sample["field_text"]["עומק פני המים"] = m.group(1)
+            m = re.search(r'(?:^|\s)([\d.]+)\s+חודיקה קמוע\s*$', line)
+            if m and sample["total_depth"] is None:
+                v = float(m.group(1))
+                sample["total_depth"] = v
+                sample["field"]["עומק כללי של הקידוח"] = v
+                sample["field_text"]["עומק כללי של הקידוח"] = m.group(1)
+
             # Pumping depth: "M 12.87 הביאש קמוע"
             m = re.search(r'M\s+([\d.]+)\s+הביאש קמוע', line)
             if m:
@@ -1490,6 +1504,8 @@ def _update_narrative_placeholders(doc: Document, date_str: str, sampler_name: s
             _replace_value_after_anchor(p, "בתאריך", shown, value_charset=r'[\d\./\-]')
 
         runs = p.runs
+        if re.search(r"על ידי\s+מר\s+.+?,\s*דוג", text):
+            runs = []  # _update_sampling_paragraphs writes the name (no doubled name)
         for i, run in enumerate(runs):
             if sampler_name and run.text.strip() == "מר" and i + 1 < len(runs):
                 runs[i + 1].text = sampler_name
@@ -2524,10 +2540,36 @@ def _txbx_docpr(txbx):
     return None
 
 
+def _widen_txbx(txbx, ratio: float):
+    """Make the drawing that holds this text box `ratio` times wider (DrawingML and VML copies)."""
+    # only this copy of the label: the DrawingML one (mc:Choice) or the VML one (mc:Fallback)
+    stops = (f"{{{_MC_NS}}}Choice", f"{{{_MC_NS}}}Fallback")
+    el = txbx.getparent()
+    while el is not None and el.tag not in stops:
+        el = el.getparent()
+    if el is None:
+        el = txbx.getparent()
+        while el is not None and el.tag not in (qn("wp:anchor"), qn("wp:inline")):
+            el = el.getparent()
+    if el is None:
+        return
+    for e in el.iter(qn("wp:extent"), qn("a:ext")):
+        if e.get("cx"):
+            e.set("cx", str(int(int(e.get("cx")) * ratio)))
+    for e in el.iter():
+        st = e.get("style")
+        if st and "width:" in st:
+            e.set("style", re.sub(r"width:([\d.]+)pt",
+                                  lambda m: f"width:{float(m.group(1)) * ratio:.1f}pt", st))
+
+
 def _txbx_set_text(txbx, text: str):
     ts = list(txbx.iter(qn("w:t")))
     if not ts:
         return
+    old = "".join(x.text or "" for x in ts).strip()
+    if old and len(text) > len(old):
+        _widen_txbx(txbx, len(text) / len(old) * 1.08)
     ts[0].text = text
     for t in ts[1:]:
         t.text = ""
@@ -3261,3 +3303,102 @@ def run_update_bytes(
         out = BytesIO()
         doc.save(out)
         return out.getvalue(), paste_bytes
+
+
+# ── Summary sentences over all the rounds of a report ───────────────────────
+
+_PARAM_NAME = {"בנזן": "בנזן", "טולואן": "טולואן", "אתיל בנזן": "אתיל בנזן", "קסילן": "קסילן", "MTBE": "MTBE"}
+
+
+def _with_forms(samples: dict, forms) -> dict:
+    s = copy.deepcopy(samples)
+    if forms:
+        from soil_lab_tool.core.gw_round_inputs import parse_yeda_field_form
+        for fb in forms:
+            _set_well_ambiguity(list(s))
+            _merge_field_form(s, parse_yeda_field_form(fb))
+    return s
+
+
+def _join_he(items: list) -> str:
+    items = [i for i in items if i]
+    if len(items) < 2:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " ו-" + items[-1]
+
+
+def _update_round_summary(doc: Document, rounds: list) -> int:
+    """
+    rounds: [(datetime, samples)] oldest first. Rewrites, where the report has them:
+      "מי התהום בתחנה אותרו בעומק הנע בין כ-0.6 מ' לבין כ-2.5 מ'" (all rounds),
+      "MTBE אותר בקידוחים ... בריכוזים של ... בהתאמה" (the latest round),
+      "לא אותרו מרכיבי דלק ... גבוהים מערכי המטרה ... למעט ..." (all rounds).
+    """
+    if not rounds:
+        return 0
+    n = 0
+    levels = [s.get("water_level", s.get("field", {}).get("עומק פני המים"))
+              for _, smp in rounds for s in smp.values()]
+    levels = [v for v in levels if isinstance(v, (int, float))]
+    targets = {}
+    for t in _all_tables(doc):
+        if _is_chem_history_table(t):
+            for k, v in _cell_targets(t).items():
+                targets.setdefault(k, v)
+    last_dt, last = rounds[-1]
+    for p in doc.paragraphs:
+        txt = p.text
+        if levels and "בעומק הנע בין" in txt:
+            if _replace_in_paragraph(
+                    p, r"בעומק הנע בין\s*כ-?\s*[\d.]+\s*מ'\s*לבין\s*כ-?\s*[\d.]+\s*מ'",
+                    lambda m: f"בעומק הנע בין כ-{min(levels):.1f} מ' לבין כ-{max(levels):.1f} מ'"):
+                n += 1
+        elif "אותר בקידוח" in txt and "בריכוז" in txt and "בהתאמה" in txt:
+            found = [(w, s) for w, s in sorted(last.items(), key=lambda kv: (_well_prefix(kv[0]), int(_well_num(kv[0]) or 0)))
+                     if s.get("results", {}).get("MTBE") is not None]
+            vals = [_result_text(s["results"], s.get("limits", {}), "MTBE", s.get("result_text"))[0] + ' מ"ג\ליטר'
+                    for _, s in found]
+            if not found:
+                new = "לא אותר בקידוחים;"
+            elif len(found) == 1:
+                new = f"אותר בקידוח {found[0][0]} בריכוז של {vals[0]};"
+            else:
+                new = (f"אותר בקידוחים {_join_he([w for w, _ in found])} בריכוזים של "
+                       f"{_join_he(vals)}, בהתאמה;")
+            if _replace_in_paragraph(p, r"אותר בקידוח.*$", lambda m: new):
+                n += 1
+        elif txt.strip().startswith("לא אותרו מרכיבי דלק") and ("המטרה" in txt or "היעד" in txt):
+            word = "המטרה" if "המטרה" in txt else "היעד"
+            ex = []
+            for dt, smp in rounds:
+                for w, s in sorted(smp.items(), key=lambda kv: (_well_prefix(kv[0]), int(_well_num(kv[0]) or 0))):
+                    for prm, lim in targets.items():
+                        v = s.get("results", {}).get(prm)
+                        if v is not None and v > lim:
+                            shown = _result_text(s["results"], s.get("limits", {}), prm, s.get("result_text"))[0]
+                            when = f" בדיגום {dt:%d.%m.%Y}" if len(rounds) > 1 else ""
+                            ex.append((prm, f"{_PARAM_NAME.get(prm, prm)} שאותר בקידוח {w} בריכוז של {shown} "
+                                            f'מ"ג\ליטר{when}', lim))
+            head = f"לא אותרו מרכיבי דלק במים שנדגמו בריכוזים גבוהים מערכי {word} של התחנה"
+            if ex:
+                lims = {prm: lim for prm, _, lim in ex}
+                limtxt = "; ".join(
+                    f"ערך {word} ל{'-' if re.match(r'[A-Za-z]', k) else ''}{_PARAM_NAME.get(k, k)} הוא {v:g} מ\"ג\ליטר"
+                    for k, v in lims.items())
+                new = f"{head} למעט {_join_he([e for _, e, _ in ex])} ({limtxt});"
+            else:
+                new = head + ";"
+            if _replace_in_paragraph(p, r"^.*\S", lambda m: new):
+                n += 1
+    return n
+
+
+def apply_round_summary(word_bytes: bytes, rounds: list) -> bytes:
+    """After all rounds: the summary sentences (rounds: [(datetime, samples, forms|None)])."""
+    doc = Document(BytesIO(word_bytes))
+    rs = [(dt, _with_forms(s, f)) for dt, s, f in rounds]
+    if not _update_round_summary(doc, rs):
+        return word_bytes
+    out = BytesIO()
+    doc.save(out)
+    return out.getvalue()
