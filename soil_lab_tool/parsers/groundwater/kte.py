@@ -74,6 +74,9 @@ class KTEGroundwaterParser(BaseParser):
 
     # ------------------------------------------------------------------
     def parse(self, file_obj: io.BytesIO | str) -> list[dict]:
+        edd = self._parse_edd(file_obj)
+        if edd is not None:
+            return edd
         df = self._read(file_obj)
         if df is None or df.empty:
             return []
@@ -119,6 +122,31 @@ class KTEGroundwaterParser(BaseParser):
             })
 
         return records
+
+    # ------------------------------------------------------------------
+    def _parse_edd(self, file_obj) -> list[dict] | None:
+        """An EDD sheet (one row per result, named columns), e.g. the ALS Houston
+        1,4-dioxane file KTE forwards; None when the file is not one."""
+        from parsers.groundwater.edd import edd_header, parse_edd
+        if isinstance(file_obj, str):
+            with open(file_obj, "rb") as f:
+                raw = f.read()
+        else:
+            raw = file_obj.read()
+            file_obj.seek(0)
+        if raw[:2] != b"PK" and raw[:4] != bytes([0xD0, 0xCF, 0x11, 0xE0]):   # xlsx / xls
+            return None
+        try:
+            sheets = pd.read_excel(io.BytesIO(raw), sheet_name=None, header=None, dtype=str)
+        except Exception:
+            return None
+        found = False
+        records = []
+        for df in sheets.values():
+            if edd_header(df) is not None:
+                found = True
+                records.extend(parse_edd(df, self.LAB_NAME))
+        return records if found else None
 
     # ------------------------------------------------------------------
     def _read(self, file_obj: io.BytesIO | str) -> pd.DataFrame | None:

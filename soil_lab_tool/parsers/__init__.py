@@ -24,6 +24,7 @@ from parsers.soil.xrf           import XRFSoilParser
 from parsers.groundwater.kte        import KTEGroundwaterParser
 from parsers.groundwater.bactochem  import BactochemGroundwaterParser
 from parsers.groundwater.aminolab   import AminolabGroundwaterParser
+from parsers.soil.aminolab          import AminolabSoilParser
 from parsers.groundwater.als_gw     import ALSGroundwaterParser
 from parsers.pfas.kte               import KTEPFASParser
 from parsers.pfas.rj_lee            import RJLeePFASParser
@@ -58,9 +59,9 @@ _REGISTRY: dict[tuple[str, str], type[BaseParser]] = {
     ("als",           "grain_size"):  ALSGrainSizeParser,
     ("als",           "soil_gas"):    ALSSoilGasTO15Parser,
     ("aminolab",      "groundwater"): AminolabGroundwaterParser,
-    ("aminolab",      "soil"):        AminolabGroundwaterParser,
+    ("aminolab",      "soil"):        AminolabSoilParser,
     ("אמינולאב",     "groundwater"): AminolabGroundwaterParser,
-    ("אמינולאב",     "soil"):        AminolabGroundwaterParser,
+    ("אמינולאב",     "soil"):        AminolabSoilParser,
     ("xrf",           "soil"):        XRFSoilParser,
     ("אלכם",          "soil"):        XRFSoilParser,   # XRF method, lab = אלכם
     ("אלכם (xrf)",    "soil"):        XRFSoilParser,   # dropdown display key

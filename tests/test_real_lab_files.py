@@ -147,10 +147,13 @@ def test_als_to15_soil_gas():
     assert {r["unit"] for r in rs} == {"µg/m³"}
 
 
-@pytest.mark.xfail(reason="not read yet: KTE groundwater EDD Excel")
 def test_kte_groundwater_edd():
+    """An EDD sheet (ALS Houston, sent by KTE): one row per result, µg/L → mg/L."""
     rs = _records(KTE_EDD, "kte", "groundwater")
-    assert rs
+    v = {r["sample_id"]: r for r in rs}
+    assert sorted(v) == ["4 (23.03.2023)", "5 (23.03.2023)", "6 (23.03.2023)"]
+    assert (v["4 (23.03.2023)"]["value"], v["4 (23.03.2023)"]["cas"]) == (0.016, "123-91-1")
+    assert v["6 (23.03.2023)"]["loq"] == 0.0001 and {r["unit"] for r in rs} == {"mg/L"}
 
 
 @pytest.mark.xfail(reason="not read yet: older Machon HaNeft Excel (4231 / 2689)")
@@ -159,7 +162,53 @@ def test_machon_haneft_older_excel():
     assert rs
 
 
-@pytest.mark.xfail(reason="not read yet in the analysis page: Aminolab PDF certificates")
-def test_aminolab_pdf_in_analysis_page():
-    rs = _records(AMINOLAB_PDF, "aminolab", "groundwater")
-    assert rs
+# ── Aminolab soil ───────────────────────────────────────────────────────────
+
+def test_aminolab_soil_pdf_and_excel_agree():
+    """The certificate and its Excel appendix: the same 94 results, CAS from the lab's own list."""
+    a = {(r["compound"].lower().replace(" ", "")): r
+         for r in _records(AMINOLAB_XLSX, "aminolab", "soil")}
+    b = {(r["compound"].lower().replace(" ", "")): r
+         for r in _records(AMINOLAB_CERT, "aminolab", "soil")}
+    assert len(a) == len(b) == 94
+    for k, r in a.items():
+        assert (r["value"], r["flag"], r["cas"], r["analysis_type"]) ==             (b[k]["value"], b[k]["flag"], b[k]["cas"], b[k]["analysis_type"]), k
+    assert b["dro-oro"]["value"] == 1411 and b["calcium"]["value"] == 152065
+    assert b["di-(2-ethylhexyl)phthalate"]["value"] == 3.12
+    assert (b["benzo(a)pyrene"]["value"], b["benzo(a)pyrene"]["flag"]) == (0.03, "<LOQ")
+    assert {r["sample_id"] for r in b.values()} == {"B1"}
+
+
+AMINOLAB_PDFS = [
+    ("AMINOLAB_1",
+     ["קר-1 (0.1)", "קר-2 (0.2)"], 302),
+    ("AMINOLAB_2",
+     ["מכ-1 (0.3)", "קר-1 (0.4)", "קר-2 (0.4)", "קר-3 (0.3)", "קר-4 (0.2)"], 415),   # + a note "8.26" per sample, not a result
+    ("AMINOLAB_3",
+     ["מג-1 (0.1)", "ממ-1 (0.1)"], 298),
+]
+
+
+@pytest.mark.parametrize("path, samples, n", AMINOLAB_PDFS)
+def test_aminolab_soil_pdf(path, samples, n):
+    """Every value in the result columns is read (counted on the pages), each under its sample."""
+    rs = _records(globals()[path], "aminolab", "soil")
+    assert sorted({r["sample_id"] for r in rs}) == sorted(samples)
+    assert len(rs) == n
+    assert all(r["cas"] for r in rs if r["analysis_type"] in ("SOIL_VOC", "SOIL_SVOC", "SOIL_METALS"))
+
+
+def test_aminolab_soil_pdf_values():
+    rs = _records(AMINOLAB_1, "aminolab", "soil")
+    v = {(r["sample_id"], r["compound"]): r for r in rs}
+    s = "קר-1 (0.1)"
+    assert v[(s, "DRO-ORO")]["value"] == 805 and v[(s, "GRO")]["value"] == 259
+    assert v[(s, "Chromium")]["value"] == 3 and v[(s, "Copper")]["value"] == 2   # values printed off their line
+    assert (v[(s, "Silver")]["value"], v[(s, "Silver")]["flag"]) == (5, "<LOQ")
+    assert v[(s, "1,2,4-Trimethylbenzene")]["value"] == 0.33       # 330 ppb
+    assert v[(s, "1,2-Dibromoethane (Ethylene dibromide)")]["cas"] == "106-93-4"
+
+
+def test_aminolab_custody_form_is_not_a_certificate():
+    """A scanned sample-collection form: nothing to read."""
+    assert _records(AMINOLAB_PDF, "aminolab", "soil") == []
