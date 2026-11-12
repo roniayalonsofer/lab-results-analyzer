@@ -97,7 +97,9 @@ class AlchemSoilGasPDFParser(BaseParser):
 
                         lod = self._to_float(lod_str)
                         loq = self._to_float(loq_str)
-                        compound = first
+                        # a long name broken over two lines keeps a space after the
+                        # hyphen ("trifluoro- Ethane"); the Excel of the same job doesn't
+                        compound = re.sub(r"-\s+", "-", first)
 
                         for i, raw_val in enumerate(conc_strs):
                             sid = sample_ids[i] if i < len(sample_ids) else f"Sample-{i + 1}"

@@ -233,6 +233,19 @@ def identify(name: str, data: bytes) -> dict:
     return {"kind": "ignored", "reason": "סוג קובץ לא נתמך"}
 
 
+def _fill_missing(sample: dict, other: dict) -> None:
+    """Results and field readings `sample` lacks, taken from `other` (the same certificate)."""
+    for key in ("results", "result_text", "limits", "field", "field_text"):
+        src = other.get(key) or {}
+        dst = sample.setdefault(key, {})
+        for k, v in src.items():
+            if k not in dst:
+                dst[k] = v
+    for key in ("water_level", "total_depth", "date"):
+        if sample.get(key) is None and other.get(key) is not None:
+            sample[key] = other[key]
+
+
 def sort_round_files(files: list) -> dict:
     rounds: dict = {}
     forms, ignored, notes, side = [], [], [], []
@@ -297,6 +310,8 @@ def sort_round_files(files: list) -> dict:
                 is_csv = name.lower().endswith(".csv")
                 if is_csv:
                     if rnd.samples and set(info["samples"]) <= set(rnd.samples):
+                        for w, s in info["samples"].items():   # fill what the PDF lacks
+                            _fill_missing(rnd.samples[w], s)
                         rnd.companion_files.append(name)
                         continue
                     rnd.lab_files.append((name, data))
@@ -304,7 +319,11 @@ def sort_round_files(files: list) -> dict:
                         rnd.samples.setdefault(k, v)
                     continue
                 rnd.lab_files.append((name, data))
+                old = dict(rnd.samples)
                 rnd.samples.update(info["samples"])
+                for w, s in old.items():           # a CSV read before: fill what the PDF lacks
+                    if w in rnd.samples and rnd.samples[w] is not s:
+                        _fill_missing(rnd.samples[w], s)
                 for fn, fb in list(rnd.lab_files):
                     if fn.lower().endswith(".csv"):
                         try:

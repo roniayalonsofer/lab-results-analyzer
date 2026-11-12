@@ -317,7 +317,9 @@ def parse_bactochem_pdf(pdf_path: str) -> dict:
             continue
         if "רפסמ" not in line or "המגודה" not in line:
             continue
-        if "בלנק" in line or "קיפ" in line:
+        if "בלנק" in line or "קיפ" in line or "קנלב" in line:
+            # a blank's own results must not run into the well before it
+            segments.append(("__blank__", i))
             continue
         m = re.search(r"(\d+)-['\u05f3]?([א-ת]{1,3})(?!\S)", line)
         if not m:
@@ -329,6 +331,16 @@ def parse_bactochem_pdf(pdf_path: str) -> dict:
         m = re.search(r"(?<![A-Za-z])([A-Z]{1,4})-?(\d{1,3})(?![\d.])", line)
         if m:
             segments.append((f"{m.group(1)}-{m.group(2)}", i))
+    if not segments:
+        # A certificate whose Hebrew comes out scrambled (its font has no
+        # letter map): the sample line still starts with the sample number
+        # and carries the Latin well code ("1938902 :... P-1 1 ...").
+        for i, line in enumerate(lines):
+            if not re.match(r"\s*\d{7}\s+:", line) or "Page" in line:
+                continue
+            m = re.search(r"(?<![A-Za-z])([A-Z]{1,4})-(\d{1,3})\s+\d+\s", line)
+            # no Latin well code on a sample line: the equipment blank
+            segments.append((f"{m.group(1)}-{m.group(2)}", i) if m else ("__blank__", i))
     segments.append((None, len(lines)))  # sentinel
 
     # Sampler, in the header: "... ןאדמח הללאדבע :םגוד" (mirrored "דוגם: עבדאללה חמדאן")
@@ -374,7 +386,7 @@ def parse_bactochem_pdf(pdf_path: str) -> dict:
             # Analyte: "CAS #: 71-43-2 0.001 mg/L 0.720 MTBE", sometimes with
             # the drinking-water standard between unit and result ("X≤ 0.005")
             m = re.search(
-                r'CAS #:\s*([\d\-]+)\s+([\d.]+)\s+mg/L\s+(?:X\S?\s*[\d.]+\s+)?([\d.]+|Not Detected)',
+                r'CAS #:\s*([\d\-]+)\s+<?([\d.]+)\s+mg/L\s+(?:X\S?\s*[\d.]+\s+)?([\d.]+|Not Detected)',
                 line, re.IGNORECASE
             )
             if m:
@@ -510,6 +522,14 @@ _BACTO_CSV_FIELDS = {
 }
 
 
+# Older CSV exports have no CAS column: the English compound name decides
+_BACTO_NAME_TO_HEB = {
+    "benzene": "בנזן", "toluene": "טולואן", "ethyl benzene": "אתיל בנזן",
+    "ethylbenzene": "אתיל בנזן", "xylene": "קסילן", "xylenes": "קסילן",
+    "xylene total": "קסילן", "total xylenes": "קסילן", "mtbe": "MTBE",
+}
+
+
 def parse_bactochem_csv(data: bytes) -> dict:
     """
     Read Bactochem's CSV export into the same shape as parse_bactochem_pdf.
@@ -566,7 +586,7 @@ def parse_bactochem_csv(data: bytes) -> dict:
         })
         comp, raw = r[c_comp].strip(), r[c_val].strip()
         cas = r[c_cas].strip() if c_cas is not None and c_cas < len(r) else ""
-        heb = CAS_TO_HEB.get(cas)
+        heb = CAS_TO_HEB.get(cas) or _BACTO_NAME_TO_HEB.get(re.sub(r"\s+", " ", comp.lower()))
         if heb:
             nd = raw.lower() in ("not detected", "nd", "n.d.") or raw.startswith("<")
             try:
