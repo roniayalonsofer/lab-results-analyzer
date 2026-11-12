@@ -17,6 +17,7 @@ auto_detect_lab, and field-contractor PDFs look like nothing at all.
 from __future__ import annotations
 
 import io
+import re
 import os
 import tempfile
 from dataclasses import dataclass, field
@@ -123,6 +124,20 @@ def _is_report_form(data: bytes) -> bool:
         return False
 
 
+def _form_date(data: bytes):
+    """The report form's sampling date (B3): a date, or the last of the days listed."""
+    try:
+        import openpyxl
+        v = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True).worksheets[0]["B3"].value
+        if isinstance(v, datetime):
+            return v
+        days = [_parse_date(x) for x in re.findall(r"\d{1,2}[./]\d{1,2}[./]\d{2,4}", str(v or ""))]
+        days = [d for d in days if d]
+        return max(days) if days else None
+    except Exception:
+        return None
+
+
 def identify(name: str, data: bytes) -> dict:
     """
     {"kind": "als"|"bactochem"|"aminolab"|"field_form"|"mk"|"ignored",
@@ -138,13 +153,15 @@ def identify(name: str, data: bytes) -> dict:
         except Exception:
             lab = {}
         if lab.get("samples"):
+            for s in lab["samples"].values():
+                s["_job"] = lab.get("job")
             return {"kind": "bactochem", "date": _parse_date(lab.get("sampling_date")),
                     "samples": lab["samples"]}
         return {"kind": "ignored", "reason": "קובץ CSV שלא זוהה כתוצאות בקטוכם"}
 
     if low.endswith((".xlsx", ".xls", ".xlsm")):
         if low.endswith((".xlsx", ".xlsm")) and _is_report_form(data):
-            return {"kind": "report_form"}
+            return {"kind": "report_form", "date": _form_date(data)}
         if low.endswith(".xlsx") and gri.is_yeda_field_form(data):
             form = gri.parse_yeda_field_form(data)
             d = form.get("sampling_date")
@@ -199,7 +216,16 @@ def identify(name: str, data: bytes) -> dict:
             return {"kind": "side",
                     "reason": "מסמך סרוק (למשל טופס נטילה מהשטח), לנספח. לא צריך אותו לעדכון"}
         if "bactochem" in text.lower():
-            return {"kind": "side",
+            # A certificate in a layout not read here: its job number and
+            # sampler still name the sampler of the CSV that comes with it.
+            job = re.search(r"D\d{6}-\d{4}", text)
+            smp = re.search(r"דוגם:\s*(\S+)\s+(\S+)", text)          # text in reading order
+            sampler = f"{smp.group(1)} {smp.group(2)}" if smp else None
+            if not smp:
+                smp = re.search(r"(\S+)\s+(\S+)\s+:םגוד(?:\s|$)", text)  # mirrored text
+                sampler = f"{smp.group(2)[::-1]} {smp.group(1)[::-1]}" if smp else None
+            return {"kind": "side", "job": job.group(0) if job else None,
+                    "sampler": sampler,
                     "reason": "טופס של בקטוכם בלי תוצאות (שרשרת משמורת / קבלת דוגמאות), לנספח. "
                               "לא צריך אותו לעדכון"}
         return {"kind": "ignored", "reason": "לא זוהה כתעודת מעבדה"}
@@ -211,7 +237,8 @@ def sort_round_files(files: list) -> dict:
     rounds: dict = {}
     forms, ignored, notes, side = [], [], [], []
     mk, mk_last = None, None
-    report_form = None
+    report_form, report_form_date = None, datetime.min
+    samplers: dict = {}   # Bactochem job number → sampler, from PDFs not read
     for name, data in files:
         try:
             info = identify(name, data)
@@ -222,6 +249,8 @@ def sort_round_files(files: list) -> dict:
             ignored.append((name, info["reason"]))
         elif kind == "side":
             side.append((name, info["reason"]))
+            if info.get("job") and info.get("sampler"):
+                samplers[info["job"]] = info["sampler"]
         elif kind == "mk":
             # Several toolkit files (old per-well templates next to the real
             # one): use the one whose data reaches the latest date.
@@ -233,10 +262,14 @@ def sort_round_files(files: list) -> dict:
             else:
                 side.append((name, "קובץ Mann-Kendall ישן יותר מקובץ אחר שהועלה"))
         elif kind == "report_form":
-            if report_form:
-                side.append((name, "כבר הועלה טופס דיווח אחר"))
+            # several forms (one per round): start from the newest
+            when = info.get("date") or datetime.min
+            if report_form is None or when > report_form_date:
+                if report_form:
+                    side.append((report_form[0], "טופס דיווח ישן יותר מטופס אחר שהועלה"))
+                report_form, report_form_date = (name, data), when
             else:
-                report_form = (name, data)
+                side.append((name, "טופס דיווח ישן יותר מטופס אחר שהועלה"))
         elif kind == "field_form":
             forms.append((name, data, info.get("date")))
         else:
@@ -324,7 +357,14 @@ def sort_round_files(files: list) -> dict:
             ignored.append((name, f"טופס שדה מ-{ds}, ואין תעודת מעבדה מאותו תאריך"))
 
     for r in ordered:
-        if r.lab == "bactochem" and r.lab_files and all(
+        for s in r.samples.values():
+            job = s.pop("_job", None)
+            if job in samplers and not s.get("sampler_name"):
+                s["sampler_name"], s["sampler_org"] = samplers[job], "בקטוכם"
+        if r.lab == "bactochem" and r.lab_files and any(s.get("sampler_name") for s in r.samples.values()):
+            continue
+    for r in ordered:
+        if r.lab == "bactochem" and r.lab_files and not any(s.get("sampler_name") for s in r.samples.values()) and all(
                 n.lower().endswith(".csv") for n, _ in r.lab_files):
             notes.append(f"בדיגום {r.date_str} התוצאות נקראו מקובץ ה-CSV של בקטוכם. אין בו את שם "
                          "הדוגם, ולכן משפט הדוגם בדוח לא עודכן. אפשר להעלות גם את תעודת ה-PDF.")

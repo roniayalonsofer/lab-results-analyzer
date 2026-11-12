@@ -2078,6 +2078,97 @@ elif page == "groundwater":
     _render_nav("groundwater")
     from soil_lab_tool.gw_report_updater import run_update_bytes, parse_bactochem_pdf
 
+    def _run_all_rounds(word_bytes, rounds, mk_bytes=None, form_bytes=None,
+                        author=None, submission=None):
+        """
+        Every round on the report, oldest first, then the people who sampled,
+        the period / year, Mann-Kendall and the report forms. The same steps
+        for a periodic and an annual report. Returns a result dict.
+        """
+        result = {"word": None, "paste": None, "rounds": [], "notes": [], "error": None}
+        current = word_bytes
+        for r in rounds:
+            rep = {}
+            try:
+                current, _ = run_update_bytes(
+                    current, None, None, lab_type=r.lab,
+                    author_name=author, submission_date=submission,
+                    field_form_bytes=r.form_bytes,
+                    parsed_round={"sampling_date": r.date_str, "samples": r.samples},
+                    report=rep,
+                )
+            except Exception as round_err:
+                msg = f"העדכון נעצר בדיגום {r.date_str}: {round_err}"
+                if result["rounds"]:
+                    msg += ("\n\nהדיגומים שלפניו כן עודכנו — אפשר להוריד את הדוח החלקי, "
+                            "לתקן, ולהעלות שוב רק את הדיגום הזה עם הדוח שהורדת.")
+                result["error"] = msg
+                break
+            result["word"] = current
+            result["rounds"].append({"date": r.date_str, "exceed": rep.get("exceedances", []),
+                                     "has_targets": rep.get("has_targets", False)})
+            result["notes"].extend(rep.get("notes", []))
+        done = [r for r in rounds if any(x["date"] == r.date_str for x in result["rounds"])]
+        if result["word"] and done:
+            from soil_lab_tool.core.gw_round_inputs import parse_yeda_field_form
+            from soil_lab_tool.gw_report_updater import apply_mann_kendall, apply_report_period, apply_samplers
+            names = []
+            for r in done:
+                for fb in (r.form_bytes or []):
+                    try:
+                        names.append(parse_yeda_field_form(fb).get("sampler_name"))
+                    except Exception:
+                        pass
+            if any(names):
+                result["word"] = apply_samplers(result["word"], names, "י.ד.ע מים וסביבה")
+            result["word"] = apply_report_period(result["word"], min(r.date for r in done),
+                                                 max((r.end_date or r.date) for r in done))
+            if form_bytes:
+                try:
+                    result["forms"] = _report_forms(form_bytes, done, word_bytes)
+                except Exception as form_err:
+                    result["notes"].append(f"טופס הדיווח לא עודכן: {form_err}")
+            if mk_bytes:
+                try:
+                    rep = {}
+                    result["word"], result["paste"] = apply_mann_kendall(
+                        result["word"], mk_bytes, [(r.date, r.samples) for r in done], report=rep)
+                    result["mk_charts"] = rep.get("mk_charts")
+                    result["notes"].extend(rep.get("notes", []))
+                except Exception as mk_err:
+                    result["notes"].append(f"קובץ ה-Mann-Kendall לא נקרא: {mk_err}")
+        return result
+
+    def _show_result(result, name, key):
+        if result.get("word"):
+            lines = []
+            for x in result["rounds"]:
+                if x["exceed"]:
+                    ex = ", ".join(f"{w} {p} {v:g} (יעד {tg:g})" for w, p, v, tg in x["exceed"])
+                    lines.append(f"דיגום {x['date']}: חריגות — {ex}")
+                else:
+                    lines.append(f"דיגום {x['date']}: עודכן")
+            st.success("✅ הדוח עודכן. השינויים מסומנים בצהוב.\n\n" + "\n\n".join(lines))
+            if result.get("mk_charts"):
+                st.info("📈 עמודי Mann-Kendall הוחלפו בדוח: " + ", ".join(result["mk_charts"]))
+            st.download_button(
+                "⬇️ הורד דוח Word מעודכן", data=result["word"], file_name=name,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True, key=f"{key}_word",
+            )
+            for span, fb in result.get("forms", []):
+                st.download_button(
+                    (f"⬇️ הורד טופס דיווח {span}" if span.startswith("מסכם")
+                     else f"⬇️ הורד טופס דיווח – דיגום {span}"),
+                    data=fb, file_name=f"טופס דיווח - {span}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True, key=f"{key}_form_{span}",
+                )
+        for n in result.get("notes", []):
+            st.warning("⚠️ " + n)
+        if result.get("error"):
+            st.error(result["error"])
+
     def _report_forms(form_bytes, rnds, word_bytes=None):
         """[(round span, updated form bytes)], one form per round."""
         from datetime import datetime as _dt
@@ -2336,8 +2427,55 @@ elif page == "groundwater":
 
     # ── TAB 2: Annual report ─────────────────────────────────────────────────
     with gw_tab2:
+        st.markdown('<div class="section-title">📅 עדכון הדוח השנתי האחרון (מומלץ)</div>'
+                    '<div class="info-banner">מעלים את הדוח השנתי האחרון ואת כל קבצי הדיגום מאז '
+                    '(תעודות מעבדה, CSV, טפסי ידע מים, Mann-Kendall וטופס הדיווח). הדוח נשאר בפורמט '
+                    'שלו: הטבלאות, ממצאי השדה, השרטוט, השנה והסיכום מתעדכנים לפי הדיגומים, '
+                    'מהישן לחדש.</div>', unsafe_allow_html=True)
+        an_word = st.file_uploader("הדוח השנתי האחרון (.docx)", type=["docx"], key="an_word")
+        an_files = st.file_uploader(
+            "כל קבצי הדיגום מאז הדוח השנתי (PDF / Excel / CSV)",
+            type=["pdf", "xlsx", "xls", "csv"], accept_multiple_files=True, key="an_files",
+        )
+        an_sig = tuple((f.name, f.size) for f in [an_word, *(an_files or [])] if f)
+        if an_files:
+            cached = st.session_state.get("an_sorted")
+            if cached and cached[0] == an_sig:
+                an_sorted = cached[1]
+            else:
+                from soil_lab_tool.core.gw_round_files import sort_round_files
+                with st.spinner("מזהה את הקבצים..."):
+                    an_sorted = sort_round_files([(f.name, f.getvalue()) for f in an_files])
+                st.session_state["an_sorted"] = (an_sig, an_sorted)
+            from soil_lab_tool.core.gw_round_files import LAB_NAMES
+            if an_sorted["rounds"]:
+                st.markdown("**🔎 דיגומים שזוהו:** " + " · ".join(
+                    f"{r.span_str} ({LAB_NAMES.get(r.lab, r.lab)}: {', '.join(r.wells)})"
+                    for r in an_sorted["rounds"]))
+            else:
+                st.error("לא נמצאה תעודת מעבדה בין הקבצים שהועלו.")
+            for n in an_sorted["notes"]:
+                st.info("ℹ️ " + n)
+            if an_sorted["ignored"]:
+                with st.expander(f"⚠️ קבצים שלא זוהו ({len(an_sorted['ignored'])})"):
+                    for name, why in an_sorted["ignored"]:
+                        st.markdown(f"- **{name}** — {why}")
+            if an_word and an_sorted["rounds"]:
+                if st.button("⚡ עדכן דוח שנתי", type="primary", use_container_width=True, key="an_btn"):
+                    with st.spinner("מעדכן את הדוח השנתי... ⏳"):
+                        res = _run_all_rounds(
+                            an_word.getvalue(), an_sorted["rounds"],
+                            an_sorted["mk"][1] if an_sorted["mk"] else None,
+                            an_sorted["report_form"][1] if an_sorted.get("report_form") else None)
+                        res["sig"] = an_sig
+                        st.session_state["an_result"] = res
+                res = st.session_state.get("an_result")
+                if res and res.get("sig") == an_sig:
+                    last = an_sorted["rounds"][-1]
+                    _show_result(res, f"דוח_ניטור_שנתי_{(last.end_date or last.date):%Y}.docx", "an_dl")
+        st.markdown("---")
         st.markdown(
-            '<div class="section-title">📅 יצירת דוח שנתי</div>'
+            '<div class="section-title">📅 יצירת דוח שנתי מדוח תקופתי (הדרך הקודמת)</div>'
             '<div class="info-banner">המערכת תייצר דוח שנתי על בסיס הדוח התקופתי האחרון + תוצאות '
             'המעבדה של כל הדיגומים שבוצעו השנה. הדוח יכלול טבלאות מצטברות מעודכנות וסיכום אוטומטי.</div>',
             unsafe_allow_html=True,

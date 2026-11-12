@@ -319,7 +319,7 @@ def parse_bactochem_pdf(pdf_path: str) -> dict:
     yeda_org = "י.ד.ע מים וסביבה" if any("ע.ד.י" in ln for ln in lines[:15]) else None
     sampler = None
     for line in lines:
-        m = re.search(r'(\S+)\s+(\S+)\s+:םגוד\s*$', line)
+        m = re.search(r'(\S+)\s+(\S+)\s+:םגוד(?:\s|$)', line)
         if m:
             sampler = f"{m.group(2)[::-1]} {m.group(1)[::-1]}"
             break
@@ -494,6 +494,7 @@ def parse_bactochem_csv(data: bytes) -> dict:
         return None
 
     c_comp, c_val = col("רכיב"), col("תוצאה")
+    c_job = col("מספר פרויקט")
     c_date, c_desc, c_cas = col("תאריך דיגום"), col("תיאור דוגמה"), col("CAS_NUM")
     if None in (c_comp, c_val, c_date, c_desc):
         raise ValueError("לא קובץ CSV של בקטוכם")
@@ -502,7 +503,9 @@ def parse_bactochem_csv(data: bytes) -> dict:
     for r in rows[1:]:
         if len(r) <= max(c_comp, c_val, c_date, c_desc):
             continue
-        m = re.search(r"([א-ת]{1,3})['׳]?[\s\-]*(\d+)\s*$", r[c_desc].strip())
+        if "בלנק" in r[c_desc] or "blank" in r[c_desc].lower():
+            continue  # an equipment / trip blank, not a well
+        m = re.search(r"([A-Za-z]{1,4}|[א-ת]{1,3})['׳]?[\s\-]*(\d+)\s*$", r[c_desc].strip())
         if not m:
             continue
         well = f"{m.group(1)}-{m.group(2)}"
@@ -542,7 +545,10 @@ def parse_bactochem_csv(data: bytes) -> dict:
             s["water_level"] = v
         elif key == "עומק כללי של הקידוח":
             s["total_depth"] = v
-    return {"sampling_date": global_date, "samples": samples}
+    job = None
+    if c_job is not None:
+        job = next((r[c_job].strip() for r in rows[1:] if len(r) > c_job and r[c_job].strip()), None)
+    return {"sampling_date": global_date, "samples": samples, "job": job}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -717,7 +723,7 @@ def _find_field_table(doc: Document):
             first = _tc_texts(row, 1)
             if not first:
                 continue
-            label = first[0].strip().rstrip("*")
+            label = first[0].strip().strip("*").strip()
             if label in _FIELD_PARAM_HINTS or label in _FIELD_ROW_ALIASES:
                 score += 1
         if score < 3:
@@ -800,7 +806,7 @@ def _update_field_table_dual_column(tbl, field_data: dict, wells: list):
             cells = row.cells
             if new_col >= len(cells) or old_col >= len(cells):
                 continue
-            label = cells[0].text.strip().rstrip("*")
+            label = cells[0].text.strip().strip("*").strip()
             key = _FIELD_ROW_ALIASES.get(label)
 
             # Shift the previously-newest reading into the older slot
@@ -858,7 +864,7 @@ def _update_field_table(doc: Document, field_data: dict, wells: list):
         # to handle docs where there's an extra "תאריך" row at index 1.
         name_to_row = {}
         for ri, row in enumerate(tbl.rows):
-            row_name = row.cells[0].text.strip().rstrip("*")
+            row_name = row.cells[0].text.strip().strip("*").strip()
             name_to_row[row_name] = ri
 
         # Update the date row if present
@@ -908,7 +914,7 @@ def _field_table_parts(doc: Document, best) -> list:
     for tbl in _all_tables(doc):
         if not tbl.rows:
             continue
-        labels = {x[0].strip().rstrip("*") for x in (_tc_texts(row, 1) for row in tbl.rows) if x}
+        labels = {x[0].strip().strip("*").strip() for x in (_tc_texts(row, 1) for row in tbl.rows) if x}
         if sum(1 for lb in labels if lb in _FIELD_PARAM_HINTS or lb in _FIELD_ROW_ALIASES) < 3:
             continue
         heads = [c.text.strip() for c in tbl.rows[0].cells[1:]]
@@ -944,7 +950,7 @@ def _update_field_columns(tbl, field_data: dict, wells: list):
     # order doesn't match the assumption.
     name_to_row = {}
     for ri, row in enumerate(tbl.rows):
-        row_label = row.cells[0].text.strip().rstrip("*")
+        row_label = row.cells[0].text.strip().strip("*").strip()
         name_to_row.setdefault(_FIELD_ROW_ALIASES.get(row_label, row_label), ri)
 
     for field in FIELD_ROWS:
@@ -1093,14 +1099,16 @@ def _update_historical_field_table_layout_a(doc: Document, new_date: str,
     """
     ti, header_cells = None, None
     for cand_ti, tbl in enumerate(doc.tables):
-        for row in tbl.rows:
+        above = []
+        for row in tbl.rows[:6]:
             cells = [c.text.strip() for c in row.cells]
-            if len(cells) < 4 or cells[0] != "קידוח" or cells[1] != "תאריך":
-                continue
-            hint_hits = sum(1 for c in cells[2:] if c.rstrip("*") in _FIELD_PARAM_HINTS)
-            if hint_hits >= 3:
+            names = " ".join(cells[:2] + above[:2])
+            hint_hits = sum(1 for c in cells[2:] if c.strip("*").strip() in _FIELD_PARAM_HINTS
+                            or c.strip("*").strip() in _FIELD_ROW_ALIASES)
+            if len(cells) >= 4 and "קידוח" in names and "תאריך" in names and hint_hits >= 3:
                 ti, header_cells = cand_ti, cells
                 break
+            above = cells
         if ti is not None:
             break
     if ti is None:
@@ -1111,7 +1119,7 @@ def _update_historical_field_table_layout_a(doc: Document, new_date: str,
     for ci, label in enumerate(header_cells):
         if ci < 2:
             continue
-        key = _FIELD_ROW_ALIASES.get(label.rstrip("*"))
+        key = _FIELD_ROW_ALIASES.get(label.strip("*").strip())
         if key and key != "__date__":
             col_field[ci] = key
 
@@ -1123,14 +1131,17 @@ def _update_historical_field_table_layout_a(doc: Document, new_date: str,
         last = _last_row_for_well(tbl, well)
         if last < 0:
             continue
-        if len(tbl.rows[last].cells) > 1 and tbl.rows[last].cells[1].text.strip() == new_date:
+        row_date = sample.get("date") if re.fullmatch(r"\d{2}\.\d{2}\.\d{2}", str(sample.get("date") or "")) else new_date
+        last_txt = tbl.rows[last].cells[1].text.strip() if len(tbl.rows[last].cells) > 1 else ""
+        m = _DATE_CELL.match(last_txt)
+        if m and _short_date(m.group(1)) == row_date:
             new_row = tbl.rows[last]
         else:
             new_row = _insert_row_after(tbl, last, last)
         cells = new_row.cells
         prev = tbl.rows[last].cells
         if len(cells) > 1:
-            _set_cell(cells[1], new_date, highlight=True)
+            _set_cell(cells[1], _date_like(last_txt, row_date), highlight=True)
         for ci, key in col_field.items():
             if ci >= len(cells):
                 continue
@@ -1474,7 +1485,9 @@ def _update_narrative_placeholders(doc: Document, date_str: str, sampler_name: s
             _replace_in_paragraph(
                 p, r"בתאריכים\s+[\d./]+(?:\s*(?:,|ו\s*-?)\s*[\d./]+)*", f"בתאריך {date_str}")
         else:
-            _replace_value_after_anchor(p, "בתאריך", date_str, value_charset=r'[\d\./\-]')
+            old = re.search(r"בתאריך\s*(\d{2}[./]\d{2}[./](?:\d{4}|\d{2}))", text)
+            shown = _date_like(old.group(1), date_str) if old and re.fullmatch(r"\d{2}\.\d{2}\.\d{2}", date_str) else date_str
+            _replace_value_after_anchor(p, "בתאריך", shown, value_charset=r'[\d\./\-]')
 
         runs = p.runs
         for i, run in enumerate(runs):
@@ -1848,7 +1861,7 @@ def _cell_targets(tbl) -> dict:
             continue
         params = header["params"]
         labels = " ".join(c.text for a, b, c in _grid_cells(row) if a not in params)
-        if "יעד" not in labels and "תקן" not in labels and "סף" not in labels:
+        if not any(w in labels for w in ("יעד", "תקן", "סף", "מטרה")):
             continue
         out = {}
         for param, c in _row_param_cells(row, header).items():
@@ -1863,7 +1876,7 @@ def _cell_targets(tbl) -> dict:
     for row in tbl.rows[:6]:
         cells = row.cells
         labels = " ".join(c.text for ci, c in enumerate(cells) if ci not in col_map)
-        if "יעד" not in labels and "תקן" not in labels:
+        if not any(w in labels for w in ("יעד", "תקן", "סף", "מטרה")):
             continue
         out = {}
         for ci, param in col_map.items():
@@ -1957,7 +1970,22 @@ def _cell_at(row, col):
     return None
 
 
-_DATE_CELL = re.compile(r'^\*?(\d{2}[./]\d{2}[./]\d{2})\*?$')
+_DATE_CELL = re.compile(r'^\*?(\d{2}[./]\d{2}[./](?:\d{4}|\d{2}))\*?$')
+
+
+def _short_date(text: str) -> str:
+    # '17/08/2025' or '17.08.25' -> '17.08.25'
+    d, m, y = re.split(r"[./]", text)
+    return f"{d}.{m}.{y[-2:]}"
+
+
+def _date_like(prev_text: str, ddmmyy: str) -> str:
+    # a date ('16.09.26') written the way the cell above writes one ('17/08/2025')
+    prev = (prev_text or "").strip().strip("*")
+    d, m, y = ddmmyy.split(".")
+    sep = "/" if "/" in prev else "."
+    year = f"20{y}" if re.search(r"\d{4}$", prev) else y
+    return f"{d}{sep}{m}{sep}{year}" 
 
 
 def _history_header(row):
@@ -2024,7 +2052,7 @@ def _history_rows(tbl):
         dc = _cell_at(row, header["date"])
         m = _DATE_CELL.match(_ctext(dc).strip()) if dc is not None else None
         if m and well:
-            out.append((ri, well, m.group(1).replace("/", "."), header))
+            out.append((ri, well, _short_date(m.group(1)), header))
     return out
 
 
@@ -2180,7 +2208,7 @@ def _add_history_row(rows, sample, new_date, rows_of=_history_rows):
         else:
             new_row = _clone_row_after(tbl, last, tmpl)
         prev_date_txt = _cell_at(prev, header["date"]).text.strip() if _cell_at(prev, header["date"]) is not None else ""
-        shown_date = row_date.replace(".", "/") if "/" in prev_date_txt else row_date
+        shown_date = _date_like(prev_date_txt, row_date)
         date_cell = _cell_at(new_row, header["date"])
         _set_cell(date_cell, shown_date, highlight=True)
         if level_col is not None and _cell_at(new_row, level_col) is not None:
@@ -2546,20 +2574,23 @@ def _update_map_labels(doc: Document, new_date: str, samples: dict, history: dic
     # Date: the newest date written on the map, when older than this round
     dates = set()
     for b in boxes:
-        for m in re.finditer(r'\b(\d{2}\.\d{2}\.\d{2})\b', "".join(t.text or "" for t in b.iter(qn("w:t")))):
+        for m in re.finditer(r'\b(\d{2}[./]\d{2}[./](?:\d{4}|\d{2}))\b', "".join(t.text or "" for t in b.iter(qn("w:t")))):
             try:
-                d = datetime.strptime(m.group(1), "%d.%m.%y")
+                d = datetime.strptime(_short_date(m.group(1)), "%d.%m.%y")
             except ValueError:
                 continue
             if d < new_dt:
                 dates.add((d, m.group(1)))
-    shown = any("".join(t.text or "" for t in b.iter(qn("w:t"))).strip() == new_date for b in boxes)
+    shown = any(_short_date(x) == new_date
+                for b in boxes
+                for x in re.findall(r'\b\d{2}[./]\d{2}[./](?:\d{4}|\d{2})\b',
+                                    "".join(t.text or "" for t in b.iter(qn("w:t")))))
     if dates and not shown:
         old = max(dates)[1]
         for b in boxes:
             txt = "".join(t.text or "" for t in b.iter(qn("w:t")))
             if txt.strip() == old:
-                _txbx_set_text(b, new_date)
+                _txbx_set_text(b, _date_like(old, new_date))
 
     # Value pairs
     by_num = {_wkey(w): w for w in samples}
@@ -2628,7 +2659,7 @@ def _latest_history_date(doc: Document):
             continue
         dates = [d for _, _, d, _ in _history_rows(tbl)]
         if not dates:
-            dates = [row.cells[1].text.strip().rstrip("*") for row in tbl.rows if len(row.cells) > 1]
+            dates = [row.cells[1].text.strip().strip("*").strip() for row in tbl.rows if len(row.cells) > 1]
         for t in dates:
             try:
                 d = datetime.strptime(t, "%d.%m.%y")
@@ -2653,6 +2684,9 @@ def _add_mk_reminder(doc: Document):
     """Yellow note before the first chart, once (not again on every round)."""
     if any("יש לעדכן את קובץ Mann-Kendall" in p.text for p in doc.paragraphs):
         return
+    if not any("KENDALL" in p.text.upper() or re.match(r"\s*גרף מספר", p.text) for p in doc.paragraphs) \
+            and _trend_intro_index(doc.paragraphs) is None:
+        return  # this report has no Mann-Kendall pages (e.g. an annual report)
     chart_para = None
     for p in doc.paragraphs:
         if re.match(r"\s*גרף מספר", p.text):
@@ -2934,10 +2968,27 @@ def _update_report_period(doc: Document, first: datetime, last: datetime) -> int
     return n
 
 
+def _update_report_year(doc: Document, year: int) -> int:
+    """An annual report's year: "שנתי 2025", "שנתי - 2025" in the title, headers and text."""
+    paras = list(doc.paragraphs)
+    for sec in doc.sections:
+        for part in (sec.header, sec.first_page_header, sec.footer):
+            paras.extend(part.paragraphs)
+    if not any(re.search(r"שנתי\s*-?\s*\d{4}", p.text) for p in paras[:30]):
+        return 0
+    n = 0
+    for p in paras:
+        if re.search(r"שנתי\s*-?\s*(\d{4})", p.text) and \
+                _replace_in_paragraph(p, r"(שנתי\s*-?\s*)\d{4}", lambda m: f"{m.group(1)}{year}"):
+            n += 1
+    return n
+
+
 def apply_report_period(word_bytes: bytes, first: datetime, last: datetime) -> bytes:
-    """After all rounds: the report's period ("אוקטובר 2024 - אוגוסט 2026"), when its title has one."""
+    """After all rounds: the report's period ("אוקטובר 2024 - אוגוסט 2026"), when its title has
+    one, or an annual report's year."""
     doc = Document(BytesIO(word_bytes))
-    if not _update_report_period(doc, first, last):
+    if not (_update_report_period(doc, first, last) + _update_report_year(doc, last.year)):
         return word_bytes
     out = BytesIO()
     doc.save(out)
@@ -3069,6 +3120,14 @@ def run_update_bytes(
         if not samples:
             raise ValueError("לא נמצאו דגימות בתעודת המעבדה.")
         new_dt = datetime.strptime(new_date, "%d.%m.%y")
+
+        # Sampling depth below the water: pumping depth minus water level
+        # (owner's rule, as for Yeda's forms), when the lab gives both.
+        for s in samples.values():
+            f = s.setdefault("field", {})
+            wl = s.get("water_level", f.get("עומק פני המים"))
+            if "עומק דגימה מפני המים" not in f and f.get("עומק שאיבה") is not None and wl is not None:
+                f["עומק דגימה מפני המים"] = round(f["עומק שאיבה"] - wl, 2)
 
         # ── Update Word document ──────────────────────────────────
         doc = Document(BytesIO(word_bytes))

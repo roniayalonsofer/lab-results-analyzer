@@ -735,3 +735,28 @@ def test_summary_form_keeps_each_wells_latest_values():
     assert summ["EAZ-1"]["water_level"] == 18.16
     assert summ["EAZ-2"]["results"] == {"בנזן": None} and summ["EAZ-2"]["limits"] == {"בנזן": 0.0002}
     assert [d.strftime("%d.%m.%y") for d in days] == ["07.10.24", "30.08.26"]
+
+
+def test_annual_report_dates_with_full_year_target_row_and_title_year():
+    from datetime import datetime as _dt
+    assert upd._short_date("17.08.2025") == "17.08.25" and upd._short_date("02/01/17") == "02.01.17"
+    assert upd._date_like("17.08.2025", "16.09.26") == "16.09.2026"
+    assert upd._date_like("*02/01/17", "16.09.26") == "16/09/26"
+    doc = Document()
+    doc.add_paragraph("שנתי 2025")
+    doc.add_paragraph('דו"ח ניטור מי תהום שנתי - 2025')
+    t = doc.add_table(rows=4, cols=8)
+    for ci, x in enumerate(["מיקום", "תאריך", "מפלס מי תהום[מ']", "", "MTBE", "בנזן", "טולואן", "כסילן"]):
+        t.cell(0, ci).text = x
+    t.cell(1, 3).text = "ערך מטרה^"
+    for ci, x in enumerate(["0.75", "0.094", "13", "9.4"]):
+        t.cell(1, 4 + ci).text = x
+    for ri, (w, d, v) in enumerate((("P-1", "09.03.2025", "0.015"), ("", "17.08.2025", "0.05")), start=2):
+        t.cell(ri, 0).text, t.cell(ri, 1).text, t.cell(ri, 4).text = w, d, v
+    assert upd._cell_targets(t)["MTBE"] == 0.75
+    assert [d for _, _, d, _ in upd._history_rows(t)] == ["09.03.25", "17.08.25"]
+    buf = io.BytesIO()
+    doc.save(buf)
+    out = upd.apply_report_period(buf.getvalue(), _dt(2026, 3, 4), _dt(2026, 9, 16))
+    texts = [p.text for p in Document(io.BytesIO(out)).paragraphs]
+    assert texts[:2] == ["שנתי 2026", 'דו"ח ניטור מי תהום שנתי - 2026']
